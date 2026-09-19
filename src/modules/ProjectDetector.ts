@@ -46,6 +46,8 @@ export class ProjectDetector {
   private readonly readFileFn: (filePath: string) => Promise<string>;
 
   private activeProjectKey?: string;
+  private activeServerUrl?: string;
+  private activeToken?: string | null;
 
   constructor(options: ProjectDetectorOptions) {
     this.secrets = options.secretStorage;
@@ -94,19 +96,27 @@ export class ProjectDetector {
   }
 
   async getToken(): Promise<string | undefined> {
-    return this.secrets.get(TOKEN_SECRET_KEY);
+    if (this.activeToken !== undefined) {
+      return this.activeToken ?? undefined;
+    }
+    const stored = await this.secrets.get(TOKEN_SECRET_KEY);
+    this.activeToken = stored ? stored.trim() : null;
+    return this.activeToken ?? undefined;
   }
 
   async setToken(token: string): Promise<void> {
-    await this.secrets.store(TOKEN_SECRET_KEY, token.trim());
+    this.activeToken = token.trim();
+    await this.secrets.store(TOKEN_SECRET_KEY, this.activeToken);
   }
 
   async deleteToken(): Promise<void> {
+    this.activeToken = null;
     await this.secrets.delete(TOKEN_SECRET_KEY);
   }
 
   async setServerUrl(url: string): Promise<void> {
-    await this.config.update('serverUrl', url.trim(), true);
+    this.activeServerUrl = url.trim();
+    await this.config.update('serverUrl', this.activeServerUrl, true);
   }
 
   async setProjectKey(projectKey: string): Promise<void> {
@@ -129,7 +139,7 @@ export class ProjectDetector {
   }
 
   async getConfig(): Promise<ResolvedProjectConfig> {
-    let serverUrl = this.config.get<string>('serverUrl', '');
+    let serverUrl = this.activeServerUrl ?? this.config.get<string>('serverUrl', '');
     let projectKey = this.activeProjectKey ?? this.config.get<string>('projectKey', '');
     let detectedFromProperties = false;
     let hasPlaintextCredentialsWarning = false;

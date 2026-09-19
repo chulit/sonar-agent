@@ -85,33 +85,47 @@ export class SonarClient {
   /**
    * Helper that executes fetch with Basic Auth and falls back to Bearer Auth if 401
    */
-  private async authenticatedFetch(url: string): Promise<Response> {
+  private async authenticatedFetch(url: string, timeoutMs: number = 10000): Promise<Response> {
     const basicHeaders = {
       Accept: 'application/json',
       ...this.getAuthHeader(),
     };
 
-    const response = await this.fetchFn(url, {
-      method: 'GET',
-      headers: basicHeaders,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (response.status === 401 && this.token) {
-      // Try Bearer token fallback
-      const bearerHeaders = {
-        Accept: 'application/json',
-        Authorization: `Bearer ${this.token}`,
-      };
-      const bearerResponse = await this.fetchFn(url, {
+    try {
+      const response = await this.fetchFn(url, {
         method: 'GET',
-        headers: bearerHeaders,
+        headers: basicHeaders,
+        signal: controller.signal,
       });
-      if (bearerResponse.ok) {
-        return bearerResponse;
-      }
-    }
 
-    return response;
+      if (response.status === 401 && this.token) {
+        // Try Bearer token fallback
+        const bearerHeaders = {
+          Accept: 'application/json',
+          Authorization: `Bearer ${this.token}`,
+        };
+        const bearerResponse = await this.fetchFn(url, {
+          method: 'GET',
+          headers: bearerHeaders,
+          signal: controller.signal,
+        });
+        if (bearerResponse.ok) {
+          return bearerResponse;
+        }
+      }
+
+      return response;
+    } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        throw new Error(`Connection timed out after ${timeoutMs / 1000}s`, { cause: err });
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   /**
@@ -160,15 +174,15 @@ export class SonarClient {
   async fetchProjects(): Promise<{ key: string; name: string }[]> {
     const endpoints = [
       `${this.serverUrl}/api/components/search?qualifiers=TRK&ps=100`,
-      `${this.serverUrl}/api/components/search_projects?ps=100`,
       `${this.serverUrl}/api/projects/search?ps=100`,
+      `${this.serverUrl}/api/components/search_projects?ps=100`,
       `${this.serverUrl}/api/projects/search?ps=100&qualifiers=TRK`,
       `${this.serverUrl}/api/components/search?qualifiers=TRK`,
     ];
 
     for (const url of endpoints) {
       try {
-        const response = await this.authenticatedFetch(url);
+        const response = await this.authenticatedFetch(url, 4000);
 
         if (!response.ok) {
           continue;
@@ -213,7 +227,29 @@ export class SonarClient {
     ].join(',');
 
     const url = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
-    const response = await this.authenticatedFetch(url);
+    let response = await this.authenticatedFetch(url);
+
+    if (!response.ok && response.status === 400) {
+      try {
+        const errorData = (await response.clone().json()) as any;
+        const msg = errorData?.errors?.[0]?.msg || '';
+        const match = msg.match(/The following metric keys are not found:\s*([^.]+)/i);
+        if (match && match[1]) {
+          const notFoundKeys = match[1].split(',').map((k: string) => k.trim());
+          const validKeys = metricKeys
+            .split(',')
+            .filter((k) => !notFoundKeys.includes(k))
+            .join(',');
+          const fallbackUrl = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${validKeys}`;
+          const fallbackResponse = await this.authenticatedFetch(fallbackUrl);
+          if (fallbackResponse.ok) {
+            response = fallbackResponse;
+          }
+        }
+      } catch {
+        // Fall through to standard error throw
+      }
+    }
 
     if (!response.ok) {
       throw new Error(`Failed to fetch measures: HTTP ${response.status} ${response.statusText}`);

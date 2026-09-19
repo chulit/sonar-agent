@@ -110,7 +110,7 @@ describe('SonarOverviewViewProvider - promptConfigureConnection', () => {
 
     expect(execCommandSpy).toHaveBeenCalledWith(
       'workbench.action.openSettings',
-      '@ext:sonar-agent',
+      '@ext:chulit.sonar-agent',
     );
   });
 
