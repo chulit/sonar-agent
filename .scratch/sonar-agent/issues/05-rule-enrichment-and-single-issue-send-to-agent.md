@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] Target Agent selector dropdown in the sidebar header with options for GitHub Copilot, Antigravity, and Codex, with default saved in settings.
-- [ ] Clicking "Send to Agent" fetches rule details from `/api/rules/show` with in-memory caching for performance.
-- [ ] AgentDispatcher extracts 10 lines of surrounding code from the local file around the issue line.
-- [ ] Enriched Fix Prompt is assembled containing file path, line number, rule key, rule description, Sonar remediation recommendation, and source snippet.
-- [ ] For GitHub Copilot, triggers `workbench.action.chat.open` with the pre-filled prompt query.
-- [ ] For Antigravity, Codex, or missing chat commands, copies the formatted prompt to the clipboard and shows a toast notification with the target file opened.
+- [x] Target Agent selector dropdown in the sidebar header with options for GitHub Copilot, Antigravity, and Codex, with default saved in settings.
+- [x] Clicking "Send to Agent" fetches rule details from `/api/rules/show` with in-memory caching for performance.
+- [x] AgentDispatcher extracts 10 lines of surrounding code from the local file around the issue line.
+- [x] Enriched Fix Prompt is assembled containing file path, line number, rule key, rule description, Sonar remediation recommendation, and source snippet.
+- [x] For GitHub Copilot, triggers `workbench.action.chat.open` with the pre-filled prompt query.
+- [x] For Antigravity, Codex, or missing chat commands, copies the formatted prompt to the clipboard and shows a toast notification with the target file opened.

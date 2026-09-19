@@ -2,18 +2,22 @@ import * as vscode from "vscode";
 import { ProjectDetector } from "./ProjectDetector.js";
 import { SonarClient, SonarDetailItem, SonarOverview } from "./SonarClient.js";
 import { FileNavigator } from "./FileNavigator.js";
+import { AgentDispatcher } from "./AgentDispatcher.js";
 
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "sonarAgent.overviewView";
   private _view?: vscode.WebviewView;
   private readonly fileNavigator: FileNavigator;
+  private readonly agentDispatcher: AgentDispatcher;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly projectDetector: ProjectDetector,
-    fileNavigator?: FileNavigator
+    fileNavigator?: FileNavigator,
+    agentDispatcher?: AgentDispatcher
   ) {
     this.fileNavigator = fileNavigator ?? new FileNavigator();
+    this.agentDispatcher = agentDispatcher ?? new AgentDispatcher({ fileNavigator: this.fileNavigator });
   }
 
   public resolveWebviewView(
@@ -61,6 +65,19 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         }
         case "openFile": {
           await this.fileNavigator.openFileAtLine(message.filePath, message.line);
+          break;
+        }
+        case "sendToAgent": {
+          await this._handleSendToAgent(message.item, message.targetAgentId);
+          break;
+        }
+        case "sendBatchToAgent": {
+          await this._handleSendBatchToAgent(message.items, message.targetAgentId);
+          break;
+        }
+        case "setTargetAgent": {
+          const config = vscode.workspace.getConfiguration("sonarAgent");
+          await config.update("defaultAgent", message.agentId, true);
           break;
         }
         case "refresh": {
@@ -112,6 +129,47 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async _handleSendToAgent(item: SonarDetailItem, targetAgentId?: string): Promise<void> {
+    const config = await this.projectDetector.getConfig();
+    const token = await this.projectDetector.getToken();
+    const agentId = targetAgentId || vscode.workspace.getConfiguration("sonarAgent").get<string>("defaultAgent", "copilot");
+
+    let client: SonarClient | undefined;
+    if (config.serverUrl && token) {
+      client = new SonarClient({ serverUrl: config.serverUrl, token });
+    }
+
+    // Wrap rule fetcher with live SonarClient if available
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: this.fileNavigator,
+      fetchRuleFn: client ? (ruleKey) => client!.getEnrichedRule(ruleKey) : undefined,
+    });
+
+    const prompt = await dispatcher.assemblePrompt(item);
+    await dispatcher.dispatch(prompt, agentId, item);
+  }
+
+  private async _handleSendBatchToAgent(items: SonarDetailItem[], targetAgentId?: string): Promise<void> {
+    if (!items || items.length === 0) return;
+
+    const config = await this.projectDetector.getConfig();
+    const token = await this.projectDetector.getToken();
+    const agentId = targetAgentId || vscode.workspace.getConfiguration("sonarAgent").get<string>("defaultAgent", "copilot");
+
+    let client: SonarClient | undefined;
+    if (config.serverUrl && token) {
+      client = new SonarClient({ serverUrl: config.serverUrl, token });
+    }
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: this.fileNavigator,
+      fetchRuleFn: client ? (ruleKey) => client!.getEnrichedRule(ruleKey) : undefined,
+    });
+
+    const prompt = await dispatcher.assembleBatchPrompt(items);
+    await dispatcher.dispatch(prompt, agentId, items[0]);
+  }
+
   private async _handleFetchDetails(category: string): Promise<void> {
     if (!this._view) return;
 
@@ -127,6 +185,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
       if (category === "hotspots") {
         items = await client.getHotspots(config.projectKey);
+      } else if (category === "coverage") {
+        items = await client.getCoverageFiles(config.projectKey);
+      } else if (category === "duplications") {
+        items = await client.getDuplicationFiles(config.projectKey);
       } else if (category === "reliability" || category === "security" || category === "maintainability") {
         items = await client.getIssues(config.projectKey, category);
       } else {
@@ -155,6 +217,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     const config = await this.projectDetector.getConfig();
     const token = await this.projectDetector.getToken();
+    const defaultAgent = vscode.workspace.getConfiguration("sonarAgent").get<string>("defaultAgent", "copilot");
 
     if (config.serverUrl && config.hasToken && token) {
       this._view.webview.postMessage({ type: "loading", loading: true });
@@ -189,6 +252,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         projects,
         overview,
         overviewError,
+        defaultAgent,
       });
 
       this._view.webview.postMessage({ type: "loading", loading: false });
@@ -197,6 +261,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         type: "state",
         state: "onboarding",
         serverUrl: config.serverUrl || "http://localhost:9000",
+        defaultAgent,
       });
     }
   }
@@ -422,6 +487,19 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       font-size: 11px;
     }
 
+    .btn-agent {
+      background: #007acc;
+      color: #ffffff;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .btn-agent:hover {
+      background: #0062a3;
+    }
+
     .alert {
       padding: 8px 10px;
       border-radius: 4px;
@@ -581,6 +659,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       flex-direction: column;
       gap: 8px;
       margin-top: 4px;
+      position: relative;
     }
 
     .section-title {
@@ -629,6 +708,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     .issue-checkbox {
       margin-top: 2px;
       cursor: pointer;
+      width: 14px;
+      height: 14px;
     }
 
     .issue-message {
@@ -693,7 +774,22 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     .issue-actions {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
+    }
+
+    /* Batch Actions Floating Bar */
+    .batch-bar {
+      position: sticky;
+      bottom: 0;
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--sonar-blue);
+      border-radius: 5px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+      z-index: 10;
     }
 
     .loading-overlay {
@@ -765,15 +861,27 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     <!-- Connected Dashboard View -->
     <div id="connected-view" class="hidden" style="display: flex; flex-direction: column; gap: 10px;">
-      <!-- Project Selector Bar -->
-      <div class="card" style="padding: 8px 10px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-          <label style="font-size: 10px;">PROJECT BINDING</label>
-          <span id="detected-badge" class="source-badge hidden">sonar-project.properties</span>
+      <!-- Project & Target Agent Selector Bar -->
+      <div class="card" style="padding: 8px 10px; gap: 8px;">
+        <div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
+            <label style="font-size: 10px;">PROJECT BINDING</label>
+            <span id="detected-badge" class="source-badge hidden">sonar-project.properties</span>
+          </div>
+          <select id="project-dropdown">
+            <option value="">Loading projects...</option>
+          </select>
         </div>
-        <select id="project-dropdown">
-          <option value="">Loading projects...</option>
-        </select>
+
+        <div>
+          <label style="font-size: 10px;">TARGET AGENT</label>
+          <select id="target-agent-dropdown" style="margin-top: 3px;">
+            <option value="copilot">GitHub Copilot</option>
+            <option value="antigravity">Antigravity Agent</option>
+            <option value="codex">Codex Agent</option>
+            <option value="clipboard">Clipboard Only</option>
+          </select>
+        </div>
       </div>
 
       <div id="plaintext-warning" class="alert warning hidden">
@@ -901,6 +1009,15 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <div id="issues-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+
+        <!-- Batch Actions Bar -->
+        <div id="batch-action-bar" class="batch-bar hidden">
+          <span id="selected-count-label" style="font-weight: 600; font-size: 11px;">0 selected</span>
+          <div style="display: flex; gap: 6px;">
+            <button id="send-batch-btn" class="btn btn-agent btn-sm">⚡ Send to Agent</button>
+            <button id="deselect-all-btn" class="btn btn-secondary btn-sm">Clear</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -921,6 +1038,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const issuesListCount = document.getElementById("issues-list-count");
     const issuesLoading = document.getElementById("issues-loading");
     const issuesContainer = document.getElementById("issues-container");
+    const batchActionBar = document.getElementById("batch-action-bar");
+    const selectedCountLabel = document.getElementById("selected-count-label");
+    const sendBatchBtn = document.getElementById("send-batch-btn");
+    const deselectAllBtn = document.getElementById("deselect-all-btn");
 
     const serverUrlInput = document.getElementById("server-url");
     const userTokenInput = document.getElementById("user-token");
@@ -928,6 +1049,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const headerRefreshBtn = document.getElementById("header-refresh-btn");
     const headerDisconnectBtn = document.getElementById("header-disconnect-btn");
     const projectDropdown = document.getElementById("project-dropdown");
+    const targetAgentDropdown = document.getElementById("target-agent-dropdown");
     const detectedBadge = document.getElementById("detected-badge");
 
     // Metric DOM elements
@@ -945,6 +1067,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const badgeHotspots = document.getElementById("badge-hotspots");
 
     let activeCategory = null;
+    let currentItems = [];
+    const selectedItemIds = new Set();
 
     function showAlert(msg) {
       alertBox.textContent = msg;
@@ -970,6 +1094,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       el.textContent = rating;
     }
 
+    function updateBatchBar() {
+      const count = selectedItemIds.size;
+      if (count > 0) {
+        batchActionBar.classList.remove("hidden");
+        selectedCountLabel.textContent = count + " issue" + (count > 1 ? "s" : "") + " selected";
+        sendBatchBtn.textContent = "⚡ Send " + count + " to Agent";
+      } else {
+        batchActionBar.classList.add("hidden");
+      }
+    }
+
     function renderOverview(overview) {
       if (!overview) return;
 
@@ -993,6 +1128,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     }
 
     function renderIssues(items, category) {
+      currentItems = items;
+      selectedItemIds.clear();
+      updateBatchBar();
+
       issuesSection.classList.remove("hidden");
       issuesListTitle.textContent = category.toUpperCase() + " ISSUES";
       issuesListCount.textContent = items.length + " items";
@@ -1021,7 +1160,15 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.className = "issue-checkbox";
-        checkbox.dataset.issueId = item.id;
+        checkbox.checked = selectedItemIds.has(item.id);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) {
+            selectedItemIds.add(item.id);
+          } else {
+            selectedItemIds.delete(item.id);
+          }
+          updateBatchBar();
+        });
 
         const msgDiv = document.createElement("div");
         msgDiv.className = "issue-message";
@@ -1063,7 +1210,26 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
         });
 
+        const agentBtn = document.createElement("button");
+        agentBtn.className = "btn btn-agent btn-sm";
+        let agentBtnLabel = "⚡ Send to Agent";
+        if (item.type === "COVERAGE") {
+          agentBtnLabel = "⚡ Generate Tests";
+        } else if (item.type === "DUPLICATION") {
+          agentBtnLabel = "⚡ Refactor";
+        } else if (item.type === "HOTSPOT") {
+          agentBtnLabel = "⚡ Review";
+        }
+        agentBtn.textContent = agentBtnLabel;
+        agentBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const targetAgentId = targetAgentDropdown.value;
+          vscode.postMessage({ command: "sendToAgent", item, targetAgentId });
+        });
+
         actionsDiv.appendChild(jumpBtn);
+        actionsDiv.appendChild(agentBtn);
+
         footerDiv.appendChild(footerMeta);
         footerDiv.appendChild(actionsDiv);
 
@@ -1075,6 +1241,26 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         issuesContainer.appendChild(card);
       });
     }
+
+    sendBatchBtn.addEventListener("click", () => {
+      const selectedItems = currentItems.filter((item) => selectedItemIds.has(item.id));
+      if (selectedItems.length > 0) {
+        const targetAgentId = targetAgentDropdown.value;
+        vscode.postMessage({ command: "sendBatchToAgent", items: selectedItems, targetAgentId });
+      }
+    });
+
+    deselectAllBtn.addEventListener("click", () => {
+      selectedItemIds.clear();
+      document.querySelectorAll(".issue-checkbox").forEach((cb) => {
+        cb.checked = false;
+      });
+      updateBatchBar();
+    });
+
+    targetAgentDropdown.addEventListener("change", () => {
+      vscode.postMessage({ command: "setTargetAgent", agentId: targetAgentDropdown.value });
+    });
 
     // Add click listeners to metric cards to trigger drilldown
     document.querySelectorAll(".metric-card").forEach((card) => {
@@ -1157,6 +1343,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           if (message.state === "connected") {
             onboardingView.classList.add("hidden");
             connectedView.classList.remove("hidden");
+
+            if (message.defaultAgent) {
+              targetAgentDropdown.value = message.defaultAgent;
+            }
 
             if (message.hasPlaintextWarning) {
               plaintextWarning.classList.remove("hidden");

@@ -2,6 +2,22 @@ export const workspace = {
   workspaceFolders: [{ uri: { fsPath: "/workspace" } }],
   findFiles: async () => [],
   openTextDocument: async () => ({}),
+  getConfiguration: () => ({
+    get: (key: string, def?: any) => def,
+    update: async () => {},
+  }),
+};
+
+export const env = {
+  clipboard: {
+    writeText: async () => {},
+    readText: async () => "",
+  },
+};
+
+export const commands = {
+  executeCommand: async () => {},
+  registerCommand: () => ({ dispose: () => {} }),
 };
 
 export const window = {

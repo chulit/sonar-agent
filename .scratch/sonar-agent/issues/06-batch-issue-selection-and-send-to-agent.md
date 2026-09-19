@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Checkbox selection state managed across issue cards with "Select All" and "Clear Selection" options.
-- [ ] Sticky action bar appears at the bottom or top of the issue list when at least one issue is selected.
-- [ ] Clicking "Send X Issues to Agent" compiles all selected issues grouped by local file path.
-- [ ] Batch Fix Prompt presents each file's issues with line numbers, rule descriptions, and corresponding code contexts in an organized format.
-- [ ] Dispatches the batch prompt to the active Target Agent using the established chat or clipboard dispatch workflow.
+- [x] Checkbox selection state managed across issue cards with "Select All" and "Clear Selection" options.
+- [x] Sticky action bar appears at the bottom or top of the issue list when at least one issue is selected.
+- [x] Clicking "Send X Issues to Agent" compiles all selected issues grouped by local file path.
+- [x] Batch Fix Prompt presents each file's issues with line numbers, rule descriptions, and corresponding code contexts in an organized format.
+- [x] Dispatches the batch prompt to the active Target Agent using the established chat or clipboard dispatch workflow.

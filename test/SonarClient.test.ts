@@ -182,4 +182,74 @@ describe("SonarClient - Connection Verification", () => {
       expect.anything()
     );
   });
+
+  it("should fetch coverage files from component_tree sorted by uncovered lines", async () => {
+    const mockTreeResponse = {
+      components: [
+        {
+          key: "my-project:src/service.ts",
+          name: "service.ts",
+          path: "src/service.ts",
+          measures: [
+            { metric: "uncovered_lines", value: "32" },
+            { metric: "coverage", value: "40.0" },
+          ],
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockTreeResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: "http://localhost:9000",
+      token: "valid-token",
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const files = await client.getCoverageFiles("my-project");
+
+    expect(files).toHaveLength(1);
+    expect(files[0].filePath).toBe("src/service.ts");
+    expect(files[0].type).toBe("COVERAGE");
+    expect(files[0].message).toContain("32 uncovered lines (40% coverage)");
+  });
+
+  it("should fetch duplication files from component_tree", async () => {
+    const mockTreeResponse = {
+      components: [
+        {
+          key: "my-project:src/duplicate.ts",
+          name: "duplicate.ts",
+          path: "src/duplicate.ts",
+          measures: [
+            { metric: "duplicated_lines_density", value: "15.4" },
+            { metric: "duplicated_blocks", value: "3" },
+          ],
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockTreeResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: "http://localhost:9000",
+      token: "valid-token",
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const files = await client.getDuplicationFiles("my-project");
+
+    expect(files).toHaveLength(1);
+    expect(files[0].filePath).toBe("src/duplicate.ts");
+    expect(files[0].type).toBe("DUPLICATION");
+    expect(files[0].message).toContain("15.4% duplicated lines (3 duplicated blocks)");
+  });
 });

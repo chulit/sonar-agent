@@ -21,6 +21,13 @@ export interface SonarOverview {
   securityHotspots: { count: number; rating: SonarRating };
 }
 
+export interface SonarRuleDoc {
+  key: string;
+  name: string;
+  cleanDesc: string;
+  recommendation?: string;
+}
+
 export interface SonarDetailItem {
   id: string;
   ruleKey: string;
@@ -297,5 +304,154 @@ export class SonarClient {
       tags: ["security-hotspot"],
       creationDate: item.creationDate || "",
     }));
+  }
+
+  /**
+   * Fetches rich rule documentation from SonarQube /api/rules/show
+   */
+  async getEnrichedRule(ruleKey: string): Promise<SonarRuleDoc> {
+    try {
+      const url = `${this.serverUrl}/api/rules/show?key=${encodeURIComponent(ruleKey)}`;
+      const response = await this.fetchFn(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          ...this.getAuthHeader(),
+        },
+      });
+
+      if (!response.ok) {
+        return {
+          key: ruleKey,
+          name: ruleKey,
+          cleanDesc: "Verify code adherence to Sonar rule guidelines.",
+        };
+      }
+
+      const data = (await response.json()) as {
+        rule?: {
+          key: string;
+          name: string;
+          htmlDesc?: string;
+          mdDesc?: string;
+        };
+      };
+
+      const desc = data.rule?.mdDesc || data.rule?.htmlDesc || "";
+      const cleanDesc = desc
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      return {
+        key: data.rule?.key || ruleKey,
+        name: data.rule?.name || ruleKey,
+        cleanDesc: cleanDesc || "Verify code adherence to Sonar rule guidelines.",
+      };
+    } catch {
+      return {
+        key: ruleKey,
+        name: ruleKey,
+        cleanDesc: "Verify code adherence to Sonar rule guidelines.",
+      };
+    }
+  }
+
+  /**
+   * Fetches components with low coverage / uncovered lines
+   */
+  async getCoverageFiles(projectKey: string): Promise<SonarDetailItem[]> {
+    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=uncovered_lines,coverage&qualifiers=FIL&ps=50`;
+    const response = await this.fetchFn(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...this.getAuthHeader(),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch coverage files: HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as { components?: any[] };
+    const items: SonarDetailItem[] = [];
+
+    for (const comp of data.components || []) {
+      const measureMap: Record<string, string> = {};
+      for (const m of comp.measures || []) {
+        measureMap[m.metric] = m.value;
+      }
+
+      const uncovered = parseInt(measureMap.uncovered_lines || "0", 10);
+      const coverage = parseFloat(measureMap.coverage || "0");
+
+      if (uncovered > 0 || coverage < 80) {
+        items.push({
+          id: comp.key,
+          ruleKey: "coverage:uncovered_lines",
+          message: `${uncovered} uncovered lines (${coverage.toFixed(0)}% coverage)`,
+          component: comp.key,
+          filePath: comp.path || this.extractFilePath(comp.key),
+          type: "COVERAGE",
+          severity: (coverage < 50 ? "CRITICAL" : "MAJOR") as any,
+          status: "UNCOVERED",
+          effort: `${uncovered} lines`,
+          tags: ["test-coverage", "unit-test"],
+          creationDate: new Date().toISOString(),
+        });
+      }
+    }
+
+    return items;
+  }
+
+  /**
+   * Fetches components with duplicate code blocks
+   */
+  async getDuplicationFiles(projectKey: string): Promise<SonarDetailItem[]> {
+    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=duplicated_lines_density,duplicated_blocks&qualifiers=FIL&ps=50`;
+    const response = await this.fetchFn(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...this.getAuthHeader(),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch duplication files: HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as { components?: any[] };
+    const items: SonarDetailItem[] = [];
+
+    for (const comp of data.components || []) {
+      const measureMap: Record<string, string> = {};
+      for (const m of comp.measures || []) {
+        measureMap[m.metric] = m.value;
+      }
+
+      const density = parseFloat(measureMap.duplicated_lines_density || "0");
+      const blocks = parseInt(measureMap.duplicated_blocks || "0", 10);
+
+      if (density > 0 || blocks > 0) {
+        items.push({
+          id: comp.key,
+          ruleKey: "duplications:duplicated_code",
+          message: `${density.toFixed(1)}% duplicated lines (${blocks} duplicated blocks)`,
+          component: comp.key,
+          filePath: comp.path || this.extractFilePath(comp.key),
+          type: "DUPLICATION",
+          severity: (density > 20 ? "CRITICAL" : "MAJOR") as any,
+          status: "DUPLICATED",
+          effort: `${blocks} blocks`,
+          tags: ["code-duplication", "refactoring"],
+          creationDate: new Date().toISOString(),
+        });
+      }
+    }
+
+    return items;
   }
 }

@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Clicking the Coverage card queries `/api/measures/component_tree` with metric `uncovered_lines` and lists files sorted by uncovered line count.
-- [ ] Each coverage item includes a "Send to Agent" button that generates a prompt directing the AI agent to write comprehensive unit tests covering the missing lines.
-- [ ] Clicking the Duplications card queries for components with `duplicated_lines_density` and lists files with duplicate code blocks.
-- [ ] Each duplication item includes a "Send to Agent" button that prompts the AI agent to refactor and extract duplicate logic into a shared helper/utility.
-- [ ] Dispatching uses the same Target Agent selector with chat command or clipboard fallback.
+- [x] Clicking the Coverage card queries `/api/measures/component_tree` with metric `uncovered_lines` and lists files sorted by uncovered line count.
+- [x] Each coverage item includes a "Send to Agent" button that generates a prompt directing the AI agent to write comprehensive unit tests covering the missing lines.
+- [x] Clicking the Duplications card queries for components with `duplicated_lines_density` and lists files with duplicate code blocks.
+- [x] Each duplication item includes a "Send to Agent" button that prompts the AI agent to refactor and extract duplicate logic into a shared helper/utility.
+- [x] Dispatching uses the same Target Agent selector with chat command or clipboard fallback.
