@@ -36,11 +36,13 @@ describe("ProjectDetector - Configuration and Secrets", () => {
     expect(config.hasToken).toBe(false);
   });
 
-  it("should save and retrieve token securely using secret storage", async () => {
+  it("should save and retrieve token securely using secret storage and never leak to settings", async () => {
     const detector = new ProjectDetector({ secretStorage, workspaceConfig });
     await detector.setToken("sqp_my_secret_token");
 
     expect(secretStorage.store).toHaveBeenCalledWith("sonarAgent.token", "sqp_my_secret_token");
+    expect(workspaceConfig.update).not.toHaveBeenCalledWith(expect.stringContaining("token"), expect.anything(), expect.anything());
+
     const token = await detector.getToken();
     expect(token).toBe("sqp_my_secret_token");
 
