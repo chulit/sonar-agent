@@ -184,7 +184,7 @@ export class SonarClient {
           }));
         }
       } catch {
-        // Try next fallback endpoint
+        // endpoint unavailable or invalid response; continue loop
       }
     }
 

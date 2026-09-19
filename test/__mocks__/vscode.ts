@@ -42,10 +42,25 @@ export class Position {
 }
 
 export class Range {
+  public start: Position;
+  public end: Position;
   constructor(
-    public start: Position,
-    public end: Position,
-  ) {}
+    startOrStartLine: Position | number,
+    endOrStartCharacter: Position | number,
+    endLine?: number,
+    endCharacter?: number,
+  ) {
+    if (typeof startOrStartLine === 'number') {
+      this.start = new Position(startOrStartLine, endOrStartCharacter as number);
+      this.end = new Position(
+        endLine ?? startOrStartLine,
+        endCharacter ?? (endOrStartCharacter as number),
+      );
+    } else {
+      this.start = startOrStartLine;
+      this.end = endOrStartCharacter as Position;
+    }
+  }
 }
 
 export class Selection extends Range {
@@ -59,4 +74,44 @@ export enum TextEditorRevealType {
   InCenter = 1,
   InCenterIfOutsideViewport = 2,
   AtTop = 3,
+}
+
+export enum DiagnosticSeverity {
+  Error = 0,
+  Warning = 1,
+  Information = 2,
+  Hint = 3,
+}
+
+export class Diagnostic {
+  public source?: string;
+  public code?: string | number | { value: string | number; target: any };
+  constructor(
+    public range: Range,
+    public message: string,
+    public severity: DiagnosticSeverity = DiagnosticSeverity.Error,
+  ) {}
+}
+
+export class CodeActionKind {
+  public static readonly Empty = new CodeActionKind('');
+  public static readonly QuickFix = new CodeActionKind('quickfix');
+  public static readonly Refactor = new CodeActionKind('refactor');
+  public static readonly Source = new CodeActionKind('source');
+  constructor(public readonly value: string) {}
+}
+
+export enum CodeActionTriggerKind {
+  Invoke = 1,
+  Automatic = 2,
+}
+
+export class CodeAction {
+  public command?: { command: string; title: string; arguments?: any[] };
+  public diagnostics?: Diagnostic[];
+  public isPreferred?: boolean;
+  constructor(
+    public title: string,
+    public kind?: CodeActionKind,
+  ) {}
 }

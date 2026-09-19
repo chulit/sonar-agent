@@ -15,12 +15,23 @@ export interface AgentDispatcherOptions {
   fileNavigator?: FileNavigator;
   fetchRuleFn?: (ruleKey: string) => Promise<SonarRuleDoc>;
   readCodeSnippetFn?: (filePath: string, line?: number) => Promise<CodeSnippetContext | null>;
+  isExtensionInstalledFn?: (extensionId: string) => boolean;
+  isAntigravityEnvFn?: () => boolean;
+  executeCommandFn?: (command: string, ...args: unknown[]) => Thenable<unknown> | Promise<unknown>;
+  sendToAgentPanelFn?: (options: SendToAgentPanelOptions) => Thenable<void> | Promise<void>;
+}
+
+export interface SendToAgentPanelOptions {
+  message?: string;
+  files?: Array<{ uri: vscode.Uri; startLine?: number; endLine?: number }>;
+  autoSend?: boolean;
 }
 
 export interface TargetAgent {
-  id: 'copilot' | 'antigravity' | 'codex' | 'clipboard';
+  id: string;
   name: string;
   description: string;
+  focusCommand?: string;
 }
 
 export class AgentDispatcher {
@@ -31,20 +42,142 @@ export class AgentDispatcher {
     filePath: string,
     line?: number,
   ) => Promise<CodeSnippetContext | null>;
+  private readonly isExtensionInstalledFn: (extensionId: string) => boolean;
+  private readonly isAntigravityEnvFn: () => boolean;
+  private readonly executeCommandFn: (
+    command: string,
+    ...args: unknown[]
+  ) => Thenable<unknown> | Promise<unknown>;
+  private readonly sendToAgentPanelFn: (
+    options: SendToAgentPanelOptions,
+  ) => Thenable<void> | Promise<void>;
 
   constructor(options?: AgentDispatcherOptions) {
     this.fileNavigator = options?.fileNavigator ?? new FileNavigator();
     this.fetchRuleFn = options?.fetchRuleFn;
     this.readCodeSnippetFn = options?.readCodeSnippetFn;
+    this.executeCommandFn =
+      options?.executeCommandFn ??
+      ((cmd: string, ...args: unknown[]) => vscode.commands.executeCommand(cmd, ...args));
+    this.sendToAgentPanelFn =
+      options?.sendToAgentPanelFn ??
+      ((opts) => {
+        const ext = (vscode as unknown as Record<string, unknown>).antigravityExtensibility as
+          { sendToAgentPanel?: (opts: SendToAgentPanelOptions) => Thenable<void> } | undefined;
+        if (ext && typeof ext.sendToAgentPanel === 'function') {
+          return ext.sendToAgentPanel(opts);
+        }
+        return Promise.reject(new Error('antigravityExtensibility.sendToAgentPanel not available'));
+      });
+    this.isExtensionInstalledFn =
+      options?.isExtensionInstalledFn ??
+      ((id: string) => {
+        try {
+          return !!vscode.extensions.getExtension(id);
+        } catch {
+          return false;
+        }
+      });
+    this.isAntigravityEnvFn =
+      options?.isAntigravityEnvFn ??
+      (() => {
+        try {
+          const appName = vscode.env.appName || '';
+          if (appName.toLowerCase().includes('antigravity')) {
+            return true;
+          }
+          if (
+            process.env.GEMINI_CLI ||
+            process.env.ANTIGRAVITY_IDE ||
+            process.env.ANTIGRAVITY_AGENT
+          ) {
+            return true;
+          }
+          return false;
+        } catch {
+          return false;
+        }
+      });
   }
 
   getAvailableAgents(): TargetAgent[] {
-    return [
-      { id: 'copilot', name: 'GitHub Copilot', description: 'VS Code Copilot Chat' },
-      { id: 'antigravity', name: 'Antigravity', description: 'Deepmind Antigravity Agent' },
-      { id: 'codex', name: 'Codex', description: 'Codex Agent' },
-      { id: 'clipboard', name: 'Clipboard Only', description: 'Copy prompt to clipboard' },
-    ];
+    const agents: TargetAgent[] = [];
+
+    // 1. GitHub Copilot
+    if (
+      this.isExtensionInstalledFn('github.copilot') ||
+      this.isExtensionInstalledFn('github.copilot-chat')
+    ) {
+      agents.push({
+        id: 'copilot',
+        name: 'GitHub Copilot',
+        description: 'VS Code Copilot Chat',
+        focusCommand: 'workbench.action.chat.open',
+      });
+    }
+
+    // 2. Antigravity Agent
+    if (
+      this.isAntigravityEnvFn() ||
+      this.isExtensionInstalledFn('google.antigravity') ||
+      this.isExtensionInstalledFn('google.gemini')
+    ) {
+      agents.push({
+        id: 'antigravity',
+        name: 'Antigravity Agent',
+        description: 'DeepMind Antigravity Agent',
+        focusCommand: 'antigravity.openChatView',
+      });
+    }
+
+    // 3. Claude Code
+    if (this.isExtensionInstalledFn('anthropic.claude-code')) {
+      agents.push({
+        id: 'claude-code',
+        name: 'Claude Code',
+        description: 'Anthropic Claude Code for VS Code',
+        focusCommand: 'workbench.view.extension.claude-sidebar',
+      });
+    }
+
+    // 4. Cline
+    if (this.isExtensionInstalledFn('saoudrizwan.claude-dev')) {
+      agents.push({
+        id: 'cline',
+        name: 'Cline',
+        description: 'Autonomous AI coding agent',
+        focusCommand: 'claude-dev.focus',
+      });
+    }
+
+    // 4. Roo Code
+    if (this.isExtensionInstalledFn('rooveterinaryinc.roo-cline')) {
+      agents.push({
+        id: 'roo-code',
+        name: 'Roo Code',
+        description: 'Roo Code coding agent',
+        focusCommand: 'roo-cline.focus',
+      });
+    }
+
+    // 5. Continue
+    if (this.isExtensionInstalledFn('continue.continue')) {
+      agents.push({
+        id: 'continue',
+        name: 'Continue',
+        description: 'Continue open-source AI assistant',
+        focusCommand: 'continue.focusContinueInputView',
+      });
+    }
+
+    // Universal Fallback: Clipboard Only
+    agents.push({
+      id: 'clipboard',
+      name: 'Clipboard Only',
+      description: 'Copy prompt to clipboard',
+    });
+
+    return agents;
   }
 
   async getRule(ruleKey: string): Promise<SonarRuleDoc> {
@@ -216,7 +349,6 @@ export class AgentDispatcher {
 
     let prompt = `@workspace Please fix the following ${items.length} SonarQube issues:\n\n`;
 
-    // Group items by file path
     const fileGroups = new Map<string, SonarDetailItem[]>();
     for (const item of items) {
       const group = fileGroups.get(item.filePath) || [];
@@ -259,23 +391,21 @@ export class AgentDispatcher {
     prompt: string,
     targetAgentId: string,
     item?: SonarDetailItem,
+    allItems?: SonarDetailItem[],
   ): Promise<{ ok: boolean; message: string }> {
-    // 1. Always copy prompt to clipboard for user convenience and universal backup
     try {
       await vscode.env.clipboard.writeText(prompt);
     } catch {
       // ignore clipboard error in headless test environments
     }
 
-    // 2. If single item with coordinates, navigate editor to that line
     if (item && item.line) {
       await this.fileNavigator.openFileAtLine(item.filePath, item.line);
     }
 
-    // 3. Dispatch to specific Target Agent
     if (targetAgentId === 'copilot') {
       try {
-        await vscode.commands.executeCommand('workbench.action.chat.open', {
+        await this.executeCommandFn('workbench.action.chat.open', {
           query: prompt,
         });
         vscode.window.showInformationMessage('Dispatched Fix Prompt to GitHub Copilot Chat!');
@@ -288,13 +418,106 @@ export class AgentDispatcher {
       }
     }
 
-    // For Antigravity, Codex, or Clipboard fallback:
+    if (targetAgentId === 'antigravity') {
+      try {
+        const files: Array<{ uri: vscode.Uri; startLine?: number; endLine?: number }> = [];
+        const itemsToProcess = allItems && allItems.length > 0 ? allItems : item ? [item] : [];
+        const seenUris = new Set<string>();
+
+        for (const it of itemsToProcess) {
+          if (it.filePath) {
+            const resolvedPath = await this.fileNavigator.resolveFilePath(it.filePath);
+            if (resolvedPath && !seenUris.has(resolvedPath)) {
+              seenUris.add(resolvedPath);
+              const line = it.line && it.line > 0 ? it.line - 1 : 0;
+              files.push({
+                uri: vscode.Uri.file(resolvedPath),
+                startLine: line,
+                endLine: line,
+              });
+            }
+          }
+        }
+
+        await this.sendToAgentPanelFn({
+          message: prompt,
+          files: files.length > 0 ? files : undefined,
+          autoSend: false,
+        });
+
+        vscode.window.showInformationMessage('Dispatched Fix Prompt to Antigravity Chat!');
+        return { ok: true, message: 'Dispatched to Antigravity Chat.' };
+      } catch {
+        // Fallback to command execution if sendToAgentPanel fails
+      }
+
+      for (const cmd of [
+        'workbench.action.chat.open',
+        'antigravity.prioritized.chat.open',
+        'workbench.action.openChat',
+      ]) {
+        try {
+          await this.executeCommandFn(cmd, { query: prompt });
+          vscode.window.showInformationMessage('Dispatched Fix Prompt to Antigravity Chat!');
+          return { ok: true, message: 'Dispatched to Antigravity Chat.' };
+        } catch {
+          // continue trying next command
+        }
+      }
+
+      try {
+        await this.executeCommandFn('antigravity.openChatView');
+        vscode.window.showInformationMessage(
+          'Antigravity Chat opened & prompt copied to clipboard! Press Cmd+V / Ctrl+V to paste.',
+        );
+        return { ok: true, message: 'Chat opened and prompt ready in clipboard.' };
+      } catch {
+        vscode.window.showInformationMessage(
+          'Fix Prompt copied to clipboard for Antigravity Agent! Paste it into your agent chat.',
+        );
+        return { ok: true, message: 'Prompt ready in clipboard for Antigravity Agent.' };
+      }
+    }
+
+    const matchedAgent = this.getAvailableAgents().find((a) => a.id === targetAgentId);
     const agentName =
-      targetAgentId === 'antigravity'
-        ? 'Antigravity Agent'
-        : targetAgentId === 'codex'
-          ? 'Codex Agent'
-          : 'Clipboard';
+      matchedAgent?.name ||
+      (targetAgentId === 'claude-code'
+        ? 'Claude Code'
+        : targetAgentId === 'cline'
+          ? 'Cline'
+          : targetAgentId === 'roo-code'
+            ? 'Roo Code'
+            : targetAgentId === 'continue'
+              ? 'Continue'
+              : 'Clipboard');
+
+    if (targetAgentId === 'claude-code') {
+      const claudeCommands = [
+        'workbench.view.extension.claude-sidebar',
+        'claude-code.focus',
+        'claude.focus',
+      ];
+      for (const cmd of claudeCommands) {
+        try {
+          await this.executeCommandFn(cmd);
+          break;
+        } catch {
+          // continue trying next command
+        }
+      }
+    } else if (matchedAgent?.focusCommand) {
+      try {
+        await this.executeCommandFn(matchedAgent.focusCommand);
+      } catch {
+        // focus command failed or not registered, proceed to clipboard notice
+      }
+    }
+
+    if (targetAgentId === 'clipboard') {
+      vscode.window.showInformationMessage('Fix Prompt copied to clipboard!');
+      return { ok: true, message: 'Prompt ready in clipboard.' };
+    }
 
     vscode.window.showInformationMessage(
       `Fix Prompt copied to clipboard for ${agentName}! Paste it into your agent chat.`,

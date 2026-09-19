@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-Developers using SonarQube often struggle with context switching between the web dashboard and their code editor. When reviewing overall project health—specifically Overall Code issues, low test coverage areas, code duplications, and security hotspots—developers must manually inspect each issue on SonarQube's web UI, search for the corresponding file and line number in VS Code, interpret Sonar rules, and formulate prompts for AI coding agents to fix them. This manual workflow is error-prone, friction-heavy, and slows down codebase refactoring and quality remediation.
+Developers using SonarQube often struggle with context switching between the web dashboard and their code editor. When reviewing overall project health (specifically Overall Code issues, low test coverage areas, code duplications, and security hotspots), developers must manually inspect each issue on SonarQube's web UI, search for the corresponding file and line number in VS Code, interpret Sonar rules, and formulate prompts for AI coding agents to fix them. This manual workflow is error-prone, friction-heavy, and slows down codebase refactoring and quality remediation.
 
 ## Solution
 
@@ -36,6 +36,8 @@ Developers using SonarQube often struggle with context switching between the web
 19. As a developer, I want clicking the Coverage metric card to display files with low coverage and provide a "Generate Unit Tests" action for uncovered lines.
 20. As a developer, I want clicking the Duplications metric card to display duplicated blocks and provide a "Refactor Duplicated Code" action to extract shared methods.
 21. As a developer, I want a manual Refresh button in the header, so that I can update metrics immediately after re-running Sonar scanner analysis.
+22. As a developer, I want the Target Agent selector to dynamically discover installed AI coding agents (GitHub Copilot, Antigravity, Cline, Roo Code, Continue) rather than showing hardcoded options, so that I only see assistants available in my environment.
+23. As a developer, I want dispatching to an agent without a direct chat-query API to trigger its focus command, open the target file at the issue line, copy the enriched Fix Prompt to the clipboard, and display a helpful toast notification.
 
 ## Implementation Decisions
 
@@ -43,22 +45,29 @@ Developers using SonarQube often struggle with context switching between the web
 
 - **`ProjectDetector`**: Small interface exposing `detectConfig(workspaceRoot)` and `saveConfig(config)`. Hides file parsing of `sonar-project.properties`, VS Code configuration lookup, and `context.secrets` management.
 - **`SonarClient`**: Small interface exposing `verifyConnection()`, `getOverview()`, `getDetails(category)`, `getEnrichedRule(ruleKey)`, and `fetchProjects()`. Hides HTTP authentication headers, pagination, error code translation, in-memory caching of rule documentation, and JSON mapping.
-- **`AgentDispatcher`**: Small interface exposing `getAvailableAgents()`, `dispatchSingle(item, targetAgentId)`, and `dispatchBatch(items, targetAgentId)`. Hides path resolution, code context extraction from local text documents, rule enrichment assembly, command dispatching, and clipboard fallback.
-- **`SonarOverviewViewProvider`**: Implements `vscode.WebviewViewProvider`. Encapsulates the Webview HTML lifecycle, container-aware styles, and the two-way message protocol between webview scripts and the extension host.
+- **`AgentDispatcher`**: Small interface exposing `getAvailableAgents()`, `dispatchSingle(item, targetAgentId)`, and `dispatchBatch(items, targetAgentId)`. Hides path resolution, environment and extension discovery, code context extraction from local text documents, rule enrichment assembly, command dispatching, and clipboard fallback.
+- **`SonarOverviewViewProvider`**: Implements `vscode.WebviewViewProvider`. Encapsulates the Webview HTML lifecycle, container-aware styles, dynamic dropdown population for detected agents, and the two-way message protocol between webview scripts and the extension host.
 
 ### 2. UI & Webview Architecture
 
 - Built with **Vanilla TypeScript + HTML/CSS** with zero third-party UI framework bloat, guaranteeing instant load times in the VS Code sidebar.
 - Styled using CSS **Container Queries** (`container-type: inline-size`) on the root container, allowing adaptive reflow between 1-column and 2-column metric cards based on sidebar width rather than viewport width.
 - Colors and typography bound strictly to VS Code theme variables (`var(--vscode-*)`) combined with standardized Sonar rating palette tokens.
+- Target Agent dropdown dynamically renders `<option>` elements from the array sent via `_syncState()`.
 
 ### 3. Agent Dispatch Contracts
 
-- **Supported Target Agents**:
+- **Dynamic Discovery**:
+  - `copilot`: Detected if extension `github.copilot` or `github.copilot-chat` is installed.
+  - `antigravity`: Detected if running in an Antigravity IDE environment (`appName` contains Antigravity or Antigravity environment config present).
+  - `claude-code`: Detected if extension `anthropic.claude-code` is installed.
+  - `cline`: Detected if extension `saoudrizwan.claude-dev` is installed.
+  - `roo-code`: Detected if extension `rooveterinaryinc.roo-cline` is installed.
+  - `continue`: Detected if extension `continue.continue` is installed.
+  - `clipboard`: Universal fallback always present at the end of the selector.
+- **Dispatch Behavior**:
   - `copilot`: Triggers `workbench.action.chat.open` with `{ query: prompt }`.
-  - `antigravity`: Triggers Antigravity chat command if available, with automatic clipboard copy fallback.
-  - `codex`: Triggers Codex command if available, with automatic clipboard copy fallback.
-  - `clipboard`: Universal fallback copying enriched Markdown prompt to system clipboard.
+  - Other agents: Triggers the agent's focus/open view command (if available), copies enriched Markdown prompt to system clipboard, opens the file at the problem line, and alerts the user.
 - **Prompt Shape**: Structured Markdown containing:
   - Header with issue summary and file/line coordinates
   - Rule description and Sonar remediation recommendation

@@ -1,7 +1,7 @@
 {
   "name": "sonar-agent",
   "displayName": "Sonar Agent - SonarQube AI Fix & Quality Metrics",
-  "description": "SonarQube & SonarCloud metrics dashboard with AI-powered fix dispatcher for GitHub Copilot, Antigravity, and Claude.",
+  "description": "SonarQube and SonarCloud metrics dashboard with fix prompt dispatcher for GitHub Copilot, Antigravity, and Claude.",
   "version": "0.1.0",
   "icon": "media/icon.png",
   "publisher": "chulit",
@@ -9,6 +9,7 @@
     "type": "git",
     "url": "https://github.com/chulit/sonar-agent"
   },
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -76,6 +77,10 @@
       {
         "command": "sonarAgent.resetConnection",
         "title": "Disconnect & Reset Credentials"
+      },
+      {
+        "command": "sonarAgent.fixWithAgent",
+        "title": "Fix Sonar Issue with AI Agent"
       }
     ],
     "menus": {
@@ -116,12 +121,20 @@
           "enum": [
             "copilot",
             "antigravity",
+            "claude-code",
+            "cline",
+            "roo-code",
+            "continue",
             "codex",
             "clipboard"
           ],
           "enumDescriptions": [
             "GitHub Copilot Chat",
             "Antigravity Agent",
+            "Claude Code (Official Anthropic AI coding agent)",
+            "Cline (Autonomous AI coding agent)",
+            "Roo Code",
+            "Continue (Open-source AI assistant)",
             "Codex Agent",
             "System Clipboard (Manual paste)"
           ],

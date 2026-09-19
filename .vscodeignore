@@ -1,0 +1,16 @@
+.vscode/**
+.vscode-test/**
+src/**
+test/**
+.scratch/**
+docs/**
+.agents/**
+.github/**
+esbuild.js
+eslint.config.mjs
+tsconfig.json
+vitest.config.ts
+.prettier*
+.releaserc*
+**/*.map
+!dist/**

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ProjectDetector } from './modules/ProjectDetector.js';
 import { SonarOverviewViewProvider } from './modules/SonarOverviewViewProvider.js';
+import { SonarCodeActionProvider } from './modules/SonarCodeActionProvider.js';
 
 export function activate(context: vscode.ExtensionContext) {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -53,6 +54,26 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('SonarQube credentials have been removed.');
       }
     }),
+  );
+
+  const codeActionProvider = new SonarCodeActionProvider({
+    projectDetector,
+  });
+
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider({ scheme: 'file' }, codeActionProvider, {
+      providedCodeActionKinds: SonarCodeActionProvider.providedCodeActionKinds,
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'sonarAgent.fixWithAgent',
+      async (diagnostic: vscode.Diagnostic, document: vscode.TextDocument) => {
+        if (!diagnostic || !document) return;
+        await codeActionProvider.executeFixWithAgent(diagnostic, document);
+      },
+    ),
   );
 }
 

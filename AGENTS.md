@@ -4,9 +4,9 @@ Guidance and operating rules for AI coding agents working on the **Sonar Agent**
 
 ## Pointers
 
-- **Domain Glossary**: [CONTEXT.md](CONTEXT.md) — canonical terminology. Use defined terms exclusively.
-- **Specification**: [SPEC.md](SPEC.md) — 21 user stories, implementation decisions, and test seams.
-- **Active Tickets**: [.scratch/sonar-agent/issues/](.scratch/sonar-agent/issues/) — tracer-bullet tickets with blocking edges.
+- **Domain Glossary**: [CONTEXT.md](CONTEXT.md): canonical terminology. Use defined terms exclusively.
+- **Specification**: [SPEC.md](SPEC.md): 21 user stories, implementation decisions, and test seams.
+- **Active Tickets**: [.scratch/sonar-agent/issues/](.scratch/sonar-agent/issues/): tracer-bullet tickets with blocking edges.
 
 ## Working on Tickets
 

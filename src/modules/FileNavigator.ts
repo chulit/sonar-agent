@@ -44,7 +44,6 @@ export class FileNavigator {
       return null;
     }
 
-    // 1. Direct path check
     const directPath = path.isAbsolute(relativePath)
       ? relativePath
       : path.join(this.workspaceRoot, relativePath);
@@ -53,7 +52,7 @@ export class FileNavigator {
       return directPath;
     }
 
-    // 2. Fallback: Search by basename for monorepos or prefixed paths
+    // Fallback search by filename for monorepos or prefixed paths
     const fileName = path.basename(relativePath);
     if (fileName) {
       const matches = await this.findFilesFn(`**/${fileName}`);

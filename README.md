@@ -33,7 +33,7 @@ A powerful companion to SonarLint that bridges clean code analysis with AI-assis
   - Enriches issues with SonarQube rule documentation and local surrounding code (10 lines of context).
   - Supports targeting **GitHub Copilot**, **Antigravity / Gemini**, **Codex**, or **Clipboard**.
   - Single issue fix and **batch multi-selection** with grouped per-file prompts.
-  - Specialized actions for coverage gaps (⚡ _Generate Tests_) and duplicated code blocks (⚡ _Refactor_).
+  - Specialized actions for coverage gaps (_Generate Tests_) and duplicated code blocks (_Refactor_).
 - **Responsive Layout**: Designed for the sidebar using modern CSS Container Queries (`@container`) with adaptive 1-column (<340px) and 2-column (≥340px) layouts.
 - **Strict Security & Zero Token Leakage**:
   - Tokens are stored exclusively in the OS Keychain via `vscode.SecretStorage`.
@@ -81,10 +81,12 @@ A powerful companion to SonarLint that bridges clean code analysis with AI-assis
 
 Access these commands via the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 
-| Command                          | Identifier                  | Description                                                  |
-| -------------------------------- | --------------------------- | ------------------------------------------------------------ |
-| **Sonar Agent: Refresh Metrics** | `sonarAgent.refreshMetrics` | Re-fetches latest measures and issues from SonarQube         |
-| **Sonar Agent: Select Project**  | `sonarAgent.selectProject`  | Opens a QuickPick list of projects from the connected server |
+| Command                                         | Identifier                   | Description                                                  |
+| ----------------------------------------------- | ---------------------------- | ------------------------------------------------------------ |
+| **Sonar Agent: Refresh**                        | `sonarAgent.refresh`         | Re-fetches latest measures and issues from SonarQube         |
+| **Sonar Agent: Select Sonar Project**           | `sonarAgent.selectProject`   | Opens a QuickPick list of projects from the connected server |
+| **Sonar Agent: Configure Connection**           | `sonarAgent.configure`       | Focuses the Sonar Overview sidebar view                      |
+| **Sonar Agent: Disconnect & Reset Credentials** | `sonarAgent.resetConnection` | Disconnects and removes stored SonarQube credentials         |
 
 ---
 
@@ -121,4 +123,4 @@ npx @vscode/vsce package --no-git-tag-version --allow-missing-repository
 
 ## License
 
-MIT
+[MIT](LICENSE.md)
