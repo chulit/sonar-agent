@@ -81,6 +81,10 @@
       {
         "command": "sonarAgent.fixWithAgent",
         "title": "Fix Sonar Issue with AI Agent"
+      },
+      {
+        "command": "sonarAgent.showLogs",
+        "title": "Show Logs"
       }
     ],
     "menus": {

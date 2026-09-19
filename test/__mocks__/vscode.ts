@@ -47,6 +47,20 @@ export const window = {
   showQuickPick: async () => undefined,
   showInputBox: async () => undefined,
   withProgress: async (_opts: any, task: any) => task({ report: () => {} }),
+  createOutputChannel: (name: string, _options?: any) => ({
+    name,
+    append: () => {},
+    appendLine: () => {},
+    clear: () => {},
+    show: () => {},
+    hide: () => {},
+    dispose: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    debug: () => {},
+    trace: () => {},
+  }),
 };
 
 export const Uri = {

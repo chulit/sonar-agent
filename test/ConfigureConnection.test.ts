@@ -55,7 +55,7 @@ describe('SonarOverviewViewProvider - promptConfigureConnection', () => {
     await provider.promptConfigureConnection();
 
     expect(vscode.window.showQuickPick).toHaveBeenCalled();
-    expect(capturedItems).toHaveLength(4);
+    expect(capturedItems).toHaveLength(5);
     expect(capturedItems[0].label).toContain('Update Server URL & Token');
     expect(capturedItems[0].description).toBe('Connected');
     expect(capturedItems[0].detail).toContain('http://localhost:9000');
@@ -65,7 +65,8 @@ describe('SonarOverviewViewProvider - promptConfigureConnection', () => {
     expect(capturedItems[1].detail).toContain('org.sample:project');
 
     expect(capturedItems[2].label).toContain('Open Extension Settings');
-    expect(capturedItems[3].label).toContain('Disconnect & Reset Credentials');
+    expect(capturedItems[3].label).toContain('Show Extension Logs');
+    expect(capturedItems[4].label).toContain('Disconnect & Reset Credentials');
   });
 
   it('should show QuickPick with disconnected status and omit disconnect option when not connected', async () => {
@@ -80,7 +81,7 @@ describe('SonarOverviewViewProvider - promptConfigureConnection', () => {
 
     await provider.promptConfigureConnection();
 
-    expect(capturedItems).toHaveLength(3);
+    expect(capturedItems).toHaveLength(4);
     expect(capturedItems[0].description).toBe('Not connected');
     expect(capturedItems.some((i) => i.action === 'disconnect')).toBe(false);
   });

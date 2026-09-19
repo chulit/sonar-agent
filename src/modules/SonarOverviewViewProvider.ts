@@ -3,6 +3,7 @@ import { ProjectDetector } from './ProjectDetector.js';
 import { SonarClient, SonarDetailItem, SonarOverview } from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
 import { AgentDispatcher } from './AgentDispatcher.js';
+import { Logger } from './Logger.js';
 
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'sonarAgent.overviewView';
@@ -178,7 +179,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const isConnected = Boolean(config.serverUrl && token);
 
     interface ConfigQuickPickItem extends vscode.QuickPickItem {
-      action: 'updateCredentials' | 'selectProject' | 'openSettings' | 'disconnect';
+      action: 'updateCredentials' | 'selectProject' | 'openSettings' | 'showLogs' | 'disconnect';
     }
 
     const items: ConfigQuickPickItem[] = [
@@ -202,6 +203,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         label: '$(gear) Open Extension Settings',
         detail: 'Configure default AI agent and advanced preferences',
         action: 'openSettings',
+      },
+      {
+        label: '$(output) Show Extension Logs',
+        detail: 'Open the Sonar Agent output log channel',
+        action: 'showLogs',
       },
     ];
 
@@ -235,6 +241,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           'workbench.action.openSettings',
           '@ext:chulit.sonar-agent',
         );
+        break;
+      case 'showLogs':
+        Logger.show();
         break;
       case 'disconnect':
         await vscode.commands.executeCommand('sonarAgent.resetConnection');
@@ -528,14 +537,32 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         if (resolvedProjectKey && resolvedProjectKey === effectiveProjectKey) {
           if (overviewResult.status === 'fulfilled') {
             overview = overviewResult.value;
+            if (overview) {
+              Logger.info(
+                `Measures updated for [${resolvedProjectKey}]: ${overview.security.count} vulnerabilities, ${overview.reliability.count} bugs, ${overview.maintainability.count} smells, ${overview.coverage.percentage.toFixed(1)}% coverage.`,
+              );
+            }
           } else {
             overviewError = overviewResult.reason?.message || 'Failed to fetch project measures.';
+            Logger.error(
+              `Failed to fetch project measures for [${resolvedProjectKey}]`,
+              overviewError,
+            );
           }
         } else if (resolvedProjectKey) {
           try {
             overview = await client.getOverview(resolvedProjectKey);
+            if (overview) {
+              Logger.info(
+                `Measures updated for [${resolvedProjectKey}]: ${overview.security.count} vulnerabilities, ${overview.reliability.count} bugs, ${overview.maintainability.count} smells, ${overview.coverage.percentage.toFixed(1)}% coverage.`,
+              );
+            }
           } catch (err: any) {
             overviewError = err.message || 'Failed to fetch project measures.';
+            Logger.error(
+              `Failed to fetch project measures for [${resolvedProjectKey}]`,
+              overviewError,
+            );
           }
         }
 
@@ -565,6 +592,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       }
     } catch (err: any) {
       console.error('[SonarAgent] _syncState error:', err);
+      Logger.error('Failed to synchronize Sonar Agent state', err);
       this._view?.webview.postMessage({
         type: 'error',
         message: err.message || 'Failed to synchronize Sonar Agent state.',
@@ -591,12 +619,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     normalizedUrl = normalizedUrl.replace(/\/+$/, '');
 
     this._view?.webview.postMessage({ type: 'connecting' });
+    Logger.info('Verifying SonarQube credentials...');
 
     try {
       const client = new SonarClient({ serverUrl: normalizedUrl, token: trimmedToken });
       const result = await client.verifyConnection();
 
       if (!result.ok) {
+        Logger.warn(`Connection verification failed: ${result.message || 'Unknown error'}`);
         this._view?.webview.postMessage({
           type: 'error',
           message: result.message || 'Connection verification failed.',
@@ -607,11 +637,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       await this.projectDetector.setServerUrl(normalizedUrl);
       await this.projectDetector.setToken(trimmedToken);
 
+      Logger.info('SonarQube connection verified and saved.');
       vscode.window.showInformationMessage('SonarQube connection successfully verified!');
 
       await this._syncState();
     } catch (err: any) {
       console.error('[SonarAgent] _handleConnect error:', err);
+      Logger.error('Unexpected connection error occurred', err);
       this._view?.webview.postMessage({
         type: 'error',
         message: err?.message || 'Unexpected connection error occurred.',
@@ -641,6 +673,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     if (confirm === 'Disconnect') {
       await this.projectDetector.deleteToken();
+      Logger.info('SonarQube credentials removed and disconnected.');
       this._view?.webview.postMessage({
         type: 'disconnected',
         message: 'Disconnected from SonarQube. Credentials removed.',

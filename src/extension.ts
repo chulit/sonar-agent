@@ -2,8 +2,13 @@ import * as vscode from 'vscode';
 import { ProjectDetector } from './modules/ProjectDetector.js';
 import { SonarOverviewViewProvider } from './modules/SonarOverviewViewProvider.js';
 import { SonarCodeActionProvider } from './modules/SonarCodeActionProvider.js';
+import { Logger } from './modules/Logger.js';
 
 export function activate(context: vscode.ExtensionContext) {
+  const logChannel = Logger.initialize();
+  context.subscriptions.push(logChannel);
+  Logger.info('Sonar Agent extension activated.');
+
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
   const projectDetector = new ProjectDetector({
@@ -56,6 +61,12 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('sonarAgent.showLogs', () => {
+      Logger.show();
+    }),
+  );
+
   const codeActionProvider = new SonarCodeActionProvider({
     projectDetector,
   });
@@ -77,4 +88,6 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-export function deactivate() {}
+export function deactivate() {
+  Logger.dispose();
+}
