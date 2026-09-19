@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] Add `author?: string` to `SonarDetailItem` and extract `item.author` from SonarQube API in `SonarClient.getIssues()`.
-- [ ] Render a responsive Filter Bar above `#issues-container` containing dropdowns for Severity, Author, File, Rule, and an "Include Test Files" checkbox.
-- [ ] Dynamically populate Author, File, and Rule dropdown options from currently loaded issues whenever a category drilldown is fetched.
-- [ ] Severity dropdown supports filtering by `All`, `BLOCKER`, `CRITICAL`, `MAJOR`, `MINOR`, and `INFO`.
-- [ ] "Include Test Files" checkbox (checked by default) excludes test files matching common test file patterns (`*.test.*`, `*.spec.*`, `**/test/**`, `**/tests/**`, `*Test.*`) when unchecked.
-- [ ] Changing any filter immediately refilters the displayed issue cards, updates the items count badge, and clears/resynchronizes the batch selection bar.
-- [ ] Unit tests verify `SonarClient` parses the author field and filter logic correctly handles all combinations of filters.
+- [x] Add `author?: string` to `SonarDetailItem` and extract `item.author` from SonarQube API in `SonarClient.getIssues()`.
+- [x] Render a responsive Filter Bar above `#issues-container` containing dropdowns for Severity, Author, File, Rule, and an "Include Test Files" checkbox.
+- [x] Dynamically populate Author, File, and Rule dropdown options from currently loaded issues whenever a category drilldown is fetched.
+- [x] Severity dropdown supports filtering by `All`, `BLOCKER`, `CRITICAL`, `MAJOR`, `MINOR`, and `INFO`.
+- [x] "Include Test Files" checkbox (checked by default) excludes test files matching common test file patterns (`*.test.*`, `*.spec.*`, `**/test/**`, `**/tests/**`, `*Test.*`) when unchecked.
+- [x] Changing any filter immediately refilters the displayed issue cards, updates the items count badge, and clears/resynchronizes the batch selection bar.
+- [x] Unit tests verify `SonarClient` parses the author field and filter logic correctly handles all combinations of filters.

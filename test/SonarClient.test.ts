@@ -156,6 +156,7 @@ describe('SonarClient - Connection Verification', () => {
           effort: '5min',
           tags: ['accessibility', 'react'],
           creationDate: '2026-09-13T10:00:00+0000',
+          author: 'alice@example.com',
         },
       ],
     };
@@ -180,6 +181,7 @@ describe('SonarClient - Connection Verification', () => {
     expect(items[0].line).toBe(168);
     expect(items[0].effort).toBe('5min');
     expect(items[0].tags).toEqual(['accessibility', 'react']);
+    expect(items[0].author).toBe('alice@example.com');
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/issues/search?componentKeys=my-project&types=BUG'),
       expect.anything(),

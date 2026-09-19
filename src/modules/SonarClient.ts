@@ -41,6 +41,7 @@ export interface SonarDetailItem {
   effort?: string;
   tags: string[];
   creationDate: string;
+  author?: string;
 }
 
 export class SonarClient {
@@ -310,6 +311,7 @@ export class SonarClient {
       effort: item.effort,
       tags: item.tags || [],
       creationDate: item.creationDate || '',
+      author: item.author || undefined,
     }));
   }
 
@@ -337,6 +339,7 @@ export class SonarClient {
       status: item.status || 'TO_REVIEW',
       tags: ['security-hotspot'],
       creationDate: item.creationDate || '',
+      author: item.author || undefined,
     }));
   }
 

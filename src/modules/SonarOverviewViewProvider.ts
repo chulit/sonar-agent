@@ -1006,6 +1006,77 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       align-items: center;
     }
 
+    /* Filter Bar */
+    .filter-bar {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 6px 8px;
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+      border-radius: 4px;
+    }
+
+    .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 12px;
+    }
+
+    .filter-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+    }
+
+    .filter-item label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--vscode-descriptionForeground);
+      text-transform: none;
+      white-space: nowrap;
+    }
+
+    .filter-item select {
+      padding: 2px 4px;
+      font-size: 11px;
+      height: 22px;
+      background: var(--vscode-dropdown-background, var(--vscode-input-background));
+      color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+      border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
+      border-radius: 3px;
+      cursor: pointer;
+      max-width: 120px;
+    }
+
+    .filter-test-row {
+      display: flex;
+      align-items: center;
+      padding-top: 4px;
+      border-top: 1px solid var(--sonar-border);
+    }
+
+    .filter-checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      text-transform: none;
+      font-weight: normal;
+      user-select: none;
+    }
+
+    .filter-checkbox-label input[type="checkbox"] {
+      width: 13px;
+      height: 13px;
+      cursor: pointer;
+      accent-color: var(--vscode-button-background, var(--sonar-blue));
+    }
+
     .issue-card {
       border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
       border-radius: 5px;
@@ -1353,6 +1424,47 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           <span id="issues-list-count" class="source-badge">0 items</span>
         </div>
 
+        <!-- Filter Bar -->
+        <div id="filter-bar" class="filter-bar">
+          <div class="filter-row">
+            <div class="filter-item">
+              <label for="filter-severity">Severity</label>
+              <select id="filter-severity">
+                <option value="ALL">All</option>
+                <option value="BLOCKER">Blocker</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="MAJOR">Major</option>
+                <option value="MINOR">Minor</option>
+                <option value="INFO">Info</option>
+              </select>
+            </div>
+            <div class="filter-item">
+              <label for="filter-author">Author</label>
+              <select id="filter-author">
+                <option value="ALL">All</option>
+              </select>
+            </div>
+            <div class="filter-item">
+              <label for="filter-file">File</label>
+              <select id="filter-file">
+                <option value="ALL">All</option>
+              </select>
+            </div>
+            <div class="filter-item">
+              <label for="filter-rule">Rule</label>
+              <select id="filter-rule">
+                <option value="ALL">All</option>
+              </select>
+            </div>
+          </div>
+          <div class="filter-test-row">
+            <label class="filter-checkbox-label">
+              <input type="checkbox" id="filter-include-tests" checked />
+              <span>Include Test Files</span>
+            </label>
+          </div>
+        </div>
+
         <div id="issues-loading" class="loading-overlay hidden">
           <div class="spinner"></div>
           <span>Loading issues list...</span>
@@ -1395,6 +1507,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const selectedCountLabel = document.getElementById("selected-count-label");
     const sendBatchBtn = document.getElementById("send-batch-btn");
     const deselectAllBtn = document.getElementById("deselect-all-btn");
+
+    const filterSeverity = document.getElementById("filter-severity");
+    const filterAuthor = document.getElementById("filter-author");
+    const filterFile = document.getElementById("filter-file");
+    const filterRule = document.getElementById("filter-rule");
+    const filterIncludeTests = document.getElementById("filter-include-tests");
 
     const serverUrlInput = document.getElementById("server-url");
     const userTokenInput = document.getElementById("user-token");
@@ -1521,6 +1639,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const acceptedCount = document.getElementById("metric-accepted-count");
 
     let activeCategory = null;
+    let rawCategoryItems = [];
     let currentItems = [];
     const selectedItemIds = new Set();
 
@@ -1585,10 +1704,246 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    function renderIssues(items, category) {
-      currentItems = items;
-      selectedItemIds.clear();
+    function isTestFile(filePath) {
+      if (!filePath) return false;
+      const normalized = filePath.replace(/\\/g, "/");
+      const segments = normalized.toLowerCase().split("/");
+      const rawFilename = normalized.split("/").pop() || "";
+      const lowerFilename = rawFilename.toLowerCase();
+
+      if (segments.some((seg) => seg === "test" || seg === "tests" || seg === "__tests__" || seg === "__test__" || seg === "testing" || seg === "spec" || seg === "specs")) {
+        return true;
+      }
+      if (lowerFilename.includes(".test.") || lowerFilename.includes(".spec.") || lowerFilename.includes("_test.") || lowerFilename.includes("-test.") || lowerFilename.includes("_spec.") || lowerFilename.includes("-spec.")) {
+        return true;
+      }
+      if (/^(?:test|tests|spec|specs)[.][a-z0-9]+$/i.test(rawFilename)) {
+        return true;
+      }
+      if (/[._-](?:test|tests|spec|specs)[.][a-z0-9]+$/i.test(rawFilename)) {
+        return true;
+      }
+      if (/[a-zA-Z0-9](?:Test|Tests|Spec|Specs)[.][a-z0-9]+$/.test(rawFilename)) {
+        return true;
+      }
+      return false;
+    }
+
+    function populateFilterDropdowns(items) {
+      const prevAuthor = filterAuthor.value;
+      const prevFile = filterFile.value;
+      const prevRule = filterRule.value;
+
+      // Populate Authors
+      const authors = Array.from(new Set(items.map((i) => i.author).filter(Boolean))).sort();
+      filterAuthor.innerHTML = '<option value="ALL">All</option>';
+      authors.forEach((a) => {
+        const opt = document.createElement("option");
+        opt.value = a;
+        opt.textContent = a;
+        filterAuthor.appendChild(opt);
+      });
+      if (authors.includes(prevAuthor)) {
+        filterAuthor.value = prevAuthor;
+      }
+
+      // Populate Files
+      const files = Array.from(new Set(items.map((i) => i.filePath).filter(Boolean))).sort();
+      filterFile.innerHTML = '<option value="ALL">All</option>';
+      files.forEach((f) => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        const shortName = f.split("/").pop() || f;
+        opt.textContent = shortName;
+        opt.title = f;
+        filterFile.appendChild(opt);
+      });
+      if (files.includes(prevFile)) {
+        filterFile.value = prevFile;
+      }
+
+      // Populate Rules
+      const rules = Array.from(new Set(items.map((i) => i.ruleKey).filter(Boolean))).sort();
+      filterRule.innerHTML = '<option value="ALL">All</option>';
+      rules.forEach((r) => {
+        const opt = document.createElement("option");
+        opt.value = r;
+        opt.textContent = r;
+        filterRule.appendChild(opt);
+      });
+      if (rules.includes(prevRule)) {
+        filterRule.value = prevRule;
+      }
+    }
+
+    function getFilteredItems() {
+      const sev = filterSeverity.value;
+      const author = filterAuthor.value;
+      const file = filterFile.value;
+      const rule = filterRule.value;
+      const includeTests = filterIncludeTests.checked;
+
+      return rawCategoryItems.filter((item) => {
+        if (sev !== "ALL" && item.severity !== sev) {
+          return false;
+        }
+        if (author !== "ALL" && (item.author || "") !== author) {
+          return false;
+        }
+        if (file !== "ALL" && item.filePath !== file) {
+          return false;
+        }
+        if (rule !== "ALL" && item.ruleKey !== rule) {
+          return false;
+        }
+        if (!includeTests && isTestFile(item.filePath)) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    function renderIssueCard(item) {
+      const card = document.createElement("div");
+      card.className = "issue-card";
+
+      const pathDiv = document.createElement("div");
+      pathDiv.className = "issue-path";
+      pathDiv.textContent = item.filePath;
+      pathDiv.title = "Click to jump to file";
+      pathDiv.addEventListener("click", () => {
+        vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
+      });
+
+      const bodyDiv = document.createElement("div");
+      bodyDiv.className = "issue-body";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "issue-checkbox";
+      checkbox.checked = selectedItemIds.has(item.id);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selectedItemIds.add(item.id);
+        } else {
+          selectedItemIds.delete(item.id);
+        }
+        updateBatchBar();
+      });
+
+      const msgDiv = document.createElement("div");
+      msgDiv.className = "issue-message";
+      msgDiv.textContent = item.message;
+
+      bodyDiv.appendChild(checkbox);
+      bodyDiv.appendChild(msgDiv);
+
+      const badgesDiv = document.createElement("div");
+      badgesDiv.className = "issue-badges";
+
+      const severityBadge = document.createElement("span");
+      severityBadge.className = "badge-tag badge-severity-" + item.severity.toLowerCase();
+      severityBadge.textContent = item.type + " (" + item.severity + ")";
+      badgesDiv.appendChild(severityBadge);
+
+      if (item.author) {
+        const authorBadge = document.createElement("span");
+        authorBadge.className = "badge-tag";
+        authorBadge.textContent = "@" + item.author;
+        badgesDiv.appendChild(authorBadge);
+      }
+
+      (item.tags || []).forEach((tag) => {
+        const tagBadge = document.createElement("span");
+        tagBadge.className = "badge-tag";
+        tagBadge.textContent = tag;
+        badgesDiv.appendChild(tagBadge);
+      });
+
+      const footerDiv = document.createElement("div");
+      footerDiv.className = "issue-footer";
+
+      const footerMeta = document.createElement("div");
+      footerMeta.className = "issue-footer-meta";
+      footerMeta.textContent = (item.line ? "L" + item.line : "File level") + (item.effort ? " • " + item.effort : "");
+
+      const actionsDiv = document.createElement("div");
+      actionsDiv.className = "issue-actions";
+
+      const jumpBtn = document.createElement("button");
+      jumpBtn.className = "btn btn-secondary btn-sm";
+      jumpBtn.style.gap = "4px";
+      jumpBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg><span>Jump</span>';
+      jumpBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
+      });
+
+      const agentBtn = document.createElement("button");
+      agentBtn.className = "btn btn-agent btn-sm";
+      let agentBtnLabel = "Send to Agent";
+      if (item.type === "COVERAGE") {
+        agentBtnLabel = "Generate Tests";
+      } else if (item.type === "DUPLICATION") {
+        agentBtnLabel = "Refactor";
+      } else if (item.type === "HOTSPOT") {
+        agentBtnLabel = "Review";
+      }
+      agentBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>' + agentBtnLabel;
+      agentBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const targetAgentId = targetAgentDropdown.value;
+        vscode.postMessage({ command: "sendToAgent", item, targetAgentId });
+      });
+
+      actionsDiv.appendChild(jumpBtn);
+      actionsDiv.appendChild(agentBtn);
+
+      footerDiv.appendChild(footerMeta);
+      footerDiv.appendChild(actionsDiv);
+
+      card.appendChild(pathDiv);
+      card.appendChild(bodyDiv);
+      card.appendChild(badgesDiv);
+      card.appendChild(footerDiv);
+
+      issuesContainer.appendChild(card);
+    }
+
+    function applyFiltersAndRender() {
+      const filtered = getFilteredItems();
+      currentItems = filtered;
+
+      // Clean up selected items that are no longer visible in the filtered list
+      const visibleIdSet = new Set(filtered.map((i) => i.id));
+      for (const id of Array.from(selectedItemIds)) {
+        if (!visibleIdSet.has(id)) {
+          selectedItemIds.delete(id);
+        }
+      }
       updateBatchBar();
+
+      issuesListCount.textContent = filtered.length + " item" + (filtered.length === 1 ? "" : "s");
+      issuesContainer.innerHTML = "";
+
+      if (filtered.length === 0) {
+        issuesContainer.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 12px;">No issues match the selected filters.</div>';
+        return;
+      }
+
+      filtered.forEach((item) => {
+        renderIssueCard(item);
+      });
+    }
+
+    function renderIssues(items, category) {
+      rawCategoryItems = items;
+      selectedItemIds.clear();
+
+      filterSeverity.value = "ALL";
+      filterIncludeTests.checked = true;
+
+      populateFilterDropdowns(items);
 
       issuesSection.classList.remove("hidden");
       const categoryTitles = {
@@ -1601,114 +1956,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         accepted: "ACCEPTED ISSUES",
       };
       issuesListTitle.textContent = categoryTitles[category] || (category.toUpperCase() + " ISSUES");
-      issuesListCount.textContent = items.length + " items";
-      issuesContainer.innerHTML = "";
 
-      if (items.length === 0) {
-        issuesContainer.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 12px;">No issues found in this category.</div>';
-        return;
-      }
-
-      items.forEach((item) => {
-        const card = document.createElement("div");
-        card.className = "issue-card";
-
-        const pathDiv = document.createElement("div");
-        pathDiv.className = "issue-path";
-        pathDiv.textContent = item.filePath;
-        pathDiv.title = "Click to jump to file";
-        pathDiv.addEventListener("click", () => {
-          vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
-        });
-
-        const bodyDiv = document.createElement("div");
-        bodyDiv.className = "issue-body";
-
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "issue-checkbox";
-        checkbox.checked = selectedItemIds.has(item.id);
-        checkbox.addEventListener("change", () => {
-          if (checkbox.checked) {
-            selectedItemIds.add(item.id);
-          } else {
-            selectedItemIds.delete(item.id);
-          }
-          updateBatchBar();
-        });
-
-        const msgDiv = document.createElement("div");
-        msgDiv.className = "issue-message";
-        msgDiv.textContent = item.message;
-
-        bodyDiv.appendChild(checkbox);
-        bodyDiv.appendChild(msgDiv);
-
-        const badgesDiv = document.createElement("div");
-        badgesDiv.className = "issue-badges";
-
-        const severityBadge = document.createElement("span");
-        severityBadge.className = "badge-tag badge-severity-" + item.severity.toLowerCase();
-        severityBadge.textContent = item.type + " (" + item.severity + ")";
-        badgesDiv.appendChild(severityBadge);
-
-        (item.tags || []).forEach((tag) => {
-          const tagBadge = document.createElement("span");
-          tagBadge.className = "badge-tag";
-          tagBadge.textContent = tag;
-          badgesDiv.appendChild(tagBadge);
-        });
-
-        const footerDiv = document.createElement("div");
-        footerDiv.className = "issue-footer";
-
-        const footerMeta = document.createElement("div");
-        footerMeta.className = "issue-footer-meta";
-        footerMeta.textContent = (item.line ? "L" + item.line : "File level") + (item.effort ? " • " + item.effort : "");
-
-        const actionsDiv = document.createElement("div");
-        actionsDiv.className = "issue-actions";
-
-        const jumpBtn = document.createElement("button");
-        jumpBtn.className = "btn btn-secondary btn-sm";
-        jumpBtn.style.gap = "4px";
-        jumpBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg><span>Jump</span>';
-        jumpBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
-        });
-
-        const agentBtn = document.createElement("button");
-        agentBtn.className = "btn btn-agent btn-sm";
-        let agentBtnLabel = "Send to Agent";
-        if (item.type === "COVERAGE") {
-          agentBtnLabel = "Generate Tests";
-        } else if (item.type === "DUPLICATION") {
-          agentBtnLabel = "Refactor";
-        } else if (item.type === "HOTSPOT") {
-          agentBtnLabel = "Review";
-        }
-        agentBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>' + agentBtnLabel;
-        agentBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const targetAgentId = targetAgentDropdown.value;
-          vscode.postMessage({ command: "sendToAgent", item, targetAgentId });
-        });
-
-        actionsDiv.appendChild(jumpBtn);
-        actionsDiv.appendChild(agentBtn);
-
-        footerDiv.appendChild(footerMeta);
-        footerDiv.appendChild(actionsDiv);
-
-        card.appendChild(pathDiv);
-        card.appendChild(bodyDiv);
-        card.appendChild(badgesDiv);
-        card.appendChild(footerDiv);
-
-        issuesContainer.appendChild(card);
-      });
+      applyFiltersAndRender();
     }
+
+    [filterSeverity, filterAuthor, filterFile, filterRule].forEach((sel) => {
+      sel.addEventListener("change", applyFiltersAndRender);
+    });
+    filterIncludeTests.addEventListener("change", applyFiltersAndRender);
 
     sendBatchBtn.addEventListener("click", () => {
       const selectedItems = currentItems.filter((item) => selectedItemIds.has(item.id));
