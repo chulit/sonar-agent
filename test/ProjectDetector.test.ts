@@ -50,6 +50,38 @@ describe("ProjectDetector - Configuration and Secrets", () => {
     expect(config.hasToken).toBe(true);
   });
 
+  it("should parse sonar-project.properties correctly", () => {
+    const propertiesContent = `
+      # SonarQube project configuration
+      sonar.projectKey=my-org_my-backend-app
+      sonar.projectName=My Backend App
+      sonar.host.url=http://sonar.internal:9000
+      sonar.sources=src
+    `;
+
+    const parsed = ProjectDetector.parseProperties(propertiesContent);
+    expect(parsed.projectKey).toBe("my-org_my-backend-app");
+    expect(parsed.serverUrl).toBe("http://sonar.internal:9000");
+    expect(parsed.hasPlaintextCredentials).toBe(false);
+  });
+
+  it("should flag security warning if sonar-project.properties contains plaintext credentials and never export them", () => {
+    const dangerousContent = `
+      sonar.projectKey=secure-app
+      sonar.login=admin
+      sonar.password=super_secret_password
+      sonar.token=squ_1234567890abcdef
+    `;
+
+    const parsed = ProjectDetector.parseProperties(dangerousContent);
+    expect(parsed.projectKey).toBe("secure-app");
+    expect(parsed.hasPlaintextCredentials).toBe(true);
+    // Guarantee no credentials object or properties leaked
+    expect((parsed as any).login).toBeUndefined();
+    expect((parsed as any).password).toBeUndefined();
+    expect((parsed as any).token).toBeUndefined();
+  });
+
   it("should save serverUrl to workspace configuration", async () => {
     const detector = new ProjectDetector({ secretStorage, workspaceConfig });
     await detector.setServerUrl("http://localhost:9000");

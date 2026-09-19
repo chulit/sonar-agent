@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] ProjectDetector reads `sonar-project.properties` in workspace root and extracts `sonar.projectKey` and `sonar.host.url`.
-- [ ] If `sonar.projectKey` is found, the project binding is established automatically and reflected in the sidebar header.
-- [ ] If `sonar-project.properties` is absent, the extension queries `/api/projects/search` on the connected SonarQube server.
-- [ ] The user can choose a project from an interactive dropdown selector in the sidebar header or via a project picker command.
-- [ ] The selected project key is persisted in VS Code workspace configuration (`sonarAgent.projectKey`).
-- [ ] A settings button allows the user to re-select or change the active project binding at any time.
+- [x] ProjectDetector reads `sonar-project.properties` in workspace root and extracts `sonar.projectKey` and `sonar.host.url`.
+- [x] If `sonar.projectKey` is found, the project binding is established automatically and reflected in the sidebar header.
+- [x] If `sonar-project.properties` is absent, the extension queries `/api/projects/search` on the connected SonarQube server.
+- [x] The user can choose a project from an interactive dropdown selector in the sidebar header or via a project picker command.
+- [x] The selected project key is persisted in VS Code workspace configuration (`sonarAgent.projectKey`).
+- [x] A settings button allows the user to re-select or change the active project binding at any time.

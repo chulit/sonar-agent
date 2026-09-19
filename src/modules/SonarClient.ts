@@ -74,4 +74,33 @@ export class SonarClient {
       };
     }
   }
+
+  /**
+   * Fetches projects from SonarQube /api/projects/search
+   */
+  async fetchProjects(): Promise<{ key: string; name: string }[]> {
+    try {
+      const url = `${this.serverUrl}/api/projects/search?ps=100`;
+      const response = await this.fetchFn(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          ...this.getAuthHeader(),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = (await response.json()) as { components?: { key: string; name: string }[] };
+      return (data.components || []).map((p) => ({
+        key: p.key,
+        name: p.name || p.key,
+      }));
+    } catch (err: any) {
+      console.error("Failed to fetch SonarQube projects:", err.message);
+      return [];
+    }
+  }
 }

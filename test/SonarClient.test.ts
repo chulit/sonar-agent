@@ -65,4 +65,34 @@ describe("SonarClient - Connection Verification", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain("Cannot reach SonarQube server");
   });
+
+  it("should fetch projects from /api/projects/search", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        components: [
+          { key: "proj-1", name: "Project One" },
+          { key: "proj-2", name: "Project Two" },
+        ],
+      }),
+    });
+
+    const client = new SonarClient({
+      serverUrl: "http://localhost:9000",
+      token: "valid-token",
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const projects = await client.fetchProjects();
+
+    expect(projects).toEqual([
+      { key: "proj-1", name: "Project One" },
+      { key: "proj-2", name: "Project Two" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:9000/api/projects/search?ps=100",
+      expect.anything()
+    );
+  });
 });

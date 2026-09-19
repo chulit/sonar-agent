@@ -42,6 +42,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "sonarAgent.selectProject",
+        "title": "Select Sonar Project",
+        "icon": "$(folder-active)"
+      },
+      {
         "command": "sonarAgent.configure",
         "title": "Configure Connection",
         "icon": "$(gear)"
@@ -59,9 +64,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "sonarAgent.configure",
+          "command": "sonarAgent.selectProject",
           "when": "view == sonarAgent.overviewView",
           "group": "navigation@2"
+        },
+        {
+          "command": "sonarAgent.configure",
+          "when": "view == sonarAgent.overviewView",
+          "group": "navigation@3"
         }
       ]
     },

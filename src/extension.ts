@@ -37,6 +37,12 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("sonarAgent.selectProject", async () => {
+      await overviewProvider.promptProjectSelection();
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("sonarAgent.resetConnection", async () => {
       const confirm = await vscode.window.showWarningMessage(
         "Are you sure you want to disconnect and remove stored SonarQube credentials?",
