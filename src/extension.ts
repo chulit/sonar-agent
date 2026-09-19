@@ -1,0 +1,55 @@
+import * as vscode from "vscode";
+import { ProjectDetector } from "./modules/ProjectDetector.js";
+import { SonarOverviewViewProvider } from "./modules/SonarOverviewViewProvider.js";
+
+export function activate(context: vscode.ExtensionContext) {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const workspaceConfig = vscode.workspace.getConfiguration("sonarAgent");
+
+  const projectDetector = new ProjectDetector({
+    secretStorage: context.secrets,
+    workspaceConfig,
+    workspaceRoot,
+  });
+
+  const overviewProvider = new SonarOverviewViewProvider(
+    context.extensionUri,
+    projectDetector
+  );
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      SonarOverviewViewProvider.viewType,
+      overviewProvider
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("sonarAgent.refresh", async () => {
+      await overviewProvider.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("sonarAgent.configure", async () => {
+      await vscode.commands.executeCommand("sonarAgent.overviewView.focus");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("sonarAgent.resetConnection", async () => {
+      const confirm = await vscode.window.showWarningMessage(
+        "Are you sure you want to disconnect and remove stored SonarQube credentials?",
+        { modal: true },
+        "Disconnect"
+      );
+      if (confirm === "Disconnect") {
+        await projectDetector.deleteToken();
+        await overviewProvider.refresh();
+        vscode.window.showInformationMessage("SonarQube credentials have been removed.");
+      }
+    })
+  );
+}
+
+export function deactivate() {}

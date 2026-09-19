@@ -1,0 +1,114 @@
+{
+  "name": "sonar-agent",
+  "displayName": "Sonar Agent",
+  "description": "SonarQube Overall Code metrics dashboard and AI Agent fix dispatcher",
+  "version": "0.1.0",
+  "publisher": "sonar-agent",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:sonarAgent.overviewView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sonar-agent-container",
+          "title": "Sonar Agent",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "sonar-agent-container": [
+        {
+          "type": "webview",
+          "id": "sonarAgent.overviewView",
+          "name": "Sonar Overview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "sonarAgent.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "sonarAgent.configure",
+        "title": "Configure Connection",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "sonarAgent.resetConnection",
+        "title": "Disconnect & Reset Credentials"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "sonarAgent.refresh",
+          "when": "view == sonarAgent.overviewView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sonarAgent.configure",
+          "when": "view == sonarAgent.overviewView",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Sonar Agent",
+      "properties": {
+        "sonarAgent.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "SonarQube Server URL (e.g. http://localhost:9000)"
+        },
+        "sonarAgent.projectKey": {
+          "type": "string",
+          "default": "",
+          "description": "SonarQube Project Key"
+        },
+        "sonarAgent.defaultAgent": {
+          "type": "string",
+          "default": "copilot",
+          "enum": [
+            "copilot",
+            "antigravity",
+            "codex",
+            "clipboard"
+          ],
+          "enumDescriptions": [
+            "GitHub Copilot Chat",
+            "Antigravity Agent",
+            "Codex Agent",
+            "System Clipboard (Manual paste)"
+          ],
+          "description": "Default target AI coding agent"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.3.1"
+  }
+}

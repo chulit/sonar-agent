@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] VS Code extension project scaffolding configured with TypeScript, esbuild bundling, and package.json manifest.
-- [ ] Activity Bar icon and Sidebar Webview View Container registered and visible in VS Code.
-- [ ] Onboarding view rendered in sidebar with input fields for SonarQube Server URL and User Token.
-- [ ] Submitting credentials validates connectivity against SonarQube API (`/api/system/status` or `/api/authentication/validate`).
-- [ ] Successful connection securely stores the token in `context.secrets` and stores the server URL in workspace settings.
-- [ ] Sidebar transitions from onboarding view to connected view upon successful verification.
-- [ ] Meaningful error messages are displayed if connection fails (e.g. invalid URL or unauthorized 401).
+- [x] VS Code extension project scaffolding configured with TypeScript, esbuild bundling, and package.json manifest.
+- [x] Activity Bar icon and Sidebar Webview View Container registered and visible in VS Code.
+- [x] Onboarding view rendered in sidebar with input fields for SonarQube Server URL and User Token.
+- [x] Submitting credentials validates connectivity against SonarQube API (`/api/system/status` or `/api/authentication/validate`).
+- [x] Successful connection securely stores the token in `context.secrets` and stores the server URL in workspace settings.
+- [x] Sidebar transitions from onboarding view to connected view upon successful verification.
+- [x] Meaningful error messages are displayed if connection fails (e.g. invalid URL or unauthorized 401).
