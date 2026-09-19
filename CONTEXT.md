@@ -43,3 +43,11 @@ _Avoid_: AI, bot, assistant, LLM
 **Fix Prompt**:
 The enriched prompt constructed from the Sonar rule explanation, code context, and line number, dispatched to the Target Agent.
 _Avoid_: Chat query, error message, instruction text
+
+## Security Invariants
+
+- **Zero Token Leakage**: The SonarQube authentication token must NEVER be written to `settings.json`, workspace files, or git. It must reside exclusively in OS-encrypted `vscode.ExtensionContext.secrets`.
+- **No Token in Webview**: The extension host must never transmit user tokens to Webview scripts via `postMessage`.
+- **No Token in AI Prompts**: Fix Prompts dispatched to AI Agents (Copilot, Antigravity, Codex, Clipboard) must strictly exclude tokens, authorization headers, or private credentials.
+- **No Token in URLs**: All API requests must transmit authentication tokens via HTTP `Authorization` headers, never via URL query parameters (which leak in server access logs and proxy logs).
+- **Plaintext Properties Warning**: If `sonar-project.properties` contains plaintext credentials (`sonar.login` or `sonar.token`), the extension must never commit or persist them, and should warn the user.

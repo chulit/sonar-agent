@@ -38,4 +38,9 @@ The codebase is organized around four deep modules:
 
 - **UI Aesthetics**: Replicate SonarQube card hierarchy and badge styling. Always use VS Code theme variables (`var(--vscode-*)`) for base colors and contrast.
 - **Container Queries**: Use `container-type: inline-size` for responsive sidebar reflows instead of viewport media queries.
-- **Secrets**: Persist user tokens exclusively via `vscode.ExtensionContext.secrets`.
+- **Security & Zero Token Leakage**:
+  - Persist user tokens exclusively via `vscode.ExtensionContext.secrets` (OS Keychain).
+  - Never transmit tokens to Webview via `postMessage`.
+  - Never include credentials or tokens in Fix Prompts sent to AI agents.
+  - Never pass tokens in URL query strings (only in `Authorization` headers).
+  - Redact/strip any token strings from error messages and logs.
