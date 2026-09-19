@@ -205,6 +205,8 @@ export class SonarClient {
       "security_rating",
       "code_smells",
       "sqale_rating",
+      "accepted_issues",
+      "wont_fix_issues",
       "coverage",
       "lines_to_cover",
       "duplicated_lines_density",
@@ -246,7 +248,7 @@ export class SonarClient {
         rating: this.parseRating(measureMap.sqale_rating),
       },
       acceptedIssues: {
-        count: 0,
+        count: parseInt(measureMap.accepted_issues || measureMap.wont_fix_issues || "0", 10),
       },
       coverage: {
         percentage: parseFloat(measureMap.coverage || "0"),
@@ -267,17 +269,31 @@ export class SonarClient {
    * Fetches issues list filtered by category/type
    */
   async getIssues(projectKey: string, category?: string): Promise<SonarDetailItem[]> {
-    let typeParam = "BUG,VULNERABILITY,CODE_SMELL";
-    if (category === "reliability") {
-      typeParam = "BUG";
-    } else if (category === "security") {
-      typeParam = "VULNERABILITY";
-    } else if (category === "maintainability") {
-      typeParam = "CODE_SMELL";
+    let url: string;
+    if (category === "accepted") {
+      url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=BUG,VULNERABILITY,CODE_SMELL&issueStatuses=ACCEPTED&ps=100`;
+    } else {
+      let typeParam = "BUG,VULNERABILITY,CODE_SMELL";
+      if (category === "reliability") {
+        typeParam = "BUG";
+      } else if (category === "security") {
+        typeParam = "VULNERABILITY";
+      } else if (category === "maintainability") {
+        typeParam = "CODE_SMELL";
+      }
+      url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=${typeParam}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`;
     }
 
-    const url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=${typeParam}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`;
-    const response = await this.authenticatedFetch(url);
+    let response = await this.authenticatedFetch(url);
+
+    // Fallback for older SonarQube versions using resolutions=WONTFIX
+    if (!response.ok && category === "accepted") {
+      const fallbackUrl = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=BUG,VULNERABILITY,CODE_SMELL&resolutions=WONTFIX&ps=100`;
+      const fallbackResponse = await this.authenticatedFetch(fallbackUrl);
+      if (fallbackResponse.ok) {
+        response = fallbackResponse;
+      }
+    }
 
     if (!response.ok) {
       throw new Error(`Failed to fetch issues: HTTP ${response.status} ${response.statusText}`);
@@ -376,7 +392,7 @@ export class SonarClient {
    * Fetches components with low coverage / uncovered lines
    */
   async getCoverageFiles(projectKey: string): Promise<SonarDetailItem[]> {
-    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=uncovered_lines,coverage&qualifiers=FIL&ps=50`;
+    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=uncovered_lines,coverage&qualifiers=FIL&strategy=leaves&s=metric&metricSort=uncovered_lines&asc=false&ps=100`;
     const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
@@ -419,7 +435,7 @@ export class SonarClient {
    * Fetches components with duplicate code blocks
    */
   async getDuplicationFiles(projectKey: string): Promise<SonarDetailItem[]> {
-    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=duplicated_lines_density,duplicated_blocks&qualifiers=FIL&ps=50`;
+    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=duplicated_lines_density,duplicated_blocks&qualifiers=FIL&strategy=leaves&s=metric&metricSort=duplicated_lines_density&asc=false&ps=100`;
     const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {

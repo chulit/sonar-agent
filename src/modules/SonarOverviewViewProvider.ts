@@ -210,7 +210,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         items = await client.getCoverageFiles(config.projectKey);
       } else if (category === "duplications") {
         items = await client.getDuplicationFiles(config.projectKey);
-      } else if (category === "reliability" || category === "security" || category === "maintainability") {
+      } else if (category === "reliability" || category === "security" || category === "maintainability" || category === "accepted") {
         items = await client.getIssues(config.projectKey, category);
       } else {
         items = await client.getIssues(config.projectKey);
@@ -1288,6 +1288,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const duplicationsLines = document.getElementById("metric-duplications-lines");
     const hotspotsCount = document.getElementById("metric-hotspots-count");
     const badgeHotspots = document.getElementById("badge-hotspots");
+    const acceptedCount = document.getElementById("metric-accepted-count");
 
     let activeCategory = null;
     let currentItems = [];
@@ -1348,6 +1349,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
       hotspotsCount.textContent = overview.securityHotspots.count;
       updateRatingBadge(badgeHotspots, overview.securityHotspots.rating);
+
+      if (acceptedCount && overview.acceptedIssues) {
+        acceptedCount.textContent = formatNumber(overview.acceptedIssues.count);
+      }
     }
 
     function renderIssues(items, category) {
@@ -1356,7 +1361,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       updateBatchBar();
 
       issuesSection.classList.remove("hidden");
-      issuesListTitle.textContent = category.toUpperCase() + " ISSUES";
+      const categoryTitles = {
+        duplications: "DUPLICATION FILES",
+        coverage: "COVERAGE FILES",
+        hotspots: "SECURITY HOTSPOTS",
+        reliability: "RELIABILITY ISSUES",
+        security: "SECURITY ISSUES",
+        maintainability: "MAINTAINABILITY ISSUES",
+        accepted: "ACCEPTED ISSUES",
+      };
+      issuesListTitle.textContent = categoryTitles[category] || (category.toUpperCase() + " ISSUES");
       issuesListCount.textContent = items.length + " items";
       issuesContainer.innerHTML = "";
 
@@ -1489,7 +1503,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     document.querySelectorAll(".metric-card").forEach((card) => {
       card.addEventListener("click", () => {
         const cat = card.dataset.category;
-        if (!cat || cat === "accepted") return;
+        if (!cat) return;
 
         document.querySelectorAll(".metric-card").forEach((c) => c.classList.remove("active"));
         card.classList.add("active");
@@ -1498,7 +1512,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         issuesContainer.innerHTML = "";
         issuesLoading.classList.remove("hidden");
         issuesSection.classList.remove("hidden");
-        issuesListTitle.textContent = cat.toUpperCase();
+        const categoryTitles = {
+          duplications: "DUPLICATION FILES",
+          coverage: "COVERAGE FILES",
+          hotspots: "SECURITY HOTSPOTS",
+          reliability: "RELIABILITY ISSUES",
+          security: "SECURITY ISSUES",
+          maintainability: "MAINTAINABILITY ISSUES",
+          accepted: "ACCEPTED ISSUES",
+        };
+        issuesListTitle.textContent = categoryTitles[cat] || (cat.toUpperCase() + " ISSUES");
 
         vscode.postMessage({ command: "fetchDetails", category: cat });
       });

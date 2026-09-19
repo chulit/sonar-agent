@@ -108,6 +108,7 @@ describe("SonarClient - Connection Verification", () => {
           { metric: "reliability_rating", value: "3.0" },
           { metric: "code_smells", value: "27" },
           { metric: "sqale_rating", value: "1.0" },
+          { metric: "accepted_issues", value: "5" },
           { metric: "coverage", value: "77.3" },
           { metric: "lines_to_cover", value: "22000" },
           { metric: "duplicated_lines_density", value: "3.2" },
@@ -134,6 +135,7 @@ describe("SonarClient - Connection Verification", () => {
     expect(overview.security).toEqual({ count: 0, rating: "A" });
     expect(overview.reliability).toEqual({ count: 2, rating: "C" });
     expect(overview.maintainability).toEqual({ count: 27, rating: "A" });
+    expect(overview.acceptedIssues).toEqual({ count: 5 });
     expect(overview.coverage).toEqual({ percentage: 77.3, linesToCover: 22000 });
     expect(overview.duplications).toEqual({ percentage: 3.2, duplicatedLines: 86000 });
     expect(overview.securityHotspots).toEqual({ count: 0, rating: "A" });
@@ -183,6 +185,48 @@ describe("SonarClient - Connection Verification", () => {
     );
   });
 
+  it("should fetch accepted issues using issueStatuses=ACCEPTED", async () => {
+    const mockIssuesResponse = {
+      issues: [
+        {
+          key: "ISSUE-ACC-1",
+          rule: "typescript:S1186",
+          severity: "MINOR",
+          type: "CODE_SMELL",
+          status: "ACCEPTED",
+          component: "my-project:src/legacy.ts",
+          line: 42,
+          message: "Empty function should not be used",
+          effort: "2min",
+          tags: ["bad-practice"],
+          creationDate: "2026-09-10T10:00:00+0000",
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockIssuesResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: "http://localhost:9000",
+      token: "valid-token",
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const items = await client.getIssues("my-project", "accepted");
+
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe("ISSUE-ACC-1");
+    expect(items[0].status).toBe("ACCEPTED");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/issueStatuses=ACCEPTED|resolutions=WONTFIX/),
+      expect.anything()
+    );
+  });
+
   it("should fetch coverage files from component_tree sorted by uncovered lines", async () => {
     const mockTreeResponse = {
       components: [
@@ -212,13 +256,17 @@ describe("SonarClient - Connection Verification", () => {
 
     const files = await client.getCoverageFiles("my-project");
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("s=metric&metricSort=uncovered_lines&asc=false"),
+      expect.anything()
+    );
     expect(files).toHaveLength(1);
     expect(files[0].filePath).toBe("src/service.ts");
     expect(files[0].type).toBe("COVERAGE");
     expect(files[0].message).toContain("32 uncovered lines (40% coverage)");
   });
 
-  it("should fetch duplication files from component_tree", async () => {
+  it("should fetch duplication files from component_tree sorted by duplicated lines density", async () => {
     const mockTreeResponse = {
       components: [
         {
@@ -247,6 +295,10 @@ describe("SonarClient - Connection Verification", () => {
 
     const files = await client.getDuplicationFiles("my-project");
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("s=metric&metricSort=duplicated_lines_density&asc=false"),
+      expect.anything()
+    );
     expect(files).toHaveLength(1);
     expect(files[0].filePath).toBe("src/duplicate.ts");
     expect(files[0].type).toBe("DUPLICATION");
