@@ -136,69 +136,69 @@ export class AgentDispatcher {
     const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
 
     if (item.type === "COVERAGE") {
-      let prompt = `@workspace Mohon buatkan unit test untuk meningkatkan test coverage pada file berikut:\n\n`;
-      prompt += `### 📍 File Target\n`;
+      let prompt = `@workspace Please generate unit tests to improve test coverage for the following file:\n\n`;
+      prompt += `### 📍 Target File\n`;
       prompt += `- File: \`${item.filePath}\`\n`;
       prompt += `- Status: ${item.message}\n\n`;
 
       if (snippetContext) {
-        prompt += `### 💻 Potongan Kode Lokal (\`${item.filePath}\`)\n`;
+        prompt += `### 💻 Local Code Snippet (\`${item.filePath}\`)\n`;
         prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
       }
 
-      prompt += `### 🎯 Instruksi untuk Agent\n`;
-      prompt += `1. Analisis kode pada file \`${item.filePath}\`.\n`;
-      prompt += `2. Buatkan unit test lengkap untuk meng-cover fungsi, branch, dan baris yang belum teruji.\n`;
-      prompt += `3. Gunakan framework testing yang konsisten dengan project ini.\n`;
+      prompt += `### 🎯 Instructions for Agent\n`;
+      prompt += `1. Analyze the code in \`${item.filePath}\`.\n`;
+      prompt += `2. Generate comprehensive unit tests covering untested functions, branches, and lines.\n`;
+      prompt += `3. Use testing frameworks and conventions consistent with this project.\n`;
       return prompt;
     }
 
     if (item.type === "DUPLICATION") {
-      let prompt = `@workspace Mohon refactor kode duplikat pada file berikut:\n\n`;
-      prompt += `### 📍 File Target\n`;
+      let prompt = `@workspace Please refactor duplicated code in the following file:\n\n`;
+      prompt += `### 📍 Target File\n`;
       prompt += `- File: \`${item.filePath}\`\n`;
       prompt += `- Status: ${item.message}\n\n`;
 
       if (snippetContext) {
-        prompt += `### 💻 Potongan Kode Lokal (\`${item.filePath}\`)\n`;
+        prompt += `### 💻 Local Code Snippet (\`${item.filePath}\`)\n`;
         prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
       }
 
-      prompt += `### 🎯 Instruksi untuk Agent\n`;
-      prompt += `1. Identifikasi blok kode yang berulang/duplikat pada file \`${item.filePath}\`.\n`;
-      prompt += `2. Ekstrak logic yang berulang menjadi helper function, method bersama, atau modul reusable.\n`;
-      prompt += `3. Pastikan tidak mengubah output atau perilaku fungsi yang ada.\n`;
+      prompt += `### 🎯 Instructions for Agent\n`;
+      prompt += `1. Identify repeated/duplicated code blocks in \`${item.filePath}\`.\n`;
+      prompt += `2. Extract repeated logic into a helper function, shared method, or reusable module.\n`;
+      prompt += `3. Ensure existing behavior, inputs, and outputs remain intact without regressions.\n`;
       return prompt;
     }
 
     const rule = await this.getRule(item.ruleKey);
 
-    let prompt = `@workspace Mohon perbaiki SonarQube issue berikut:\n\n`;
-    prompt += `### 📍 Lokasi\n`;
+    let prompt = `@workspace Please fix the following SonarQube issue:\n\n`;
+    prompt += `### 📍 Location\n`;
     prompt += `- File: \`${item.filePath}\`\n`;
     prompt += `- Line: ${item.line || "File level"}\n\n`;
 
-    prompt += `### ⚠️ Detail Masalah\n`;
-    prompt += `- Pesan: "${item.message}"\n`;
-    prompt += `- Tipe: ${item.type} | Severity: ${item.severity}\n`;
+    prompt += `### ⚠️ Issue Details\n`;
+    prompt += `- Message: "${item.message}"\n`;
+    prompt += `- Type: ${item.type} | Severity: ${item.severity}\n`;
     prompt += `- Sonar Rule: \`${rule.key}\` - ${rule.name}\n\n`;
 
-    prompt += `### 📖 Penjelasan Aturan SonarQube\n`;
+    prompt += `### 📖 SonarQube Rule Details\n`;
     prompt += `${rule.cleanDesc}\n`;
     if (rule.recommendation) {
-      prompt += `> Rekomendasi Sonar: ${rule.recommendation}\n`;
+      prompt += `> Sonar Recommendation: ${rule.recommendation}\n`;
     }
     prompt += `\n`;
 
     if (snippetContext) {
-      prompt += `### 💻 Potongan Kode Lokal (\`${item.filePath}\` L${snippetContext.startLine}-L${snippetContext.endLine})\n`;
+      prompt += `### 💻 Local Code Snippet (\`${item.filePath}\` L${snippetContext.startLine}-L${snippetContext.endLine})\n`;
       prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
     }
 
-    prompt += `### 🎯 Instruksi untuk Agent\n`;
-    prompt += `1. Perbaiki issue di atas sesuai aturan SonarQube tanpa merusak fungsionalitas lain.\n`;
-    prompt += `2. Pertahankan gaya penulisan kode yang konsisten dengan codebase.\n`;
-    prompt += `3. Berikan kode perbaikan yang lengkap dan jelaskan perubahannya secara ringkas.\n`;
+    prompt += `### 🎯 Instructions for Agent\n`;
+    prompt += `1. Fix the issue according to the SonarQube rule without breaking existing functionality.\n`;
+    prompt += `2. Maintain consistent code style with the existing codebase.\n`;
+    prompt += `3. Provide the complete fixed code and concisely explain the changes.\n`;
 
     return prompt;
   }
@@ -211,7 +211,7 @@ export class AgentDispatcher {
       return this.assemblePrompt(items[0]);
     }
 
-    let prompt = `@workspace Mohon perbaiki ${items.length} SonarQube issues berikut sekaligus:\n\n`;
+    let prompt = `@workspace Please fix the following ${items.length} SonarQube issues:\n\n`;
 
     // Group items by file path
     const fileGroups = new Map<string, SonarDetailItem[]>();
@@ -230,9 +230,9 @@ export class AgentDispatcher {
         const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
 
         prompt += `### Issue #${idx + 1}: Line ${item.line || "File level"} [${item.severity}] ${rule.name}\n`;
-        prompt += `- Pesan: "${item.message}"\n`;
+        prompt += `- Message: "${item.message}"\n`;
         prompt += `- Rule: \`${rule.key}\`\n`;
-        prompt += `- Panduan: ${rule.cleanDesc}\n`;
+        prompt += `- Guidance: ${rule.cleanDesc}\n`;
 
         if (snippetContext) {
           prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n`;
@@ -241,10 +241,10 @@ export class AgentDispatcher {
       }
     }
 
-    prompt += `### 🎯 Instruksi untuk Agent\n`;
-    prompt += `1. Selesaikan semua issue di atas secara terstruktur per file.\n`;
-    prompt += `2. Pastikan tidak ada regresi dan kode tetap bersih.\n`;
-    prompt += `3. Rangkum perbaikan yang dilakukan untuk setiap issue.\n`;
+    prompt += `### 🎯 Instructions for Agent\n`;
+    prompt += `1. Fix all listed issues sequentially per file.\n`;
+    prompt += `2. Preserve existing behavior and do not break other functionality.\n`;
+    prompt += `3. Explain the applied fixes concisely.\n`;
 
     return prompt;
   }

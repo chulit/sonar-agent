@@ -43,7 +43,7 @@ describe("AgentDispatcher - Enriched Fix Prompt Assembly", () => {
 
     const prompt = await dispatcher.assemblePrompt(sampleItem);
 
-    expect(prompt).toContain("### 📍 Lokasi");
+    expect(prompt).toContain("### 📍 Location");
     expect(prompt).toContain("resources/survey/components/widgets/TugasCardGrid.vue");
     expect(prompt).toContain("Line: 168");
     expect(prompt).toContain('Elements with ARIA roles must use a valid, non-abstract ARIA role. "toolbar" is not a valid role.');
@@ -51,7 +51,7 @@ describe("AgentDispatcher - Enriched Fix Prompt Assembly", () => {
     expect(prompt).toContain("ARIA roles validity");
     expect(prompt).toContain("Elements with ARIA roles must use a valid, non-abstract ARIA role to ensure accessibility.");
     expect(prompt).toContain("168: ---> line 168");
-    expect(prompt).toContain("### 🎯 Instruksi untuk Agent");
+    expect(prompt).toContain("### 🎯 Instructions for Agent");
   });
 
   it("should cache rule documentation to avoid duplicate API requests", async () => {
