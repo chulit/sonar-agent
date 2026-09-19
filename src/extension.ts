@@ -31,7 +31,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('sonarAgent.configure', async () => {
-      await vscode.commands.executeCommand('sonarAgent.overviewView.focus');
+      await overviewProvider.promptConfigureConnection();
     }),
   );
 

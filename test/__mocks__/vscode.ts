@@ -20,6 +20,22 @@ export const commands = {
   registerCommand: () => ({ dispose: () => {} }),
 };
 
+export const languages = {
+  createDiagnosticCollection: () => ({
+    clear: () => {},
+    set: () => {},
+    delete: () => {},
+    dispose: () => {},
+  }),
+  registerCodeActionsProvider: () => ({ dispose: () => {} }),
+};
+
+export enum ProgressLocation {
+  SourceControl = 1,
+  Window = 10,
+  Notification = 15,
+}
+
 export const window = {
   showTextDocument: async () => ({
     selection: {},
@@ -28,6 +44,9 @@ export const window = {
   showWarningMessage: async () => {},
   showErrorMessage: async () => {},
   showInformationMessage: async () => {},
+  showQuickPick: async () => undefined,
+  showInputBox: async () => undefined,
+  withProgress: async (_opts: any, task: any) => task({ report: () => {} }),
 };
 
 export const Uri = {

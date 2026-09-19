@@ -85,7 +85,7 @@ Access these commands via the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 | ----------------------------------------------- | ---------------------------- | ------------------------------------------------------------ |
 | **Sonar Agent: Refresh**                        | `sonarAgent.refresh`         | Re-fetches latest measures and issues from SonarQube         |
 | **Sonar Agent: Select Sonar Project**           | `sonarAgent.selectProject`   | Opens a QuickPick list of projects from the connected server |
-| **Sonar Agent: Configure Connection**           | `sonarAgent.configure`       | Focuses the Sonar Overview sidebar view                      |
+| **Sonar Agent: Configure Connection**           | `sonarAgent.configure`       | Opens interactive connection configuration and settings menu |
 | **Sonar Agent: Disconnect & Reset Credentials** | `sonarAgent.resetConnection` | Disconnects and removes stored SonarQube credentials         |
 
 ---

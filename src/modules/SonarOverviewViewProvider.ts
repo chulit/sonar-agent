@@ -155,6 +155,173 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  public async promptConfigureConnection(): Promise<void> {
+    const config = await this.projectDetector.getConfig();
+    const token = await this.projectDetector.getToken();
+    const isConnected = Boolean(config.serverUrl && token);
+
+    interface ConfigQuickPickItem extends vscode.QuickPickItem {
+      action: 'updateCredentials' | 'selectProject' | 'openSettings' | 'disconnect';
+    }
+
+    const items: ConfigQuickPickItem[] = [
+      {
+        label: '$(link) Update Server URL & Token',
+        description: isConnected ? 'Connected' : 'Not connected',
+        detail: config.serverUrl
+          ? `Server: ${config.serverUrl}`
+          : 'Configure SonarQube host URL and authentication token',
+        action: 'updateCredentials',
+      },
+      {
+        label: '$(folder-active) Select Sonar Project',
+        description: config.projectKey ? 'Active' : 'Not selected',
+        detail: config.projectKey
+          ? `Current project: ${config.projectKey}`
+          : 'Choose an active project on the server',
+        action: 'selectProject',
+      },
+      {
+        label: '$(gear) Open Extension Settings',
+        detail: 'Configure default AI agent and advanced preferences',
+        action: 'openSettings',
+      },
+    ];
+
+    if (isConnected) {
+      items.push({
+        label: '$(debug-disconnect) Disconnect & Reset Credentials',
+        detail: 'Remove stored token from OS Keychain and disconnect',
+        action: 'disconnect',
+      });
+    }
+
+    const selected = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Sonar Agent: Configure Connection & Settings',
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+
+    if (!selected) {
+      return;
+    }
+
+    switch (selected.action) {
+      case 'updateCredentials':
+        await this.promptUpdateCredentials(config.serverUrl);
+        break;
+      case 'selectProject':
+        await this.promptProjectSelection();
+        break;
+      case 'openSettings':
+        await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:sonar-agent');
+        break;
+      case 'disconnect':
+        await vscode.commands.executeCommand('sonarAgent.resetConnection');
+        break;
+    }
+  }
+
+  public async promptUpdateCredentials(initialUrl?: string, initialToken?: string): Promise<void> {
+    let currentUrl =
+      initialUrl || (await this.projectDetector.getConfig()).serverUrl || 'http://localhost:9000';
+    let currentToken = initialToken || '';
+
+    while (true) {
+      const serverUrl = await vscode.window.showInputBox({
+        title: 'SonarQube Connection (1/2)',
+        prompt: 'Enter the SonarQube Server URL',
+        placeHolder: 'http://localhost:9000 or https://sonar.example.com',
+        value: currentUrl,
+        ignoreFocusOut: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return 'Server URL is required';
+          }
+          if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+            return 'Server URL must start with http:// or https://';
+          }
+          try {
+            const parsed = new URL(trimmed);
+            if (!parsed.hostname) {
+              return 'Please enter a valid URL with hostname';
+            }
+          } catch {
+            return 'Please enter a valid URL';
+          }
+          return null;
+        },
+      });
+
+      if (serverUrl === undefined) {
+        return;
+      }
+
+      currentUrl = serverUrl.trim();
+
+      const token = await vscode.window.showInputBox({
+        title: 'SonarQube Connection (2/2)',
+        prompt: 'Enter your SonarQube User Token',
+        placeHolder: 'sqp_...',
+        value: currentToken,
+        password: true,
+        ignoreFocusOut: true,
+        validateInput: (value) => {
+          if (!value.trim()) {
+            return 'User Token is required';
+          }
+          return null;
+        },
+      });
+
+      if (token === undefined) {
+        return;
+      }
+
+      currentToken = token.trim();
+
+      let verificationResult: { ok: boolean; message?: string } = { ok: false };
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Verifying SonarQube connection...',
+          cancellable: false,
+        },
+        async () => {
+          const client = new SonarClient({ serverUrl: currentUrl, token: currentToken });
+          verificationResult = await client.verifyConnection();
+        },
+      );
+
+      if (!verificationResult.ok) {
+        const action = await vscode.window.showErrorMessage(
+          `SonarQube connection verification failed: ${verificationResult.message || 'Unknown error'}`,
+          'Retry',
+          'Cancel',
+        );
+
+        if (action === 'Retry') {
+          continue;
+        }
+        return;
+      }
+
+      await this.projectDetector.setServerUrl(currentUrl);
+      await this.projectDetector.setToken(currentToken);
+
+      vscode.window.showInformationMessage('SonarQube connection successfully verified and saved!');
+
+      const updatedConfig = await this.projectDetector.getConfig();
+      if (!updatedConfig.projectKey) {
+        await this.promptProjectSelection();
+      }
+
+      await this.refresh();
+      return;
+    }
+  }
+
   private async _handleSendToAgent(item: SonarDetailItem, targetAgentId?: string): Promise<void> {
     const config = await this.projectDetector.getConfig();
     const token = await this.projectDetector.getToken();

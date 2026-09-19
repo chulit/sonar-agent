@@ -38,6 +38,8 @@ Developers using SonarQube often struggle with context switching between the web
 21. As a developer, I want a manual Refresh button in the header, so that I can update metrics immediately after re-running Sonar scanner analysis.
 22. As a developer, I want the Target Agent selector to dynamically discover installed AI coding agents (GitHub Copilot, Antigravity, Cline, Roo Code, Continue) rather than showing hardcoded options, so that I only see assistants available in my environment.
 23. As a developer, I want dispatching to an agent without a direct chat-query API to trigger its focus command, open the target file at the issue line, copy the enriched Fix Prompt to the clipboard, and display a helpful toast notification.
+24. As a developer, I want clicking the "Configure Connection" gear button in the sidebar header to open an interactive QuickPick configuration menu, so that I can update my SonarQube Server URL and token with live verification, switch projects, disconnect, or open settings.
+25. As a developer, I want a reactive Filter Bar above the issues list (Severity, Author, File, Rule, Include Test Files) so that I can quickly narrow down issues of interest during drilldown review.
 
 ## Implementation Decisions
 
