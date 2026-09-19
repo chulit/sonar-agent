@@ -1,15 +1,20 @@
 import * as vscode from "vscode";
 import { ProjectDetector } from "./ProjectDetector.js";
-import { SonarClient, SonarOverview } from "./SonarClient.js";
+import { SonarClient, SonarDetailItem, SonarOverview } from "./SonarClient.js";
+import { FileNavigator } from "./FileNavigator.js";
 
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "sonarAgent.overviewView";
   private _view?: vscode.WebviewView;
+  private readonly fileNavigator: FileNavigator;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly projectDetector: ProjectDetector
-  ) {}
+    private readonly projectDetector: ProjectDetector,
+    fileNavigator?: FileNavigator
+  ) {
+    this.fileNavigator = fileNavigator ?? new FileNavigator();
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -48,6 +53,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         }
         case "openProjectPicker": {
           await this.promptProjectSelection();
+          break;
+        }
+        case "fetchDetails": {
+          await this._handleFetchDetails(message.category);
+          break;
+        }
+        case "openFile": {
+          await this.fileNavigator.openFileAtLine(message.filePath, message.line);
           break;
         }
         case "refresh": {
@@ -96,6 +109,42 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       await this.projectDetector.setProjectKey(selected.description);
       await this._syncState();
       vscode.window.showInformationMessage(`Active SonarQube project set to: ${selected.label}`);
+    }
+  }
+
+  private async _handleFetchDetails(category: string): Promise<void> {
+    if (!this._view) return;
+
+    const config = await this.projectDetector.getConfig();
+    const token = await this.projectDetector.getToken();
+    if (!config.serverUrl || !config.projectKey || !token) return;
+
+    this._view.webview.postMessage({ type: "loadingDetails", loading: true });
+
+    try {
+      const client = new SonarClient({ serverUrl: config.serverUrl, token });
+      let items: SonarDetailItem[] = [];
+
+      if (category === "hotspots") {
+        items = await client.getHotspots(config.projectKey);
+      } else if (category === "reliability" || category === "security" || category === "maintainability") {
+        items = await client.getIssues(config.projectKey, category);
+      } else {
+        items = await client.getIssues(config.projectKey);
+      }
+
+      this._view.webview.postMessage({
+        type: "details",
+        category,
+        items,
+      });
+    } catch (err: any) {
+      this._view.webview.postMessage({
+        type: "detailsError",
+        message: err.message || "Failed to load issues.",
+      });
+    } finally {
+      this._view.webview.postMessage({ type: "loadingDetails", loading: false });
     }
   }
 
@@ -302,15 +351,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       border-bottom-color: var(--sonar-blue);
     }
 
-    .tab-badge-fail {
-      background: rgba(212, 51, 63, 0.15);
-      color: var(--sonar-red);
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 10px;
-      font-weight: 600;
-    }
-
     /* Card styling */
     .card {
       background: var(--vscode-editor-background);
@@ -377,9 +417,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-button-secondaryHoverBackground);
     }
 
-    .btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
+    .btn-sm {
+      padding: 3px 8px;
+      font-size: 11px;
     }
 
     .alert {
@@ -437,7 +477,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     .metric-card.active {
       border-color: var(--sonar-blue);
-      box-shadow: 0 0 0 1px var(--sonar-blue);
+      box-shadow: 0 0 0 1.5px var(--sonar-blue);
     }
 
     .metric-info {
@@ -489,30 +529,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       flex-shrink: 0;
     }
 
-    .rating-A {
-      background: rgba(0, 170, 94, 0.15);
-      color: var(--sonar-green);
-    }
-
-    .rating-B {
-      background: rgba(129, 179, 0, 0.15);
-      color: var(--sonar-lime);
-    }
-
-    .rating-C {
-      background: rgba(234, 190, 6, 0.15);
-      color: var(--sonar-yellow);
-    }
-
-    .rating-D {
-      background: rgba(237, 125, 32, 0.15);
-      color: var(--sonar-orange);
-    }
-
-    .rating-E {
-      background: rgba(212, 51, 63, 0.15);
-      color: var(--sonar-red);
-    }
+    .rating-A { background: rgba(0, 170, 94, 0.15); color: var(--sonar-green); }
+    .rating-B { background: rgba(129, 179, 0, 0.15); color: var(--sonar-lime); }
+    .rating-C { background: rgba(234, 190, 6, 0.15); color: var(--sonar-yellow); }
+    .rating-D { background: rgba(237, 125, 32, 0.15); color: var(--sonar-orange); }
+    .rating-E { background: rgba(212, 51, 63, 0.15); color: var(--sonar-red); }
 
     .circle-icon {
       width: 24px;
@@ -554,12 +575,133 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       font-weight: normal;
     }
 
+    /* Issues List Drilldown - Image 2 Style */
+    .issues-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--vscode-descriptionForeground);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .issue-card {
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+      border-radius: 5px;
+      background: var(--vscode-editor-background);
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: border-color 0.15s ease;
+    }
+
+    .issue-card:hover {
+      border-color: var(--sonar-blue);
+    }
+
+    .issue-path {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      word-break: break-all;
+      cursor: pointer;
+    }
+
+    .issue-path:hover {
+      color: var(--sonar-blue);
+      text-decoration: underline;
+    }
+
+    .issue-body {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .issue-checkbox {
+      margin-top: 2px;
+      cursor: pointer;
+    }
+
+    .issue-message {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--vscode-foreground);
+      line-height: 1.35;
+      flex: 1;
+    }
+
+    .issue-badges {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      margin-top: 2px;
+    }
+
+    .badge-tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+    }
+
+    .badge-severity-critical, .badge-severity-blocker {
+      background: rgba(212, 51, 63, 0.18);
+      color: var(--sonar-red);
+      font-weight: 600;
+    }
+
+    .badge-severity-major {
+      background: rgba(237, 125, 32, 0.18);
+      color: var(--sonar-orange);
+      font-weight: 600;
+    }
+
+    .badge-severity-minor {
+      background: rgba(234, 190, 6, 0.18);
+      color: var(--sonar-yellow);
+      font-weight: 600;
+    }
+
+    .issue-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--sonar-border);
+      padding-top: 6px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .issue-footer-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .issue-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
     .loading-overlay {
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 20px 0;
+      padding: 16px 0;
       color: var(--vscode-descriptionForeground);
       font-size: 12px;
     }
@@ -745,6 +887,21 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           <div id="badge-hotspots" class="rating-badge rating-A">A</div>
         </div>
       </div>
+
+      <!-- Issues Drilldown Section -->
+      <div id="issues-section" class="issues-section hidden">
+        <div class="section-title">
+          <span id="issues-list-title">Issues</span>
+          <span id="issues-list-count" class="source-badge">0 items</span>
+        </div>
+
+        <div id="issues-loading" class="loading-overlay hidden">
+          <div class="spinner"></div>
+          <span>Loading issues list...</span>
+        </div>
+
+        <div id="issues-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+      </div>
     </div>
   </div>
 
@@ -758,6 +915,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const plaintextWarning = document.getElementById("plaintext-warning");
     const loadingIndicator = document.getElementById("loading-indicator");
     const metricsGrid = document.getElementById("metrics-grid");
+
+    const issuesSection = document.getElementById("issues-section");
+    const issuesListTitle = document.getElementById("issues-list-title");
+    const issuesListCount = document.getElementById("issues-list-count");
+    const issuesLoading = document.getElementById("issues-loading");
+    const issuesContainer = document.getElementById("issues-container");
 
     const serverUrlInput = document.getElementById("server-url");
     const userTokenInput = document.getElementById("user-token");
@@ -780,6 +943,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const duplicationsLines = document.getElementById("metric-duplications-lines");
     const hotspotsCount = document.getElementById("metric-hotspots-count");
     const badgeHotspots = document.getElementById("badge-hotspots");
+
+    let activeCategory = null;
 
     function showAlert(msg) {
       alertBox.textContent = msg;
@@ -827,6 +992,109 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       updateRatingBadge(badgeHotspots, overview.securityHotspots.rating);
     }
 
+    function renderIssues(items, category) {
+      issuesSection.classList.remove("hidden");
+      issuesListTitle.textContent = category.toUpperCase() + " ISSUES";
+      issuesListCount.textContent = items.length + " items";
+      issuesContainer.innerHTML = "";
+
+      if (items.length === 0) {
+        issuesContainer.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 12px;">No issues found in this category.</div>';
+        return;
+      }
+
+      items.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "issue-card";
+
+        const pathDiv = document.createElement("div");
+        pathDiv.className = "issue-path";
+        pathDiv.textContent = item.filePath;
+        pathDiv.title = "Click to jump to file";
+        pathDiv.addEventListener("click", () => {
+          vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
+        });
+
+        const bodyDiv = document.createElement("div");
+        bodyDiv.className = "issue-body";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "issue-checkbox";
+        checkbox.dataset.issueId = item.id;
+
+        const msgDiv = document.createElement("div");
+        msgDiv.className = "issue-message";
+        msgDiv.textContent = item.message;
+
+        bodyDiv.appendChild(checkbox);
+        bodyDiv.appendChild(msgDiv);
+
+        const badgesDiv = document.createElement("div");
+        badgesDiv.className = "issue-badges";
+
+        const severityBadge = document.createElement("span");
+        severityBadge.className = "badge-tag badge-severity-" + item.severity.toLowerCase();
+        severityBadge.textContent = item.type + " (" + item.severity + ")";
+        badgesDiv.appendChild(severityBadge);
+
+        (item.tags || []).forEach((tag) => {
+          const tagBadge = document.createElement("span");
+          tagBadge.className = "badge-tag";
+          tagBadge.textContent = tag;
+          badgesDiv.appendChild(tagBadge);
+        });
+
+        const footerDiv = document.createElement("div");
+        footerDiv.className = "issue-footer";
+
+        const footerMeta = document.createElement("div");
+        footerMeta.className = "issue-footer-meta";
+        footerMeta.textContent = (item.line ? "L" + item.line : "File level") + (item.effort ? " • " + item.effort : "");
+
+        const actionsDiv = document.createElement("div");
+        actionsDiv.className = "issue-actions";
+
+        const jumpBtn = document.createElement("button");
+        jumpBtn.className = "btn btn-secondary btn-sm";
+        jumpBtn.textContent = "👁 Jump";
+        jumpBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
+        });
+
+        actionsDiv.appendChild(jumpBtn);
+        footerDiv.appendChild(footerMeta);
+        footerDiv.appendChild(actionsDiv);
+
+        card.appendChild(pathDiv);
+        card.appendChild(bodyDiv);
+        card.appendChild(badgesDiv);
+        card.appendChild(footerDiv);
+
+        issuesContainer.appendChild(card);
+      });
+    }
+
+    // Add click listeners to metric cards to trigger drilldown
+    document.querySelectorAll(".metric-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const cat = card.dataset.category;
+        if (!cat || cat === "accepted") return;
+
+        document.querySelectorAll(".metric-card").forEach((c) => c.classList.remove("active"));
+        card.classList.add("active");
+        activeCategory = cat;
+
+        issuesContainer.innerHTML = "";
+        issuesLoading.classList.remove("hidden");
+        issuesSection.classList.remove("hidden");
+        issuesListTitle.textContent = cat.toUpperCase();
+
+        vscode.postMessage({ command: "fetchDetails", category: cat });
+      });
+    });
+
     connectBtn.addEventListener("click", () => {
       clearAlert();
       const serverUrl = serverUrlInput.value.trim();
@@ -851,6 +1119,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     headerRefreshBtn.addEventListener("click", () => {
       vscode.postMessage({ command: "refresh" });
+      if (activeCategory) {
+        vscode.postMessage({ command: "fetchDetails", category: activeCategory });
+      }
     });
 
     headerDisconnectBtn.addEventListener("click", () => {
@@ -866,6 +1137,18 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           } else {
             loadingIndicator.classList.add("hidden");
           }
+          break;
+        }
+        case "loadingDetails": {
+          if (message.loading) {
+            issuesLoading.classList.remove("hidden");
+          } else {
+            issuesLoading.classList.add("hidden");
+          }
+          break;
+        }
+        case "details": {
+          renderIssues(message.items || [], message.category);
           break;
         }
         case "state": {
@@ -887,7 +1170,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
               detectedBadge.classList.add("hidden");
             }
 
-            // Populate projects dropdown
             projectDropdown.innerHTML = "";
             const projects = message.projects || [];
             if (projects.length === 0) {
@@ -938,7 +1220,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    // Notify extension host that webview is loaded
     vscode.postMessage({ command: "init" });
   </script>
 </body>

@@ -1,4 +1,4 @@
-"use strict";var k=Object.create;var u=Object.defineProperty;var j=Object.getOwnPropertyDescriptor;var C=Object.getOwnPropertyNames;var P=Object.getPrototypeOf,S=Object.prototype.hasOwnProperty;var B=(o,e)=>{for(var t in e)u(o,t,{get:e[t],enumerable:!0})},y=(o,e,t,i)=>{if(e&&typeof e=="object"||typeof e=="function")for(let r of C(e))!S.call(o,r)&&r!==t&&u(o,r,{get:()=>e[r],enumerable:!(i=j(e,r))||i.enumerable});return o};var m=(o,e,t)=>(t=o!=null?k(P(o)):{},y(e||!o||!o.__esModule?u(t,"default",{value:o,enumerable:!0}):t,o)),E=o=>y(u({},"__esModule",{value:!0}),o);var F={};B(F,{activate:()=>T,deactivate:()=>I});module.exports=E(F);var c=m(require("vscode"));var w=m(require("node:path")),x=m(require("node:fs/promises")),f="sonarAgent.token",b=class o{secrets;config;workspaceRoot;readFileFn;constructor(e){this.secrets=e.secretStorage,this.config=e.workspaceConfig,this.workspaceRoot=e.workspaceRoot,this.readFileFn=e.readFileFn??(t=>x.readFile(t,"utf-8"))}static parseProperties(e){let t=e.split(/\r?\n/),i,r,s=!1;for(let n of t){let a=n.trim();if(!a||a.startsWith("#")||a.startsWith(";"))continue;let p=a.indexOf("=");if(p===-1)continue;let g=a.slice(0,p).trim(),h=a.slice(p+1).trim();g==="sonar.projectKey"?i=h:g==="sonar.host.url"?r=h:(g==="sonar.login"||g==="sonar.password"||g==="sonar.token")&&(s=!0)}return{projectKey:i,serverUrl:r,hasPlaintextCredentials:s}}async getToken(){return this.secrets.get(f)}async setToken(e){await this.secrets.store(f,e)}async deleteToken(){await this.secrets.delete(f)}async setServerUrl(e){await this.config.update("serverUrl",e,!0)}async setProjectKey(e){await this.config.update("projectKey",e,!0)}async detectWorkspaceProperties(){if(!this.workspaceRoot)return null;let e=w.join(this.workspaceRoot,"sonar-project.properties");try{let t=await this.readFileFn(e);return o.parseProperties(t)}catch{return null}}async getConfig(){let e=this.config.get("serverUrl",""),t=this.config.get("projectKey",""),i=!1,r=!1,s=await this.detectWorkspaceProperties();s&&(s.projectKey&&(t=s.projectKey,i=!0),!e&&s.serverUrl&&(e=s.serverUrl),s.hasPlaintextCredentials&&(r=!0));let n=await this.getToken();return{serverUrl:e,projectKey:t,hasToken:!!(n&&n.trim().length>0),detectedFromProperties:i,hasPlaintextCredentialsWarning:r}}};var d=m(require("vscode"));var l=class{serverUrl;token;fetchFn;constructor(e){this.serverUrl=e.serverUrl.replace(/\/+$/,""),this.token=e.token,this.fetchFn=e.fetchFn??globalThis.fetch}getAuthHeader(){return this.token?{Authorization:`Basic ${Buffer.from(`${this.token}:`).toString("base64")}`}:{}}parseRating(e){let t=typeof e=="number"?e:parseFloat(String(e||"1.0"));return t<=1?"A":t<=2?"B":t<=3?"C":t<=4?"D":"E"}async verifyConnection(){try{let e=`${this.serverUrl}/api/authentication/validate`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(t.status===401||t.status===403)return{ok:!1,message:`Authentication failed (HTTP ${t.status}). Please verify your token.`};if(!t.ok)return{ok:!1,message:`Server returned HTTP ${t.status}: ${t.statusText}`};let i=await t.json();return i&&i.valid===!0?{ok:!0}:{ok:!1,message:"Invalid credentials: SonarQube reported token as invalid."}}catch(e){return{ok:!1,message:`Cannot reach SonarQube server at ${this.serverUrl}: ${e.message||String(e)}`}}}async fetchProjects(){try{let e=`${this.serverUrl}/api/projects/search?ps=100`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!t.ok)throw new Error(`HTTP ${t.status}: ${t.statusText}`);return((await t.json()).components||[]).map(r=>({key:r.key,name:r.name||r.key}))}catch(e){return console.error("Failed to fetch SonarQube projects:",e.message),[]}}async getOverview(e){let t=["bugs","reliability_rating","vulnerabilities","security_rating","code_smells","sqale_rating","coverage","lines_to_cover","duplicated_lines_density","duplicated_lines","security_hotspots"].join(","),i=`${this.serverUrl}/api/measures/component?component=${encodeURIComponent(e)}&metricKeys=${t}`,r=await this.fetchFn(i,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!r.ok)throw new Error(`Failed to fetch measures: HTTP ${r.status} ${r.statusText}`);let s=await r.json(),n={};for(let a of s.component?.measures||[])a.value!==void 0&&(n[a.metric]=a.value);return{security:{count:parseInt(n.vulnerabilities||"0",10),rating:this.parseRating(n.security_rating)},reliability:{count:parseInt(n.bugs||"0",10),rating:this.parseRating(n.reliability_rating)},maintainability:{count:parseInt(n.code_smells||"0",10),rating:this.parseRating(n.sqale_rating)},acceptedIssues:{count:0},coverage:{percentage:parseFloat(n.coverage||"0"),linesToCover:parseInt(n.lines_to_cover||"0",10)},duplications:{percentage:parseFloat(n.duplicated_lines_density||"0"),duplicatedLines:parseInt(n.duplicated_lines||"0",10)},securityHotspots:{count:parseInt(n.security_hotspots||"0",10),rating:"A"}}}};var v=class{constructor(e,t){this.extensionUri=e;this.projectDetector=t}static viewType="sonarAgent.overviewView";_view;resolveWebviewView(e,t,i){this._view=e,e.webview.options={enableScripts:!0,localResourceRoots:[this.extensionUri]},e.webview.html=this._getHtmlForWebview(e.webview),e.webview.onDidReceiveMessage(async r=>{switch(r.command){case"init":{await this._syncState();break}case"connect":{await this._handleConnect(r.serverUrl,r.token);break}case"disconnect":{await this._handleDisconnect();break}case"selectProject":{r.projectKey&&(await this.projectDetector.setProjectKey(r.projectKey),await this._syncState());break}case"openProjectPicker":{await this.promptProjectSelection();break}case"refresh":{await this._syncState();break}}})}async refresh(){this._view&&await this._syncState()}async promptProjectSelection(){let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(!e.serverUrl||!t){d.window.showWarningMessage("Please connect to SonarQube first.");return}let r=await new l({serverUrl:e.serverUrl,token:t}).fetchProjects();if(r.length===0){d.window.showInformationMessage("No projects found on the SonarQube server.");return}let s=r.map(a=>({label:a.name,description:a.key,detail:a.key===e.projectKey?"(Currently selected)":void 0})),n=await d.window.showQuickPick(s,{placeHolder:"Select a SonarQube project for this workspace",matchOnDescription:!0});n&&n.description&&(await this.projectDetector.setProjectKey(n.description),await this._syncState(),d.window.showInformationMessage(`Active SonarQube project set to: ${n.label}`))}async _syncState(){if(!this._view)return;let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(e.serverUrl&&e.hasToken&&t){this._view.webview.postMessage({type:"loading",loading:!0});let i=new l({serverUrl:e.serverUrl,token:t}),r=await i.fetchProjects(),s=e.projectKey;!s&&r.length>0&&(s=r[0].key,await this.projectDetector.setProjectKey(s));let n=null,a;if(s)try{n=await i.getOverview(s)}catch(p){a=p.message||"Failed to fetch project measures."}this._view.webview.postMessage({type:"state",state:"connected",serverUrl:e.serverUrl,projectKey:s,detectedFromProperties:e.detectedFromProperties??!1,hasPlaintextWarning:e.hasPlaintextCredentialsWarning??!1,projects:r,overview:n,overviewError:a}),this._view.webview.postMessage({type:"loading",loading:!1})}else this._view.webview.postMessage({type:"state",state:"onboarding",serverUrl:e.serverUrl||"http://localhost:9000"})}async _handleConnect(e,t){if(!e||!t){this._view?.webview.postMessage({type:"error",message:"Server URL and User Token are required."});return}this._view?.webview.postMessage({type:"connecting"});let r=await new l({serverUrl:e,token:t}).verifyConnection();if(!r.ok){this._view?.webview.postMessage({type:"error",message:r.message||"Connection verification failed."});return}await this.projectDetector.setServerUrl(e),await this.projectDetector.setToken(t),d.window.showInformationMessage("SonarQube connection successfully verified!"),await this._syncState()}async _handleDisconnect(){await this.projectDetector.deleteToken(),d.window.showInformationMessage("Disconnected from SonarQube."),await this._syncState()}_getHtmlForWebview(e){return`<!DOCTYPE html>
+"use strict";var E=Object.create;var b=Object.defineProperty;var D=Object.getOwnPropertyDescriptor;var S=Object.getOwnPropertyNames;var I=Object.getPrototypeOf,F=Object.prototype.hasOwnProperty;var B=(a,e)=>{for(var t in e)b(a,t,{get:e[t],enumerable:!0})},k=(a,e,t,s)=>{if(e&&typeof e=="object"||typeof e=="function")for(let r of S(e))!F.call(a,r)&&r!==t&&b(a,r,{get:()=>e[r],enumerable:!(s=D(e,r))||s.enumerable});return a};var p=(a,e,t)=>(t=a!=null?E(I(a)):{},k(e||!a||!a.__esModule?b(t,"default",{value:a,enumerable:!0}):t,a)),T=a=>k(b({},"__esModule",{value:!0}),a);var U={};B(U,{activate:()=>L,deactivate:()=>R});module.exports=T(U);var d=p(require("vscode"));var C=p(require("node:path")),P=p(require("node:fs/promises")),w="sonarAgent.token",h=class a{secrets;config;workspaceRoot;readFileFn;constructor(e){this.secrets=e.secretStorage,this.config=e.workspaceConfig,this.workspaceRoot=e.workspaceRoot,this.readFileFn=e.readFileFn??(t=>P.readFile(t,"utf-8"))}static parseProperties(e){let t=e.split(/\r?\n/),s,r,i=!1;for(let n of t){let o=n.trim();if(!o||o.startsWith("#")||o.startsWith(";"))continue;let l=o.indexOf("=");if(l===-1)continue;let m=o.slice(0,l).trim(),x=o.slice(l+1).trim();m==="sonar.projectKey"?s=x:m==="sonar.host.url"?r=x:(m==="sonar.login"||m==="sonar.password"||m==="sonar.token")&&(i=!0)}return{projectKey:s,serverUrl:r,hasPlaintextCredentials:i}}async getToken(){return this.secrets.get(w)}async setToken(e){await this.secrets.store(w,e)}async deleteToken(){await this.secrets.delete(w)}async setServerUrl(e){await this.config.update("serverUrl",e,!0)}async setProjectKey(e){await this.config.update("projectKey",e,!0)}async detectWorkspaceProperties(){if(!this.workspaceRoot)return null;let e=C.join(this.workspaceRoot,"sonar-project.properties");try{let t=await this.readFileFn(e);return a.parseProperties(t)}catch{return null}}async getConfig(){let e=this.config.get("serverUrl",""),t=this.config.get("projectKey",""),s=!1,r=!1,i=await this.detectWorkspaceProperties();i&&(i.projectKey&&(t=i.projectKey,s=!0),!e&&i.serverUrl&&(e=i.serverUrl),i.hasPlaintextCredentials&&(r=!0));let n=await this.getToken();return{serverUrl:e,projectKey:t,hasToken:!!(n&&n.trim().length>0),detectedFromProperties:s,hasPlaintextCredentialsWarning:r}}};var u=p(require("vscode"));var g=class{serverUrl;token;fetchFn;constructor(e){this.serverUrl=e.serverUrl.replace(/\/+$/,""),this.token=e.token,this.fetchFn=e.fetchFn??globalThis.fetch}getAuthHeader(){return this.token?{Authorization:`Basic ${Buffer.from(`${this.token}:`).toString("base64")}`}:{}}parseRating(e){let t=typeof e=="number"?e:parseFloat(String(e||"1.0"));return t<=1?"A":t<=2?"B":t<=3?"C":t<=4?"D":"E"}extractFilePath(e){let t=e.indexOf(":");return t!==-1?e.slice(t+1):e}async verifyConnection(){try{let e=`${this.serverUrl}/api/authentication/validate`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(t.status===401||t.status===403)return{ok:!1,message:`Authentication failed (HTTP ${t.status}). Please verify your token.`};if(!t.ok)return{ok:!1,message:`Server returned HTTP ${t.status}: ${t.statusText}`};let s=await t.json();return s&&s.valid===!0?{ok:!0}:{ok:!1,message:"Invalid credentials: SonarQube reported token as invalid."}}catch(e){return{ok:!1,message:`Cannot reach SonarQube server at ${this.serverUrl}: ${e.message||String(e)}`}}}async fetchProjects(){try{let e=`${this.serverUrl}/api/projects/search?ps=100`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!t.ok)throw new Error(`HTTP ${t.status}: ${t.statusText}`);return((await t.json()).components||[]).map(r=>({key:r.key,name:r.name||r.key}))}catch(e){return console.error("Failed to fetch SonarQube projects:",e.message),[]}}async getOverview(e){let t=["bugs","reliability_rating","vulnerabilities","security_rating","code_smells","sqale_rating","coverage","lines_to_cover","duplicated_lines_density","duplicated_lines","security_hotspots"].join(","),s=`${this.serverUrl}/api/measures/component?component=${encodeURIComponent(e)}&metricKeys=${t}`,r=await this.fetchFn(s,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!r.ok)throw new Error(`Failed to fetch measures: HTTP ${r.status} ${r.statusText}`);let i=await r.json(),n={};for(let o of i.component?.measures||[])o.value!==void 0&&(n[o.metric]=o.value);return{security:{count:parseInt(n.vulnerabilities||"0",10),rating:this.parseRating(n.security_rating)},reliability:{count:parseInt(n.bugs||"0",10),rating:this.parseRating(n.reliability_rating)},maintainability:{count:parseInt(n.code_smells||"0",10),rating:this.parseRating(n.sqale_rating)},acceptedIssues:{count:0},coverage:{percentage:parseFloat(n.coverage||"0"),linesToCover:parseInt(n.lines_to_cover||"0",10)},duplications:{percentage:parseFloat(n.duplicated_lines_density||"0"),duplicatedLines:parseInt(n.duplicated_lines||"0",10)},securityHotspots:{count:parseInt(n.security_hotspots||"0",10),rating:"A"}}}async getIssues(e,t){let s="BUG,VULNERABILITY,CODE_SMELL";t==="reliability"?s="BUG":t==="security"?s="VULNERABILITY":t==="maintainability"&&(s="CODE_SMELL");let r=`${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(e)}&types=${s}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`,i=await this.fetchFn(r,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!i.ok)throw new Error(`Failed to fetch issues: HTTP ${i.status} ${i.statusText}`);return((await i.json()).issues||[]).map(o=>({id:o.key,ruleKey:o.rule||"",message:o.message||"",component:o.component||"",filePath:this.extractFilePath(o.component||""),line:o.line,type:o.type||"CODE_SMELL",severity:o.severity||"MAJOR",status:o.status||"OPEN",effort:o.effort,tags:o.tags||[],creationDate:o.creationDate||""}))}async getHotspots(e){let t=`${this.serverUrl}/api/hotspots/search?projectKey=${encodeURIComponent(e)}&status=TO_REVIEW&ps=100`,s=await this.fetchFn(t,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!s.ok)throw new Error(`Failed to fetch hotspots: HTTP ${s.status} ${s.statusText}`);return((await s.json()).hotspots||[]).map(i=>({id:i.key,ruleKey:i.ruleKey||"",message:i.message||"",component:i.component||"",filePath:this.extractFilePath(i.component||""),line:i.line,type:"HOTSPOT",severity:i.vulnerabilityProbability==="HIGH"?"CRITICAL":"MAJOR",status:i.status||"TO_REVIEW",tags:["security-hotspot"],creationDate:i.creationDate||""}))}};var v=p(require("node:path")),j=p(require("node:fs/promises")),c=p(require("vscode")),y=class{workspaceRoot;fileExistsFn;findFilesFn;constructor(e){this.workspaceRoot=e?.workspaceRoot??c.workspace.workspaceFolders?.[0]?.uri.fsPath,this.fileExistsFn=e?.fileExistsFn??(async t=>{try{return await j.stat(t),!0}catch{return!1}}),this.findFilesFn=e?.findFilesFn??(async t=>(await c.workspace.findFiles(t,"**/node_modules/**",5)).map(r=>r.fsPath))}async resolveFilePath(e){if(!this.workspaceRoot)return null;let t=v.isAbsolute(e)?e:v.join(this.workspaceRoot,e);if(await this.fileExistsFn(t))return t;let s=v.basename(e);if(s){let r=await this.findFilesFn(`**/${s}`);if(r&&r.length>0)return r[0]}return null}async openFileAtLine(e,t){let s=await this.resolveFilePath(e);if(!s)return c.window.showWarningMessage(`Could not find file locally: ${e}`),!1;try{let r=c.Uri.file(s),i=await c.workspace.openTextDocument(r),n=await c.window.showTextDocument(i,{preview:!1});if(t!==void 0&&t>0){let o=t-1,l=new c.Position(o,0);n.selection=new c.Selection(l,l),n.revealRange(new c.Range(l,l),c.TextEditorRevealType.InCenter)}return!0}catch(r){return c.window.showErrorMessage(`Failed to open file: ${r.message||String(r)}`),!1}}};var f=class{constructor(e,t,s){this.extensionUri=e;this.projectDetector=t;this.fileNavigator=s??new y}static viewType="sonarAgent.overviewView";_view;fileNavigator;resolveWebviewView(e,t,s){this._view=e,e.webview.options={enableScripts:!0,localResourceRoots:[this.extensionUri]},e.webview.html=this._getHtmlForWebview(e.webview),e.webview.onDidReceiveMessage(async r=>{switch(r.command){case"init":{await this._syncState();break}case"connect":{await this._handleConnect(r.serverUrl,r.token);break}case"disconnect":{await this._handleDisconnect();break}case"selectProject":{r.projectKey&&(await this.projectDetector.setProjectKey(r.projectKey),await this._syncState());break}case"openProjectPicker":{await this.promptProjectSelection();break}case"fetchDetails":{await this._handleFetchDetails(r.category);break}case"openFile":{await this.fileNavigator.openFileAtLine(r.filePath,r.line);break}case"refresh":{await this._syncState();break}}})}async refresh(){this._view&&await this._syncState()}async promptProjectSelection(){let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(!e.serverUrl||!t){u.window.showWarningMessage("Please connect to SonarQube first.");return}let r=await new g({serverUrl:e.serverUrl,token:t}).fetchProjects();if(r.length===0){u.window.showInformationMessage("No projects found on the SonarQube server.");return}let i=r.map(o=>({label:o.name,description:o.key,detail:o.key===e.projectKey?"(Currently selected)":void 0})),n=await u.window.showQuickPick(i,{placeHolder:"Select a SonarQube project for this workspace",matchOnDescription:!0});n&&n.description&&(await this.projectDetector.setProjectKey(n.description),await this._syncState(),u.window.showInformationMessage(`Active SonarQube project set to: ${n.label}`))}async _handleFetchDetails(e){if(!this._view)return;let t=await this.projectDetector.getConfig(),s=await this.projectDetector.getToken();if(!(!t.serverUrl||!t.projectKey||!s)){this._view.webview.postMessage({type:"loadingDetails",loading:!0});try{let r=new g({serverUrl:t.serverUrl,token:s}),i=[];e==="hotspots"?i=await r.getHotspots(t.projectKey):e==="reliability"||e==="security"||e==="maintainability"?i=await r.getIssues(t.projectKey,e):i=await r.getIssues(t.projectKey),this._view.webview.postMessage({type:"details",category:e,items:i})}catch(r){this._view.webview.postMessage({type:"detailsError",message:r.message||"Failed to load issues."})}finally{this._view.webview.postMessage({type:"loadingDetails",loading:!1})}}}async _syncState(){if(!this._view)return;let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(e.serverUrl&&e.hasToken&&t){this._view.webview.postMessage({type:"loading",loading:!0});let s=new g({serverUrl:e.serverUrl,token:t}),r=await s.fetchProjects(),i=e.projectKey;!i&&r.length>0&&(i=r[0].key,await this.projectDetector.setProjectKey(i));let n=null,o;if(i)try{n=await s.getOverview(i)}catch(l){o=l.message||"Failed to fetch project measures."}this._view.webview.postMessage({type:"state",state:"connected",serverUrl:e.serverUrl,projectKey:i,detectedFromProperties:e.detectedFromProperties??!1,hasPlaintextWarning:e.hasPlaintextCredentialsWarning??!1,projects:r,overview:n,overviewError:o}),this._view.webview.postMessage({type:"loading",loading:!1})}else this._view.webview.postMessage({type:"state",state:"onboarding",serverUrl:e.serverUrl||"http://localhost:9000"})}async _handleConnect(e,t){if(!e||!t){this._view?.webview.postMessage({type:"error",message:"Server URL and User Token are required."});return}this._view?.webview.postMessage({type:"connecting"});let r=await new g({serverUrl:e,token:t}).verifyConnection();if(!r.ok){this._view?.webview.postMessage({type:"error",message:r.message||"Connection verification failed."});return}await this.projectDetector.setServerUrl(e),await this.projectDetector.setToken(t),u.window.showInformationMessage("SonarQube connection successfully verified!"),await this._syncState()}async _handleDisconnect(){await this.projectDetector.deleteToken(),u.window.showInformationMessage("Disconnected from SonarQube."),await this._syncState()}_getHtmlForWebview(e){return`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -111,15 +111,6 @@
       border-bottom-color: var(--sonar-blue);
     }
 
-    .tab-badge-fail {
-      background: rgba(212, 51, 63, 0.15);
-      color: var(--sonar-red);
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 10px;
-      font-weight: 600;
-    }
-
     /* Card styling */
     .card {
       background: var(--vscode-editor-background);
@@ -186,9 +177,9 @@
       background: var(--vscode-button-secondaryHoverBackground);
     }
 
-    .btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
+    .btn-sm {
+      padding: 3px 8px;
+      font-size: 11px;
     }
 
     .alert {
@@ -246,7 +237,7 @@
 
     .metric-card.active {
       border-color: var(--sonar-blue);
-      box-shadow: 0 0 0 1px var(--sonar-blue);
+      box-shadow: 0 0 0 1.5px var(--sonar-blue);
     }
 
     .metric-info {
@@ -298,30 +289,11 @@
       flex-shrink: 0;
     }
 
-    .rating-A {
-      background: rgba(0, 170, 94, 0.15);
-      color: var(--sonar-green);
-    }
-
-    .rating-B {
-      background: rgba(129, 179, 0, 0.15);
-      color: var(--sonar-lime);
-    }
-
-    .rating-C {
-      background: rgba(234, 190, 6, 0.15);
-      color: var(--sonar-yellow);
-    }
-
-    .rating-D {
-      background: rgba(237, 125, 32, 0.15);
-      color: var(--sonar-orange);
-    }
-
-    .rating-E {
-      background: rgba(212, 51, 63, 0.15);
-      color: var(--sonar-red);
-    }
+    .rating-A { background: rgba(0, 170, 94, 0.15); color: var(--sonar-green); }
+    .rating-B { background: rgba(129, 179, 0, 0.15); color: var(--sonar-lime); }
+    .rating-C { background: rgba(234, 190, 6, 0.15); color: var(--sonar-yellow); }
+    .rating-D { background: rgba(237, 125, 32, 0.15); color: var(--sonar-orange); }
+    .rating-E { background: rgba(212, 51, 63, 0.15); color: var(--sonar-red); }
 
     .circle-icon {
       width: 24px;
@@ -363,12 +335,133 @@
       font-weight: normal;
     }
 
+    /* Issues List Drilldown - Image 2 Style */
+    .issues-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--vscode-descriptionForeground);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .issue-card {
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+      border-radius: 5px;
+      background: var(--vscode-editor-background);
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: border-color 0.15s ease;
+    }
+
+    .issue-card:hover {
+      border-color: var(--sonar-blue);
+    }
+
+    .issue-path {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      word-break: break-all;
+      cursor: pointer;
+    }
+
+    .issue-path:hover {
+      color: var(--sonar-blue);
+      text-decoration: underline;
+    }
+
+    .issue-body {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .issue-checkbox {
+      margin-top: 2px;
+      cursor: pointer;
+    }
+
+    .issue-message {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--vscode-foreground);
+      line-height: 1.35;
+      flex: 1;
+    }
+
+    .issue-badges {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      margin-top: 2px;
+    }
+
+    .badge-tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+    }
+
+    .badge-severity-critical, .badge-severity-blocker {
+      background: rgba(212, 51, 63, 0.18);
+      color: var(--sonar-red);
+      font-weight: 600;
+    }
+
+    .badge-severity-major {
+      background: rgba(237, 125, 32, 0.18);
+      color: var(--sonar-orange);
+      font-weight: 600;
+    }
+
+    .badge-severity-minor {
+      background: rgba(234, 190, 6, 0.18);
+      color: var(--sonar-yellow);
+      font-weight: 600;
+    }
+
+    .issue-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--sonar-border);
+      padding-top: 6px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .issue-footer-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .issue-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
     .loading-overlay {
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 20px 0;
+      padding: 16px 0;
       color: var(--vscode-descriptionForeground);
       font-size: 12px;
     }
@@ -554,6 +647,21 @@
           <div id="badge-hotspots" class="rating-badge rating-A">A</div>
         </div>
       </div>
+
+      <!-- Issues Drilldown Section -->
+      <div id="issues-section" class="issues-section hidden">
+        <div class="section-title">
+          <span id="issues-list-title">Issues</span>
+          <span id="issues-list-count" class="source-badge">0 items</span>
+        </div>
+
+        <div id="issues-loading" class="loading-overlay hidden">
+          <div class="spinner"></div>
+          <span>Loading issues list...</span>
+        </div>
+
+        <div id="issues-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+      </div>
     </div>
   </div>
 
@@ -567,6 +675,12 @@
     const plaintextWarning = document.getElementById("plaintext-warning");
     const loadingIndicator = document.getElementById("loading-indicator");
     const metricsGrid = document.getElementById("metrics-grid");
+
+    const issuesSection = document.getElementById("issues-section");
+    const issuesListTitle = document.getElementById("issues-list-title");
+    const issuesListCount = document.getElementById("issues-list-count");
+    const issuesLoading = document.getElementById("issues-loading");
+    const issuesContainer = document.getElementById("issues-container");
 
     const serverUrlInput = document.getElementById("server-url");
     const userTokenInput = document.getElementById("user-token");
@@ -589,6 +703,8 @@
     const duplicationsLines = document.getElementById("metric-duplications-lines");
     const hotspotsCount = document.getElementById("metric-hotspots-count");
     const badgeHotspots = document.getElementById("badge-hotspots");
+
+    let activeCategory = null;
 
     function showAlert(msg) {
       alertBox.textContent = msg;
@@ -636,6 +752,109 @@
       updateRatingBadge(badgeHotspots, overview.securityHotspots.rating);
     }
 
+    function renderIssues(items, category) {
+      issuesSection.classList.remove("hidden");
+      issuesListTitle.textContent = category.toUpperCase() + " ISSUES";
+      issuesListCount.textContent = items.length + " items";
+      issuesContainer.innerHTML = "";
+
+      if (items.length === 0) {
+        issuesContainer.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 12px;">No issues found in this category.</div>';
+        return;
+      }
+
+      items.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "issue-card";
+
+        const pathDiv = document.createElement("div");
+        pathDiv.className = "issue-path";
+        pathDiv.textContent = item.filePath;
+        pathDiv.title = "Click to jump to file";
+        pathDiv.addEventListener("click", () => {
+          vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
+        });
+
+        const bodyDiv = document.createElement("div");
+        bodyDiv.className = "issue-body";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "issue-checkbox";
+        checkbox.dataset.issueId = item.id;
+
+        const msgDiv = document.createElement("div");
+        msgDiv.className = "issue-message";
+        msgDiv.textContent = item.message;
+
+        bodyDiv.appendChild(checkbox);
+        bodyDiv.appendChild(msgDiv);
+
+        const badgesDiv = document.createElement("div");
+        badgesDiv.className = "issue-badges";
+
+        const severityBadge = document.createElement("span");
+        severityBadge.className = "badge-tag badge-severity-" + item.severity.toLowerCase();
+        severityBadge.textContent = item.type + " (" + item.severity + ")";
+        badgesDiv.appendChild(severityBadge);
+
+        (item.tags || []).forEach((tag) => {
+          const tagBadge = document.createElement("span");
+          tagBadge.className = "badge-tag";
+          tagBadge.textContent = tag;
+          badgesDiv.appendChild(tagBadge);
+        });
+
+        const footerDiv = document.createElement("div");
+        footerDiv.className = "issue-footer";
+
+        const footerMeta = document.createElement("div");
+        footerMeta.className = "issue-footer-meta";
+        footerMeta.textContent = (item.line ? "L" + item.line : "File level") + (item.effort ? " \u2022 " + item.effort : "");
+
+        const actionsDiv = document.createElement("div");
+        actionsDiv.className = "issue-actions";
+
+        const jumpBtn = document.createElement("button");
+        jumpBtn.className = "btn btn-secondary btn-sm";
+        jumpBtn.textContent = "\u{1F441} Jump";
+        jumpBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
+        });
+
+        actionsDiv.appendChild(jumpBtn);
+        footerDiv.appendChild(footerMeta);
+        footerDiv.appendChild(actionsDiv);
+
+        card.appendChild(pathDiv);
+        card.appendChild(bodyDiv);
+        card.appendChild(badgesDiv);
+        card.appendChild(footerDiv);
+
+        issuesContainer.appendChild(card);
+      });
+    }
+
+    // Add click listeners to metric cards to trigger drilldown
+    document.querySelectorAll(".metric-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const cat = card.dataset.category;
+        if (!cat || cat === "accepted") return;
+
+        document.querySelectorAll(".metric-card").forEach((c) => c.classList.remove("active"));
+        card.classList.add("active");
+        activeCategory = cat;
+
+        issuesContainer.innerHTML = "";
+        issuesLoading.classList.remove("hidden");
+        issuesSection.classList.remove("hidden");
+        issuesListTitle.textContent = cat.toUpperCase();
+
+        vscode.postMessage({ command: "fetchDetails", category: cat });
+      });
+    });
+
     connectBtn.addEventListener("click", () => {
       clearAlert();
       const serverUrl = serverUrlInput.value.trim();
@@ -660,6 +879,9 @@
 
     headerRefreshBtn.addEventListener("click", () => {
       vscode.postMessage({ command: "refresh" });
+      if (activeCategory) {
+        vscode.postMessage({ command: "fetchDetails", category: activeCategory });
+      }
     });
 
     headerDisconnectBtn.addEventListener("click", () => {
@@ -675,6 +897,18 @@
           } else {
             loadingIndicator.classList.add("hidden");
           }
+          break;
+        }
+        case "loadingDetails": {
+          if (message.loading) {
+            issuesLoading.classList.remove("hidden");
+          } else {
+            issuesLoading.classList.add("hidden");
+          }
+          break;
+        }
+        case "details": {
+          renderIssues(message.items || [], message.category);
           break;
         }
         case "state": {
@@ -696,7 +930,6 @@
               detectedBadge.classList.add("hidden");
             }
 
-            // Populate projects dropdown
             projectDropdown.innerHTML = "";
             const projects = message.projects || [];
             if (projects.length === 0) {
@@ -747,8 +980,7 @@
       }
     });
 
-    // Notify extension host that webview is loaded
     vscode.postMessage({ command: "init" });
   </script>
 </body>
-</html>`}};function T(o){let e=c.workspace.workspaceFolders?.[0]?.uri.fsPath,t=c.workspace.getConfiguration("sonarAgent"),i=new b({secretStorage:o.secrets,workspaceConfig:t,workspaceRoot:e}),r=new v(o.extensionUri,i);o.subscriptions.push(c.window.registerWebviewViewProvider(v.viewType,r)),o.subscriptions.push(c.commands.registerCommand("sonarAgent.refresh",async()=>{await r.refresh()})),o.subscriptions.push(c.commands.registerCommand("sonarAgent.configure",async()=>{await c.commands.executeCommand("sonarAgent.overviewView.focus")})),o.subscriptions.push(c.commands.registerCommand("sonarAgent.selectProject",async()=>{await r.promptProjectSelection()})),o.subscriptions.push(c.commands.registerCommand("sonarAgent.resetConnection",async()=>{await c.window.showWarningMessage("Are you sure you want to disconnect and remove stored SonarQube credentials?",{modal:!0},"Disconnect")==="Disconnect"&&(await i.deleteToken(),await r.refresh(),c.window.showInformationMessage("SonarQube credentials have been removed."))}))}function I(){}0&&(module.exports={activate,deactivate});
+</html>`}};function L(a){let e=d.workspace.workspaceFolders?.[0]?.uri.fsPath,t=d.workspace.getConfiguration("sonarAgent"),s=new h({secretStorage:a.secrets,workspaceConfig:t,workspaceRoot:e}),r=new f(a.extensionUri,s);a.subscriptions.push(d.window.registerWebviewViewProvider(f.viewType,r)),a.subscriptions.push(d.commands.registerCommand("sonarAgent.refresh",async()=>{await r.refresh()})),a.subscriptions.push(d.commands.registerCommand("sonarAgent.configure",async()=>{await d.commands.executeCommand("sonarAgent.overviewView.focus")})),a.subscriptions.push(d.commands.registerCommand("sonarAgent.selectProject",async()=>{await r.promptProjectSelection()})),a.subscriptions.push(d.commands.registerCommand("sonarAgent.resetConnection",async()=>{await d.window.showWarningMessage("Are you sure you want to disconnect and remove stored SonarQube credentials?",{modal:!0},"Disconnect")==="Disconnect"&&(await s.deleteToken(),await r.refresh(),d.window.showInformationMessage("SonarQube credentials have been removed."))}))}function R(){}0&&(module.exports={activate,deactivate});

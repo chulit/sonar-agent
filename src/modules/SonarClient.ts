@@ -21,6 +21,21 @@ export interface SonarOverview {
   securityHotspots: { count: number; rating: SonarRating };
 }
 
+export interface SonarDetailItem {
+  id: string;
+  ruleKey: string;
+  message: string;
+  component: string;
+  filePath: string;
+  line?: number;
+  type: "BUG" | "VULNERABILITY" | "CODE_SMELL" | "HOTSPOT" | "COVERAGE" | "DUPLICATION";
+  severity: "BLOCKER" | "CRITICAL" | "MAJOR" | "MINOR" | "INFO";
+  status: string;
+  effort?: string;
+  tags: string[];
+  creationDate: string;
+}
+
 export class SonarClient {
   private readonly serverUrl: string;
   private readonly token?: string;
@@ -49,6 +64,14 @@ export class SonarClient {
     if (num <= 3.0) return "C";
     if (num <= 4.0) return "D";
     return "E";
+  }
+
+  private extractFilePath(component: string): string {
+    const colonIndex = component.indexOf(":");
+    if (colonIndex !== -1) {
+      return component.slice(colonIndex + 1);
+    }
+    return component;
   }
 
   /**
@@ -198,5 +221,81 @@ export class SonarClient {
         rating: "A",
       },
     };
+  }
+
+  /**
+   * Fetches issues list for a project, optionally filtered by category
+   */
+  async getIssues(projectKey: string, category?: "reliability" | "security" | "maintainability"): Promise<SonarDetailItem[]> {
+    let typeParam = "BUG,VULNERABILITY,CODE_SMELL";
+    if (category === "reliability") {
+      typeParam = "BUG";
+    } else if (category === "security") {
+      typeParam = "VULNERABILITY";
+    } else if (category === "maintainability") {
+      typeParam = "CODE_SMELL";
+    }
+
+    const url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=${typeParam}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`;
+    const response = await this.fetchFn(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...this.getAuthHeader(),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch issues: HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as { issues?: any[] };
+    return (data.issues || []).map((item) => ({
+      id: item.key,
+      ruleKey: item.rule || "",
+      message: item.message || "",
+      component: item.component || "",
+      filePath: this.extractFilePath(item.component || ""),
+      line: item.line,
+      type: item.type || "CODE_SMELL",
+      severity: item.severity || "MAJOR",
+      status: item.status || "OPEN",
+      effort: item.effort,
+      tags: item.tags || [],
+      creationDate: item.creationDate || "",
+    }));
+  }
+
+  /**
+   * Fetches Security Hotspots for a project
+   */
+  async getHotspots(projectKey: string): Promise<SonarDetailItem[]> {
+    const url = `${this.serverUrl}/api/hotspots/search?projectKey=${encodeURIComponent(projectKey)}&status=TO_REVIEW&ps=100`;
+    const response = await this.fetchFn(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...this.getAuthHeader(),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch hotspots: HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as { hotspots?: any[] };
+    return (data.hotspots || []).map((item) => ({
+      id: item.key,
+      ruleKey: item.ruleKey || "",
+      message: item.message || "",
+      component: item.component || "",
+      filePath: this.extractFilePath(item.component || ""),
+      line: item.line,
+      type: "HOTSPOT",
+      severity: (item.vulnerabilityProbability === "HIGH" ? "CRITICAL" : "MAJOR") as any,
+      status: item.status || "TO_REVIEW",
+      tags: ["security-hotspot"],
+      creationDate: item.creationDate || "",
+    }));
   }
 }

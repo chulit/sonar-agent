@@ -138,4 +138,48 @@ describe("SonarClient - Connection Verification", () => {
     expect(overview.duplications).toEqual({ percentage: 3.2, duplicatedLines: 86000 });
     expect(overview.securityHotspots).toEqual({ count: 0, rating: "A" });
   });
+
+  it("should fetch issues and extract clean relative file paths", async () => {
+    const mockIssuesResponse = {
+      issues: [
+        {
+          key: "ISSUE-1",
+          rule: "vue:S123",
+          severity: "MAJOR",
+          type: "BUG",
+          component: "my-project:resources/survey/components/widgets/TugasCardGrid.vue",
+          line: 168,
+          message: 'Elements with ARIA roles must use a valid, non-abstract ARIA role. "toolbar" is not a valid role.',
+          effort: "5min",
+          tags: ["accessibility", "react"],
+          creationDate: "2026-09-13T10:00:00+0000",
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockIssuesResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: "http://localhost:9000",
+      token: "valid-token",
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const items = await client.getIssues("my-project", "reliability");
+
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe("ISSUE-1");
+    expect(items[0].filePath).toBe("resources/survey/components/widgets/TugasCardGrid.vue");
+    expect(items[0].line).toBe(168);
+    expect(items[0].effort).toBe("5min");
+    expect(items[0].tags).toEqual(["accessibility", "react"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/issues/search?componentKeys=my-project&types=BUG"),
+      expect.anything()
+    );
+  });
 });

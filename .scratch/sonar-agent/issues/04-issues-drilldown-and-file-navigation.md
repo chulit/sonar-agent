@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Clicking on a metric card filters the view and fetches issues via `/api/issues/search` or hotspots via `/api/hotspots/search`.
-- [ ] Issue items are rendered as cards matching SonarQube's visual structure (checkbox, issue message, severity badges, effort estimate, tags, line number).
-- [ ] Clicking on an issue card triggers `vscode.workspace.openTextDocument` and `vscode.window.showTextDocument` to navigate directly to the target line.
-- [ ] Path resolver handles relative paths against the workspace root and falls back to `vscode.workspace.findFiles` when component paths include repository or module prefixes.
-- [ ] Clear empty state and error indicators when no issues match or when network requests fail.
+- [x] Clicking on a metric card filters the view and fetches issues via `/api/issues/search` or hotspots via `/api/hotspots/search`.
+- [x] Issue items are rendered as cards matching SonarQube's visual structure (checkbox, issue message, severity badges, effort estimate, tags, line number).
+- [x] Clicking on an issue card triggers `vscode.workspace.openTextDocument` and `vscode.window.showTextDocument` to navigate directly to the target line.
+- [x] Path resolver handles relative paths against the workspace root and falls back to `vscode.workspace.findFiles` when component paths include repository or module prefixes.
+- [x] Clear empty state and error indicators when no issues match or when network requests fail.
