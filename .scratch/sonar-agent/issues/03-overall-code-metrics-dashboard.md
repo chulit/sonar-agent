@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] SonarClient queries `/api/measures/component` for Overall Code metrics (`bugs`, `vulnerabilities`, `code_smells`, `coverage`, `duplicated_lines_density`, `security_hotspots`, `reliability_rating`, `sqale_rating`, `security_rating`, `lines_to_cover`, `duplicated_lines`).
-- [ ] Metric cards render with exact Sonar ratings (A, B, C, D, E) styled with corresponding Sonar color tokens.
-- [ ] Root dashboard container is styled with `container-type: inline-size` and adapts to 1 column below 340px and 2 columns at 340px or wider.
-- [ ] Typography and base backgrounds use VS Code theme variables (`--vscode-*`) for seamless dark, light, and high-contrast support.
-- [ ] A Refresh button in the header re-fetches latest measures from the server with a loading state indicator.
+- [x] SonarClient queries `/api/measures/component` for Overall Code metrics (`bugs`, `vulnerabilities`, `code_smells`, `coverage`, `duplicated_lines_density`, `security_hotspots`, `reliability_rating`, `sqale_rating`, `security_rating`, `lines_to_cover`, `duplicated_lines`).
+- [x] Metric cards render with exact Sonar ratings (A, B, C, D, E) styled with corresponding Sonar color tokens.
+- [x] Root dashboard container is styled with `container-type: inline-size` and adapts to 1 column below 340px and 2 columns at 340px or wider.
+- [x] Typography and base backgrounds use VS Code theme variables (`--vscode-*`) for seamless dark, light, and high-contrast support.
+- [x] A Refresh button in the header re-fetches latest measures from the server with a loading state indicator.

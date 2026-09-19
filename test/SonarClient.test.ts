@@ -95,4 +95,47 @@ describe("SonarClient - Connection Verification", () => {
       expect.anything()
     );
   });
+
+  it("should fetch and correctly map Overall Code measures into SonarOverview", async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: "test-project",
+        name: "Test Project",
+        measures: [
+          { metric: "vulnerabilities", value: "0" },
+          { metric: "security_rating", value: "1.0" },
+          { metric: "bugs", value: "2" },
+          { metric: "reliability_rating", value: "3.0" },
+          { metric: "code_smells", value: "27" },
+          { metric: "sqale_rating", value: "1.0" },
+          { metric: "coverage", value: "77.3" },
+          { metric: "lines_to_cover", value: "22000" },
+          { metric: "duplicated_lines_density", value: "3.2" },
+          { metric: "duplicated_lines", value: "86000" },
+          { metric: "security_hotspots", value: "0" },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: "http://localhost:9000",
+      token: "valid-token",
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview("test-project");
+
+    expect(overview.security).toEqual({ count: 0, rating: "A" });
+    expect(overview.reliability).toEqual({ count: 2, rating: "C" });
+    expect(overview.maintainability).toEqual({ count: 27, rating: "A" });
+    expect(overview.coverage).toEqual({ percentage: 77.3, linesToCover: 22000 });
+    expect(overview.duplications).toEqual({ percentage: 3.2, duplicatedLines: 86000 });
+    expect(overview.securityHotspots).toEqual({ count: 0, rating: "A" });
+  });
 });

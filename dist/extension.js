@@ -1,4 +1,4 @@
-"use strict";var x=Object.create;var v=Object.defineProperty;var j=Object.getOwnPropertyDescriptor;var P=Object.getOwnPropertyNames;var C=Object.getPrototypeOf,S=Object.prototype.hasOwnProperty;var U=(r,e)=>{for(var t in e)v(r,t,{get:e[t],enumerable:!0})},w=(r,e,t,n)=>{if(e&&typeof e=="object"||typeof e=="function")for(let o of P(e))!S.call(r,o)&&o!==t&&v(r,o,{get:()=>e[o],enumerable:!(n=j(e,o))||n.enumerable});return r};var u=(r,e,t)=>(t=r!=null?x(C(r)):{},w(e||!r||!r.__esModule?v(t,"default",{value:r,enumerable:!0}):t,r)),B=r=>w(v({},"__esModule",{value:!0}),r);var F={};U(F,{activate:()=>T,deactivate:()=>E});module.exports=B(F);var i=u(require("vscode"));var y=u(require("node:path")),k=u(require("node:fs/promises")),m="sonarAgent.token",f=class r{secrets;config;workspaceRoot;readFileFn;constructor(e){this.secrets=e.secretStorage,this.config=e.workspaceConfig,this.workspaceRoot=e.workspaceRoot,this.readFileFn=e.readFileFn??(t=>k.readFile(t,"utf-8"))}static parseProperties(e){let t=e.split(/\r?\n/),n,o,s=!1;for(let c of t){let a=c.trim();if(!a||a.startsWith("#")||a.startsWith(";"))continue;let h=a.indexOf("=");if(h===-1)continue;let p=a.slice(0,h).trim(),b=a.slice(h+1).trim();p==="sonar.projectKey"?n=b:p==="sonar.host.url"?o=b:(p==="sonar.login"||p==="sonar.password"||p==="sonar.token")&&(s=!0)}return{projectKey:n,serverUrl:o,hasPlaintextCredentials:s}}async getToken(){return this.secrets.get(m)}async setToken(e){await this.secrets.store(m,e)}async deleteToken(){await this.secrets.delete(m)}async setServerUrl(e){await this.config.update("serverUrl",e,!0)}async setProjectKey(e){await this.config.update("projectKey",e,!0)}async detectWorkspaceProperties(){if(!this.workspaceRoot)return null;let e=y.join(this.workspaceRoot,"sonar-project.properties");try{let t=await this.readFileFn(e);return r.parseProperties(t)}catch{return null}}async getConfig(){let e=this.config.get("serverUrl",""),t=this.config.get("projectKey",""),n=!1,o=!1,s=await this.detectWorkspaceProperties();s&&(s.projectKey&&(t=s.projectKey,n=!0),!e&&s.serverUrl&&(e=s.serverUrl),s.hasPlaintextCredentials&&(o=!0));let c=await this.getToken();return{serverUrl:e,projectKey:t,hasToken:!!(c&&c.trim().length>0),detectedFromProperties:n,hasPlaintextCredentialsWarning:o}}};var d=u(require("vscode"));var l=class{serverUrl;token;fetchFn;constructor(e){this.serverUrl=e.serverUrl.replace(/\/+$/,""),this.token=e.token,this.fetchFn=e.fetchFn??globalThis.fetch}getAuthHeader(){return this.token?{Authorization:`Basic ${Buffer.from(`${this.token}:`).toString("base64")}`}:{}}async verifyConnection(){try{let e=`${this.serverUrl}/api/authentication/validate`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(t.status===401||t.status===403)return{ok:!1,message:`Authentication failed (HTTP ${t.status}). Please verify your token.`};if(!t.ok)return{ok:!1,message:`Server returned HTTP ${t.status}: ${t.statusText}`};let n=await t.json();return n&&n.valid===!0?{ok:!0}:{ok:!1,message:"Invalid credentials: SonarQube reported token as invalid."}}catch(e){return{ok:!1,message:`Cannot reach SonarQube server at ${this.serverUrl}: ${e.message||String(e)}`}}}async fetchProjects(){try{let e=`${this.serverUrl}/api/projects/search?ps=100`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!t.ok)throw new Error(`HTTP ${t.status}: ${t.statusText}`);return((await t.json()).components||[]).map(o=>({key:o.key,name:o.name||o.key}))}catch(e){return console.error("Failed to fetch SonarQube projects:",e.message),[]}}};var g=class{constructor(e,t){this.extensionUri=e;this.projectDetector=t}static viewType="sonarAgent.overviewView";_view;resolveWebviewView(e,t,n){this._view=e,e.webview.options={enableScripts:!0,localResourceRoots:[this.extensionUri]},e.webview.html=this._getHtmlForWebview(e.webview),e.webview.onDidReceiveMessage(async o=>{switch(o.command){case"init":{await this._syncState();break}case"connect":{await this._handleConnect(o.serverUrl,o.token);break}case"disconnect":{await this._handleDisconnect();break}case"selectProject":{o.projectKey&&(await this.projectDetector.setProjectKey(o.projectKey),await this._syncState());break}case"openProjectPicker":{await this.promptProjectSelection();break}case"refresh":{await this._syncState();break}}})}async refresh(){this._view&&await this._syncState()}async promptProjectSelection(){let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(!e.serverUrl||!t){d.window.showWarningMessage("Please connect to SonarQube first.");return}let o=await new l({serverUrl:e.serverUrl,token:t}).fetchProjects();if(o.length===0){d.window.showInformationMessage("No projects found on the SonarQube server.");return}let s=o.map(a=>({label:a.name,description:a.key,detail:a.key===e.projectKey?"(Currently selected)":void 0})),c=await d.window.showQuickPick(s,{placeHolder:"Select a SonarQube project for this workspace",matchOnDescription:!0});c&&c.description&&(await this.projectDetector.setProjectKey(c.description),await this._syncState(),d.window.showInformationMessage(`Active SonarQube project set to: ${c.label}`))}async _syncState(){if(!this._view)return;let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(e.serverUrl&&e.hasToken&&t){let o=await new l({serverUrl:e.serverUrl,token:t}).fetchProjects(),s=e.projectKey;!s&&o.length>0&&(s=o[0].key,await this.projectDetector.setProjectKey(s)),this._view.webview.postMessage({type:"state",state:"connected",serverUrl:e.serverUrl,projectKey:s,detectedFromProperties:e.detectedFromProperties??!1,hasPlaintextWarning:e.hasPlaintextCredentialsWarning??!1,projects:o})}else this._view.webview.postMessage({type:"state",state:"onboarding",serverUrl:e.serverUrl||"http://localhost:9000"})}async _handleConnect(e,t){if(!e||!t){this._view?.webview.postMessage({type:"error",message:"Server URL and User Token are required."});return}this._view?.webview.postMessage({type:"connecting"});let o=await new l({serverUrl:e,token:t}).verifyConnection();if(!o.ok){this._view?.webview.postMessage({type:"error",message:o.message||"Connection verification failed."});return}await this.projectDetector.setServerUrl(e),await this.projectDetector.setToken(t),d.window.showInformationMessage("SonarQube connection successfully verified!"),await this._syncState()}async _handleDisconnect(){await this.projectDetector.deleteToken(),d.window.showInformationMessage("Disconnected from SonarQube."),await this._syncState()}_getHtmlForWebview(e){return`<!DOCTYPE html>
+"use strict";var k=Object.create;var u=Object.defineProperty;var j=Object.getOwnPropertyDescriptor;var C=Object.getOwnPropertyNames;var P=Object.getPrototypeOf,S=Object.prototype.hasOwnProperty;var B=(o,e)=>{for(var t in e)u(o,t,{get:e[t],enumerable:!0})},y=(o,e,t,i)=>{if(e&&typeof e=="object"||typeof e=="function")for(let r of C(e))!S.call(o,r)&&r!==t&&u(o,r,{get:()=>e[r],enumerable:!(i=j(e,r))||i.enumerable});return o};var m=(o,e,t)=>(t=o!=null?k(P(o)):{},y(e||!o||!o.__esModule?u(t,"default",{value:o,enumerable:!0}):t,o)),E=o=>y(u({},"__esModule",{value:!0}),o);var F={};B(F,{activate:()=>T,deactivate:()=>I});module.exports=E(F);var c=m(require("vscode"));var w=m(require("node:path")),x=m(require("node:fs/promises")),f="sonarAgent.token",b=class o{secrets;config;workspaceRoot;readFileFn;constructor(e){this.secrets=e.secretStorage,this.config=e.workspaceConfig,this.workspaceRoot=e.workspaceRoot,this.readFileFn=e.readFileFn??(t=>x.readFile(t,"utf-8"))}static parseProperties(e){let t=e.split(/\r?\n/),i,r,s=!1;for(let n of t){let a=n.trim();if(!a||a.startsWith("#")||a.startsWith(";"))continue;let p=a.indexOf("=");if(p===-1)continue;let g=a.slice(0,p).trim(),h=a.slice(p+1).trim();g==="sonar.projectKey"?i=h:g==="sonar.host.url"?r=h:(g==="sonar.login"||g==="sonar.password"||g==="sonar.token")&&(s=!0)}return{projectKey:i,serverUrl:r,hasPlaintextCredentials:s}}async getToken(){return this.secrets.get(f)}async setToken(e){await this.secrets.store(f,e)}async deleteToken(){await this.secrets.delete(f)}async setServerUrl(e){await this.config.update("serverUrl",e,!0)}async setProjectKey(e){await this.config.update("projectKey",e,!0)}async detectWorkspaceProperties(){if(!this.workspaceRoot)return null;let e=w.join(this.workspaceRoot,"sonar-project.properties");try{let t=await this.readFileFn(e);return o.parseProperties(t)}catch{return null}}async getConfig(){let e=this.config.get("serverUrl",""),t=this.config.get("projectKey",""),i=!1,r=!1,s=await this.detectWorkspaceProperties();s&&(s.projectKey&&(t=s.projectKey,i=!0),!e&&s.serverUrl&&(e=s.serverUrl),s.hasPlaintextCredentials&&(r=!0));let n=await this.getToken();return{serverUrl:e,projectKey:t,hasToken:!!(n&&n.trim().length>0),detectedFromProperties:i,hasPlaintextCredentialsWarning:r}}};var d=m(require("vscode"));var l=class{serverUrl;token;fetchFn;constructor(e){this.serverUrl=e.serverUrl.replace(/\/+$/,""),this.token=e.token,this.fetchFn=e.fetchFn??globalThis.fetch}getAuthHeader(){return this.token?{Authorization:`Basic ${Buffer.from(`${this.token}:`).toString("base64")}`}:{}}parseRating(e){let t=typeof e=="number"?e:parseFloat(String(e||"1.0"));return t<=1?"A":t<=2?"B":t<=3?"C":t<=4?"D":"E"}async verifyConnection(){try{let e=`${this.serverUrl}/api/authentication/validate`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(t.status===401||t.status===403)return{ok:!1,message:`Authentication failed (HTTP ${t.status}). Please verify your token.`};if(!t.ok)return{ok:!1,message:`Server returned HTTP ${t.status}: ${t.statusText}`};let i=await t.json();return i&&i.valid===!0?{ok:!0}:{ok:!1,message:"Invalid credentials: SonarQube reported token as invalid."}}catch(e){return{ok:!1,message:`Cannot reach SonarQube server at ${this.serverUrl}: ${e.message||String(e)}`}}}async fetchProjects(){try{let e=`${this.serverUrl}/api/projects/search?ps=100`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!t.ok)throw new Error(`HTTP ${t.status}: ${t.statusText}`);return((await t.json()).components||[]).map(r=>({key:r.key,name:r.name||r.key}))}catch(e){return console.error("Failed to fetch SonarQube projects:",e.message),[]}}async getOverview(e){let t=["bugs","reliability_rating","vulnerabilities","security_rating","code_smells","sqale_rating","coverage","lines_to_cover","duplicated_lines_density","duplicated_lines","security_hotspots"].join(","),i=`${this.serverUrl}/api/measures/component?component=${encodeURIComponent(e)}&metricKeys=${t}`,r=await this.fetchFn(i,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!r.ok)throw new Error(`Failed to fetch measures: HTTP ${r.status} ${r.statusText}`);let s=await r.json(),n={};for(let a of s.component?.measures||[])a.value!==void 0&&(n[a.metric]=a.value);return{security:{count:parseInt(n.vulnerabilities||"0",10),rating:this.parseRating(n.security_rating)},reliability:{count:parseInt(n.bugs||"0",10),rating:this.parseRating(n.reliability_rating)},maintainability:{count:parseInt(n.code_smells||"0",10),rating:this.parseRating(n.sqale_rating)},acceptedIssues:{count:0},coverage:{percentage:parseFloat(n.coverage||"0"),linesToCover:parseInt(n.lines_to_cover||"0",10)},duplications:{percentage:parseFloat(n.duplicated_lines_density||"0"),duplicatedLines:parseInt(n.duplicated_lines||"0",10)},securityHotspots:{count:parseInt(n.security_hotspots||"0",10),rating:"A"}}}};var v=class{constructor(e,t){this.extensionUri=e;this.projectDetector=t}static viewType="sonarAgent.overviewView";_view;resolveWebviewView(e,t,i){this._view=e,e.webview.options={enableScripts:!0,localResourceRoots:[this.extensionUri]},e.webview.html=this._getHtmlForWebview(e.webview),e.webview.onDidReceiveMessage(async r=>{switch(r.command){case"init":{await this._syncState();break}case"connect":{await this._handleConnect(r.serverUrl,r.token);break}case"disconnect":{await this._handleDisconnect();break}case"selectProject":{r.projectKey&&(await this.projectDetector.setProjectKey(r.projectKey),await this._syncState());break}case"openProjectPicker":{await this.promptProjectSelection();break}case"refresh":{await this._syncState();break}}})}async refresh(){this._view&&await this._syncState()}async promptProjectSelection(){let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(!e.serverUrl||!t){d.window.showWarningMessage("Please connect to SonarQube first.");return}let r=await new l({serverUrl:e.serverUrl,token:t}).fetchProjects();if(r.length===0){d.window.showInformationMessage("No projects found on the SonarQube server.");return}let s=r.map(a=>({label:a.name,description:a.key,detail:a.key===e.projectKey?"(Currently selected)":void 0})),n=await d.window.showQuickPick(s,{placeHolder:"Select a SonarQube project for this workspace",matchOnDescription:!0});n&&n.description&&(await this.projectDetector.setProjectKey(n.description),await this._syncState(),d.window.showInformationMessage(`Active SonarQube project set to: ${n.label}`))}async _syncState(){if(!this._view)return;let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(e.serverUrl&&e.hasToken&&t){this._view.webview.postMessage({type:"loading",loading:!0});let i=new l({serverUrl:e.serverUrl,token:t}),r=await i.fetchProjects(),s=e.projectKey;!s&&r.length>0&&(s=r[0].key,await this.projectDetector.setProjectKey(s));let n=null,a;if(s)try{n=await i.getOverview(s)}catch(p){a=p.message||"Failed to fetch project measures."}this._view.webview.postMessage({type:"state",state:"connected",serverUrl:e.serverUrl,projectKey:s,detectedFromProperties:e.detectedFromProperties??!1,hasPlaintextWarning:e.hasPlaintextCredentialsWarning??!1,projects:r,overview:n,overviewError:a}),this._view.webview.postMessage({type:"loading",loading:!1})}else this._view.webview.postMessage({type:"state",state:"onboarding",serverUrl:e.serverUrl||"http://localhost:9000"})}async _handleConnect(e,t){if(!e||!t){this._view?.webview.postMessage({type:"error",message:"Server URL and User Token are required."});return}this._view?.webview.postMessage({type:"connecting"});let r=await new l({serverUrl:e,token:t}).verifyConnection();if(!r.ok){this._view?.webview.postMessage({type:"error",message:r.message||"Connection verification failed."});return}await this.projectDetector.setServerUrl(e),await this.projectDetector.setToken(t),d.window.showInformationMessage("SonarQube connection successfully verified!"),await this._syncState()}async _handleDisconnect(){await this.projectDetector.deleteToken(),d.window.showInformationMessage("Disconnected from SonarQube."),await this._syncState()}_getHtmlForWebview(e){return`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -8,8 +8,11 @@
     :root {
       --sonar-blue: #4b9fd5;
       --sonar-green: #00aa5e;
-      --sonar-red: #d4333f;
+      --sonar-lime: #81b300;
       --sonar-yellow: #eabe06;
+      --sonar-orange: #ed7d20;
+      --sonar-red: #d4333f;
+      --sonar-border: var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
     }
 
     * {
@@ -19,55 +22,119 @@
     }
 
     body {
-      padding: 12px;
+      padding: 10px;
       color: var(--vscode-foreground);
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
       background-color: var(--vscode-sideBar-background);
+      overflow-x: hidden;
     }
 
     .container {
       container-type: inline-size;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
 
-    .header {
+    .top-header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+      justify-content: space-between;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--sonar-border);
     }
 
-    .header-icon {
-      width: 20px;
-      height: 20px;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .brand-icon {
+      width: 18px;
+      height: 18px;
       color: var(--sonar-blue);
     }
 
-    .header h2 {
-      font-size: 14px;
-      font-weight: 600;
+    .brand h2 {
+      font-size: 12px;
+      font-weight: 700;
       letter-spacing: 0.5px;
       text-transform: uppercase;
     }
 
+    .header-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .icon-btn {
+      background: none;
+      border: none;
+      color: var(--vscode-icon-foreground);
+      cursor: pointer;
+      padding: 3px 5px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .icon-btn:hover {
+      background: var(--vscode-toolbar-hoverBackground);
+    }
+
+    /* Tabs SonarQube Style */
+    .tabs-nav {
+      display: flex;
+      border-bottom: 1px solid var(--sonar-border);
+      gap: 8px;
+    }
+
+    .tab-item {
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+    }
+
+    .tab-item.active {
+      color: var(--vscode-foreground);
+      border-bottom-color: var(--sonar-blue);
+    }
+
+    .tab-badge-fail {
+      background: rgba(212, 51, 63, 0.15);
+      color: var(--sonar-red);
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    /* Card styling */
     .card {
       background: var(--vscode-editor-background);
-      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
       border-radius: 6px;
-      padding: 14px;
+      padding: 12px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
 
     .form-group {
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 4px;
     }
 
     label {
@@ -79,7 +146,7 @@
 
     input[type="text"], input[type="password"], select {
       width: 100%;
-      padding: 7px 9px;
+      padding: 6px 8px;
       background: var(--vscode-input-background);
       color: var(--vscode-input-foreground);
       border: 1px solid var(--vscode-input-border, transparent);
@@ -96,7 +163,7 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 7px 14px;
+      padding: 6px 12px;
       border: none;
       border-radius: 4px;
       font-size: 12px;
@@ -104,7 +171,6 @@
       cursor: pointer;
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
-      transition: background 0.15s ease;
     }
 
     .btn:hover {
@@ -147,46 +213,177 @@
       color: var(--sonar-yellow);
     }
 
-    .status-badge {
-      display: inline-flex;
+    /* Container Queries for Metric Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    @container (min-width: 320px) {
+      .metrics-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .metric-card {
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+      border-radius: 6px;
+      padding: 10px;
+      display: flex;
+      justify-content: space-between;
       align-items: center;
-      gap: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s ease, transform 0.1s ease;
+      user-select: none;
+    }
+
+    .metric-card:hover {
+      border-color: var(--sonar-blue);
+      transform: translateY(-1px);
+    }
+
+    .metric-card.active {
+      border-color: var(--sonar-blue);
+      box-shadow: 0 0 0 1px var(--sonar-blue);
+    }
+
+    .metric-info {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .metric-title {
       font-size: 11px;
       font-weight: 600;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .metric-value-row {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+    }
+
+    .metric-big-num {
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.1;
+      color: var(--vscode-foreground);
+    }
+
+    .metric-sublabel {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .metric-helper {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      margin-top: 2px;
+    }
+
+    /* Sonar Rating Badges */
+    .rating-badge {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .rating-A {
+      background: rgba(0, 170, 94, 0.15);
       color: var(--sonar-green);
-      background: rgba(0, 170, 94, 0.12);
-      padding: 4px 8px;
-      border-radius: 4px;
-      align-self: flex-start;
+    }
+
+    .rating-B {
+      background: rgba(129, 179, 0, 0.15);
+      color: var(--sonar-lime);
+    }
+
+    .rating-C {
+      background: rgba(234, 190, 6, 0.15);
+      color: var(--sonar-yellow);
+    }
+
+    .rating-D {
+      background: rgba(237, 125, 32, 0.15);
+      color: var(--sonar-orange);
+    }
+
+    .rating-E {
+      background: rgba(212, 51, 63, 0.15);
+      color: var(--sonar-red);
+    }
+
+    .circle-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2.5px solid var(--sonar-green);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .dot-inner {
+      width: 6px;
+      height: 6px;
+      background: var(--sonar-green);
+      border-radius: 50%;
+    }
+
+    .clock-badge {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: rgba(128, 128, 128, 0.15);
+      color: var(--vscode-descriptionForeground);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
     }
 
     .source-badge {
-      display: inline-flex;
       font-size: 10px;
       background: var(--vscode-badge-background);
       color: var(--vscode-badge-foreground);
-      padding: 2px 6px;
+      padding: 1px 5px;
       border-radius: 3px;
-      margin-left: 6px;
       font-weight: normal;
     }
 
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--sonar-green);
-    }
-
-    .connected-info {
-      font-size: 12px;
-      line-height: 1.6;
-    }
-
-    .connected-info span {
+    .loading-overlay {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 20px 0;
       color: var(--vscode-descriptionForeground);
-      display: block;
-      font-size: 11px;
+      font-size: 12px;
+    }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--vscode-descriptionForeground);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
 
     .hidden {
@@ -196,14 +393,20 @@
 </head>
 <body>
   <div class="container">
-    <div class="header">
-      <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>
-        <path d="M12 6a6 6 0 1 0 6 6 6 6 0 0 0-6-6z"/>
-        <circle cx="12" cy="12" r="2"/>
-        <line x1="12" y1="12" x2="19" y2="5"/>
-      </svg>
-      <h2>Sonar Agent</h2>
+    <div class="top-header">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>
+          <path d="M12 6a6 6 0 1 0 6 6 6 6 0 0 0-6-6z"/>
+          <circle cx="12" cy="12" r="2"/>
+          <line x1="12" y1="12" x2="19" y2="5"/>
+        </svg>
+        <h2>Sonar Agent</h2>
+      </div>
+      <div class="header-actions">
+        <button id="header-refresh-btn" class="icon-btn" title="Refresh measures">\u27F3</button>
+        <button id="header-disconnect-btn" class="icon-btn" title="Disconnect server">\u23FB</button>
+      </div>
     </div>
 
     <!-- Onboarding Form -->
@@ -227,38 +430,129 @@
       <button id="connect-btn" class="btn">Connect & Verify</button>
     </div>
 
-    <!-- Connected State View -->
-    <div id="connected-view" class="card hidden">
-      <div class="status-badge">
-        <div class="status-dot"></div>
-        Connected to SonarQube
+    <!-- Connected Dashboard View -->
+    <div id="connected-view" class="hidden" style="display: flex; flex-direction: column; gap: 10px;">
+      <!-- Project Selector Bar -->
+      <div class="card" style="padding: 8px 10px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+          <label style="font-size: 10px;">PROJECT BINDING</label>
+          <span id="detected-badge" class="source-badge hidden">sonar-project.properties</span>
+        </div>
+        <select id="project-dropdown">
+          <option value="">Loading projects...</option>
+        </select>
       </div>
 
       <div id="plaintext-warning" class="alert warning hidden">
-        \u26A0\uFE0F Warning: Plaintext credentials found in sonar-project.properties. Please remove them and use secure token storage to avoid leaking secrets.
+        \u26A0\uFE0F Warning: Plaintext credentials found in sonar-project.properties. Please remove them to avoid leaking secrets.
       </div>
 
-      <div class="connected-info">
-        <span>SERVER</span>
-        <strong id="connected-server-url">-</strong>
-      </div>
-
-      <div class="connected-info">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <span>PROJECT BINDING</span>
-          <span id="detected-badge" class="source-badge hidden">sonar-project.properties</span>
+      <!-- Sonar Tabs -->
+      <div class="tabs-nav">
+        <div class="tab-item">
+          New Code
         </div>
-        <div style="margin-top: 4px;">
-          <select id="project-dropdown">
-            <option value="">Loading projects...</option>
-          </select>
+        <div class="tab-item active">
+          Overall Code
         </div>
       </div>
 
-      <div style="display: flex; gap: 8px; margin-top: 6px;">
-        <button id="change-project-btn" class="btn btn-secondary" style="flex: 1;">Pick Project</button>
-        <button id="refresh-btn" class="btn btn-secondary" style="flex: 1;">Refresh</button>
-        <button id="disconnect-btn" class="btn btn-secondary" style="flex: 1;">Disconnect</button>
+      <!-- Loading State -->
+      <div id="loading-indicator" class="loading-overlay hidden">
+        <div class="spinner"></div>
+        <span>Fetching Overall Code measures...</span>
+      </div>
+
+      <div id="overview-error" class="alert error"></div>
+
+      <!-- Metric Cards Grid (Container Query Controlled) -->
+      <div id="metrics-grid" class="metrics-grid">
+        <!-- Security -->
+        <div class="metric-card" data-category="security">
+          <div class="metric-info">
+            <span class="metric-title">Security</span>
+            <div class="metric-value-row">
+              <span id="metric-security-count" class="metric-big-num">-</span>
+              <span class="metric-sublabel">Open issues</span>
+            </div>
+          </div>
+          <div id="badge-security" class="rating-badge rating-A">A</div>
+        </div>
+
+        <!-- Reliability -->
+        <div class="metric-card" data-category="reliability">
+          <div class="metric-info">
+            <span class="metric-title">Reliability</span>
+            <div class="metric-value-row">
+              <span id="metric-reliability-count" class="metric-big-num">-</span>
+              <span class="metric-sublabel">Open issues</span>
+            </div>
+          </div>
+          <div id="badge-reliability" class="rating-badge rating-C">C</div>
+        </div>
+
+        <!-- Maintainability -->
+        <div class="metric-card" data-category="maintainability">
+          <div class="metric-info">
+            <span class="metric-title">Maintainability</span>
+            <div class="metric-value-row">
+              <span id="metric-maintainability-count" class="metric-big-num">-</span>
+              <span class="metric-sublabel">Open issues</span>
+            </div>
+          </div>
+          <div id="badge-maintainability" class="rating-badge rating-A">A</div>
+        </div>
+
+        <!-- Accepted Issues -->
+        <div class="metric-card" data-category="accepted">
+          <div class="metric-info">
+            <span class="metric-title">Accepted issues</span>
+            <div class="metric-value-row">
+              <span id="metric-accepted-count" class="metric-big-num">0</span>
+            </div>
+            <span class="metric-helper">Valid issues not fixed</span>
+          </div>
+          <div class="clock-badge">\u23F1</div>
+        </div>
+
+        <!-- Coverage -->
+        <div class="metric-card" data-category="coverage">
+          <div class="metric-info">
+            <span class="metric-title">Coverage</span>
+            <div class="metric-value-row">
+              <span id="metric-coverage-percent" class="metric-big-num">-%</span>
+            </div>
+            <span id="metric-coverage-lines" class="metric-helper">On - lines to cover.</span>
+          </div>
+          <div class="circle-icon">
+            <div class="dot-inner"></div>
+          </div>
+        </div>
+
+        <!-- Duplications -->
+        <div class="metric-card" data-category="duplications">
+          <div class="metric-info">
+            <span class="metric-title">Duplications</span>
+            <div class="metric-value-row">
+              <span id="metric-duplications-percent" class="metric-big-num">-%</span>
+            </div>
+            <span id="metric-duplications-lines" class="metric-helper">On - lines.</span>
+          </div>
+          <div class="circle-icon" style="border-color: var(--sonar-green);">
+            <div class="dot-inner" style="background: var(--sonar-green);"></div>
+          </div>
+        </div>
+
+        <!-- Security Hotspots -->
+        <div class="metric-card" data-category="hotspots">
+          <div class="metric-info">
+            <span class="metric-title">Security Hotspots</span>
+            <div class="metric-value-row">
+              <span id="metric-hotspots-count" class="metric-big-num">-</span>
+            </div>
+          </div>
+          <div id="badge-hotspots" class="rating-badge rating-A">A</div>
+        </div>
       </div>
     </div>
   </div>
@@ -269,16 +563,32 @@
     const onboardingView = document.getElementById("onboarding-view");
     const connectedView = document.getElementById("connected-view");
     const alertBox = document.getElementById("alert-box");
+    const overviewError = document.getElementById("overview-error");
     const plaintextWarning = document.getElementById("plaintext-warning");
+    const loadingIndicator = document.getElementById("loading-indicator");
+    const metricsGrid = document.getElementById("metrics-grid");
+
     const serverUrlInput = document.getElementById("server-url");
     const userTokenInput = document.getElementById("user-token");
     const connectBtn = document.getElementById("connect-btn");
-    const disconnectBtn = document.getElementById("disconnect-btn");
-    const refreshBtn = document.getElementById("refresh-btn");
-    const changeProjectBtn = document.getElementById("change-project-btn");
-    const connectedServerUrl = document.getElementById("connected-server-url");
+    const headerRefreshBtn = document.getElementById("header-refresh-btn");
+    const headerDisconnectBtn = document.getElementById("header-disconnect-btn");
     const projectDropdown = document.getElementById("project-dropdown");
     const detectedBadge = document.getElementById("detected-badge");
+
+    // Metric DOM elements
+    const securityCount = document.getElementById("metric-security-count");
+    const badgeSecurity = document.getElementById("badge-security");
+    const reliabilityCount = document.getElementById("metric-reliability-count");
+    const badgeReliability = document.getElementById("badge-reliability");
+    const maintainabilityCount = document.getElementById("metric-maintainability-count");
+    const badgeMaintainability = document.getElementById("badge-maintainability");
+    const coveragePercent = document.getElementById("metric-coverage-percent");
+    const coverageLines = document.getElementById("metric-coverage-lines");
+    const duplicationsPercent = document.getElementById("metric-duplications-percent");
+    const duplicationsLines = document.getElementById("metric-duplications-lines");
+    const hotspotsCount = document.getElementById("metric-hotspots-count");
+    const badgeHotspots = document.getElementById("badge-hotspots");
 
     function showAlert(msg) {
       alertBox.textContent = msg;
@@ -288,6 +598,42 @@
     function clearAlert() {
       alertBox.textContent = "";
       alertBox.className = "alert";
+      overviewError.textContent = "";
+      overviewError.className = "alert";
+    }
+
+    function formatNumber(num) {
+      if (num >= 1000) {
+        return (num / 1000).toFixed(0) + "k";
+      }
+      return String(num);
+    }
+
+    function updateRatingBadge(el, rating) {
+      el.className = "rating-badge rating-" + rating;
+      el.textContent = rating;
+    }
+
+    function renderOverview(overview) {
+      if (!overview) return;
+
+      securityCount.textContent = overview.security.count;
+      updateRatingBadge(badgeSecurity, overview.security.rating);
+
+      reliabilityCount.textContent = overview.reliability.count;
+      updateRatingBadge(badgeReliability, overview.reliability.rating);
+
+      maintainabilityCount.textContent = overview.maintainability.count;
+      updateRatingBadge(badgeMaintainability, overview.maintainability.rating);
+
+      coveragePercent.textContent = overview.coverage.percentage.toFixed(1) + "%";
+      coverageLines.textContent = "On " + formatNumber(overview.coverage.linesToCover) + " lines to cover.";
+
+      duplicationsPercent.textContent = overview.duplications.percentage.toFixed(1) + "%";
+      duplicationsLines.textContent = "On " + formatNumber(overview.duplications.duplicatedLines) + " lines.";
+
+      hotspotsCount.textContent = overview.securityHotspots.count;
+      updateRatingBadge(badgeHotspots, overview.securityHotspots.rating);
     }
 
     connectBtn.addEventListener("click", () => {
@@ -312,28 +658,31 @@
       }
     });
 
-    changeProjectBtn.addEventListener("click", () => {
-      vscode.postMessage({ command: "openProjectPicker" });
-    });
-
-    disconnectBtn.addEventListener("click", () => {
-      vscode.postMessage({ command: "disconnect" });
-    });
-
-    refreshBtn.addEventListener("click", () => {
+    headerRefreshBtn.addEventListener("click", () => {
       vscode.postMessage({ command: "refresh" });
+    });
+
+    headerDisconnectBtn.addEventListener("click", () => {
+      vscode.postMessage({ command: "disconnect" });
     });
 
     window.addEventListener("message", (event) => {
       const message = event.data;
       switch (message.type) {
+        case "loading": {
+          if (message.loading) {
+            loadingIndicator.classList.remove("hidden");
+          } else {
+            loadingIndicator.classList.add("hidden");
+          }
+          break;
+        }
         case "state": {
           connectBtn.disabled = false;
           connectBtn.textContent = "Connect & Verify";
           if (message.state === "connected") {
             onboardingView.classList.add("hidden");
             connectedView.classList.remove("hidden");
-            connectedServerUrl.textContent = message.serverUrl;
 
             if (message.hasPlaintextWarning) {
               plaintextWarning.classList.remove("hidden");
@@ -366,6 +715,14 @@
                 projectDropdown.appendChild(opt);
               });
             }
+
+            if (message.overviewError) {
+              overviewError.textContent = message.overviewError;
+              overviewError.className = "alert error";
+            } else if (message.overview) {
+              overviewError.className = "alert";
+              renderOverview(message.overview);
+            }
           } else {
             connectedView.classList.add("hidden");
             onboardingView.classList.remove("hidden");
@@ -394,4 +751,4 @@
     vscode.postMessage({ command: "init" });
   </script>
 </body>
-</html>`}};function T(r){let e=i.workspace.workspaceFolders?.[0]?.uri.fsPath,t=i.workspace.getConfiguration("sonarAgent"),n=new f({secretStorage:r.secrets,workspaceConfig:t,workspaceRoot:e}),o=new g(r.extensionUri,n);r.subscriptions.push(i.window.registerWebviewViewProvider(g.viewType,o)),r.subscriptions.push(i.commands.registerCommand("sonarAgent.refresh",async()=>{await o.refresh()})),r.subscriptions.push(i.commands.registerCommand("sonarAgent.configure",async()=>{await i.commands.executeCommand("sonarAgent.overviewView.focus")})),r.subscriptions.push(i.commands.registerCommand("sonarAgent.selectProject",async()=>{await o.promptProjectSelection()})),r.subscriptions.push(i.commands.registerCommand("sonarAgent.resetConnection",async()=>{await i.window.showWarningMessage("Are you sure you want to disconnect and remove stored SonarQube credentials?",{modal:!0},"Disconnect")==="Disconnect"&&(await n.deleteToken(),await o.refresh(),i.window.showInformationMessage("SonarQube credentials have been removed."))}))}function E(){}0&&(module.exports={activate,deactivate});
+</html>`}};function T(o){let e=c.workspace.workspaceFolders?.[0]?.uri.fsPath,t=c.workspace.getConfiguration("sonarAgent"),i=new b({secretStorage:o.secrets,workspaceConfig:t,workspaceRoot:e}),r=new v(o.extensionUri,i);o.subscriptions.push(c.window.registerWebviewViewProvider(v.viewType,r)),o.subscriptions.push(c.commands.registerCommand("sonarAgent.refresh",async()=>{await r.refresh()})),o.subscriptions.push(c.commands.registerCommand("sonarAgent.configure",async()=>{await c.commands.executeCommand("sonarAgent.overviewView.focus")})),o.subscriptions.push(c.commands.registerCommand("sonarAgent.selectProject",async()=>{await r.promptProjectSelection()})),o.subscriptions.push(c.commands.registerCommand("sonarAgent.resetConnection",async()=>{await c.window.showWarningMessage("Are you sure you want to disconnect and remove stored SonarQube credentials?",{modal:!0},"Disconnect")==="Disconnect"&&(await i.deleteToken(),await r.refresh(),c.window.showInformationMessage("SonarQube credentials have been removed."))}))}function I(){}0&&(module.exports={activate,deactivate});
