@@ -91,7 +91,7 @@ describe("SonarClient - Connection Verification", () => {
       { key: "proj-2", name: "Project Two" },
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:9000/api/projects/search?ps=100",
+      "http://localhost:9000/api/components/search?qualifiers=TRK&ps=100",
       expect.anything()
     );
   });

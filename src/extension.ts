@@ -4,11 +4,15 @@ import { SonarOverviewViewProvider } from "./modules/SonarOverviewViewProvider.j
 
 export function activate(context: vscode.ExtensionContext) {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const workspaceConfig = vscode.workspace.getConfiguration("sonarAgent");
 
   const projectDetector = new ProjectDetector({
     secretStorage: context.secrets,
-    workspaceConfig,
+    workspaceConfig: {
+      get: <T>(sec: string, def?: T) =>
+        vscode.workspace.getConfiguration("sonarAgent").get<T>(sec, def as T),
+      update: (sec: string, val: any, target?: boolean | number) =>
+        vscode.workspace.getConfiguration("sonarAgent").update(sec, val, target),
+    },
     workspaceRoot,
   });
 

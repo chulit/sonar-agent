@@ -106,21 +106,42 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const client = new SonarClient({ serverUrl: config.serverUrl, token });
     const projects = await client.fetchProjects();
 
-    if (projects.length === 0) {
-      vscode.window.showInformationMessage("No projects found on the SonarQube server.");
-      return;
-    }
+    const manualOption = {
+      label: "$(edit) Enter Project Key manually...",
+      description: "Type the exact project key from SonarQube",
+      detail: "Use this if your project is not listed or search is restricted",
+    };
 
-    const items = projects.map((p) => ({
-      label: p.name,
-      description: p.key,
-      detail: p.key === config.projectKey ? "(Currently selected)" : undefined,
-    }));
+    const items = [
+      manualOption,
+      ...projects.map((p) => ({
+        label: p.name,
+        description: p.key,
+        detail: p.key === config.projectKey ? "(Currently selected)" : undefined,
+      })),
+    ];
 
     const selected = await vscode.window.showQuickPick(items, {
-      placeHolder: "Select a SonarQube project for this workspace",
+      placeHolder: "Select a SonarQube project or enter key manually",
       matchOnDescription: true,
     });
+
+    if (selected === manualOption) {
+      const manualKey = await vscode.window.showInputBox({
+        prompt: "Enter the SonarQube Project Key",
+        placeHolder: "e.g. org.company:my-project",
+        value: config.projectKey || "",
+        validateInput: (val) => (!val.trim() ? "Project Key cannot be empty" : null),
+      });
+
+      if (manualKey && manualKey.trim()) {
+        const trimmed = manualKey.trim();
+        await this.projectDetector.setProjectKey(trimmed);
+        await this._syncState();
+        vscode.window.showInformationMessage(`Active SonarQube project set to: ${trimmed}`);
+      }
+      return;
+    }
 
     if (selected && selected.description) {
       await this.projectDetector.setProjectKey(selected.description);
@@ -522,6 +543,96 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       color: var(--sonar-yellow);
     }
 
+    /* Searchable Project Selector */
+    .project-selector-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    .search-input-group {
+      display: flex;
+      align-items: center;
+      position: relative;
+    }
+
+    #project-search-input {
+      width: 100%;
+      padding-right: 26px;
+      cursor: pointer;
+    }
+
+    #project-search-toggle-btn {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: transparent;
+      border: none;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      padding: 2px 4px;
+      font-size: 11px;
+    }
+
+    .project-dropdown-popup {
+      position: absolute;
+      top: calc(100% + 2px);
+      left: 0;
+      right: 0;
+      max-height: 220px;
+      overflow-y: auto;
+      background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+      border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border));
+      border-radius: 4px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      z-index: 100;
+    }
+
+    .project-items-container {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .project-item {
+      padding: 6px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.15));
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .project-item:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+
+    .project-item.active {
+      background: var(--vscode-list-activeSelectionBackground);
+      color: var(--vscode-list-activeSelectionForeground);
+    }
+
+    .project-item-name {
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .project-item-key {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .project-item.active .project-item-key {
+      color: inherit;
+      opacity: 0.85;
+    }
+
+    .project-item.manual-item {
+      font-size: 11px;
+      color: var(--vscode-textLink-foreground, #3794ff);
+      border-bottom: none;
+      padding: 8px 10px;
+    }
+
     /* Container Queries for Metric Grid */
     .metrics-grid {
       display: grid;
@@ -865,12 +976,24 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       <div class="card" style="padding: 8px 10px; gap: 8px;">
         <div>
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
-            <label style="font-size: 10px;">PROJECT BINDING</label>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <label style="font-size: 10px;">PROJECT BINDING</label>
+              <button id="manual-project-btn" class="icon-btn" title="Enter Project Key manually" style="font-size: 11px; padding: 0 4px; height: 18px; line-height: 18px;">✏️</button>
+            </div>
             <span id="detected-badge" class="source-badge hidden">sonar-project.properties</span>
           </div>
-          <select id="project-dropdown">
-            <option value="">Loading projects...</option>
-          </select>
+          <div class="project-selector-wrapper">
+            <div class="search-input-group">
+              <input id="project-search-input" type="text" placeholder="Type to search or click to pick project..." autocomplete="off" />
+              <button id="project-search-toggle-btn" type="button" title="Toggle project list">▾</button>
+            </div>
+            <div id="project-dropdown-popup" class="project-dropdown-popup hidden">
+              <div id="project-items-container" class="project-items-container"></div>
+              <div id="manual-project-item" class="project-item manual-item">
+                <span>✏️ Enter Project Key manually...</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div>
@@ -904,7 +1027,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         <span>Fetching Overall Code measures...</span>
       </div>
 
-      <div id="overview-error" class="alert error"></div>
+      <div id="overview-error" class="alert error hidden"></div>
 
       <!-- Metric Cards Grid (Container Query Controlled) -->
       <div id="metrics-grid" class="metrics-grid">
@@ -1048,9 +1171,109 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const connectBtn = document.getElementById("connect-btn");
     const headerRefreshBtn = document.getElementById("header-refresh-btn");
     const headerDisconnectBtn = document.getElementById("header-disconnect-btn");
-    const projectDropdown = document.getElementById("project-dropdown");
+    const projectSearchInput = document.getElementById("project-search-input");
+    const projectSearchToggleBtn = document.getElementById("project-search-toggle-btn");
+    const projectDropdownPopup = document.getElementById("project-dropdown-popup");
+    const projectItemsContainer = document.getElementById("project-items-container");
+    const manualProjectItem = document.getElementById("manual-project-item");
     const targetAgentDropdown = document.getElementById("target-agent-dropdown");
     const detectedBadge = document.getElementById("detected-badge");
+
+    let cachedProjects = [];
+    let currentSelectedProjectKey = "";
+
+    function renderProjectList(filterText) {
+      projectItemsContainer.innerHTML = "";
+      const q = (filterText || "").trim().toLowerCase();
+
+      const filtered = cachedProjects.filter((p) => {
+        if (!q) return true;
+        const nameMatch = (p.name || "").toLowerCase().includes(q);
+        const keyMatch = (p.key || "").toLowerCase().includes(q);
+        return nameMatch || keyMatch;
+      });
+
+      if (filtered.length === 0) {
+        const emptyDiv = document.createElement("div");
+        emptyDiv.style.padding = "8px 10px";
+        emptyDiv.style.fontSize = "11px";
+        emptyDiv.style.color = "var(--vscode-descriptionForeground)";
+        emptyDiv.textContent = cachedProjects.length === 0 ? "No projects found" : "No matching projects";
+        projectItemsContainer.appendChild(emptyDiv);
+      } else {
+        filtered.forEach((p) => {
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "project-item" + (p.key === currentSelectedProjectKey ? " active" : "");
+
+          const nameRow = document.createElement("div");
+          nameRow.style.display = "flex";
+          nameRow.style.justifyContent = "space-between";
+          nameRow.style.alignItems = "center";
+
+          const nameSpan = document.createElement("span");
+          nameSpan.className = "project-item-name";
+          nameSpan.textContent = p.name;
+          nameRow.appendChild(nameSpan);
+
+          if (p.key === currentSelectedProjectKey) {
+            const check = document.createElement("span");
+            check.style.fontSize = "11px";
+            check.textContent = "✓";
+            nameRow.appendChild(check);
+          }
+
+          const keySpan = document.createElement("span");
+          keySpan.className = "project-item-key";
+          keySpan.textContent = p.key;
+
+          itemDiv.appendChild(nameRow);
+          itemDiv.appendChild(keySpan);
+
+          itemDiv.addEventListener("click", () => {
+            currentSelectedProjectKey = p.key;
+            projectSearchInput.value = p.name + " (" + p.key + ")";
+            projectDropdownPopup.classList.add("hidden");
+            vscode.postMessage({ command: "selectProject", projectKey: p.key });
+          });
+
+          projectItemsContainer.appendChild(itemDiv);
+        });
+      }
+    }
+
+    projectSearchInput.addEventListener("focus", () => {
+      projectDropdownPopup.classList.remove("hidden");
+      renderProjectList(projectSearchInput.value);
+    });
+
+    projectSearchInput.addEventListener("input", () => {
+      projectDropdownPopup.classList.remove("hidden");
+      renderProjectList(projectSearchInput.value);
+    });
+
+    projectSearchToggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (projectDropdownPopup.classList.contains("hidden")) {
+        projectDropdownPopup.classList.remove("hidden");
+        renderProjectList("");
+      } else {
+        projectDropdownPopup.classList.add("hidden");
+      }
+    });
+
+    if (manualProjectItem) {
+      manualProjectItem.addEventListener("click", () => {
+        projectDropdownPopup.classList.add("hidden");
+        vscode.postMessage({ command: "openProjectPicker" });
+      });
+    }
+
+    document.addEventListener("click", (e) => {
+      const wrapper = document.querySelector(".project-selector-wrapper");
+      if (wrapper && !wrapper.contains(e.target)) {
+        projectDropdownPopup.classList.add("hidden");
+      }
+    });
 
     // Metric DOM elements
     const securityCount = document.getElementById("metric-security-count");
@@ -1296,12 +1519,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       vscode.postMessage({ command: "connect", serverUrl, token });
     });
 
-    projectDropdown.addEventListener("change", () => {
-      const selectedKey = projectDropdown.value;
-      if (selectedKey) {
-        vscode.postMessage({ command: "selectProject", projectKey: selectedKey });
-      }
-    });
+    const manualProjectBtn = document.getElementById("manual-project-btn");
+    if (manualProjectBtn) {
+      manualProjectBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "openProjectPicker" });
+      });
+    }
 
     headerRefreshBtn.addEventListener("click", () => {
       vscode.postMessage({ command: "refresh" });
@@ -1360,31 +1583,29 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
               detectedBadge.classList.add("hidden");
             }
 
-            projectDropdown.innerHTML = "";
-            const projects = message.projects || [];
-            if (projects.length === 0) {
-              const opt = document.createElement("option");
-              opt.value = message.projectKey || "";
-              opt.textContent = message.projectKey || "No projects found";
-              projectDropdown.appendChild(opt);
+            cachedProjects = message.projects || [];
+            currentSelectedProjectKey = message.projectKey || "";
+
+            const matched = cachedProjects.find((p) => p.key === currentSelectedProjectKey);
+            if (matched) {
+              projectSearchInput.value = matched.name + " (" + matched.key + ")";
+            } else if (currentSelectedProjectKey) {
+              projectSearchInput.value = currentSelectedProjectKey;
             } else {
-              projects.forEach((proj) => {
-                const opt = document.createElement("option");
-                opt.value = proj.key;
-                opt.textContent = proj.name + " (" + proj.key + ")";
-                if (proj.key === message.projectKey) {
-                  opt.selected = true;
-                }
-                projectDropdown.appendChild(opt);
-              });
+              projectSearchInput.value = "";
             }
+
+            renderProjectList("");
 
             if (message.overviewError) {
               overviewError.textContent = message.overviewError;
               overviewError.className = "alert error";
-            } else if (message.overview) {
-              overviewError.className = "alert";
-              renderOverview(message.overview);
+            } else {
+              overviewError.className = "alert error hidden";
+              overviewError.textContent = "";
+              if (message.overview) {
+                renderOverview(message.overview);
+              }
             }
           } else {
             connectedView.classList.add("hidden");

@@ -50,7 +50,7 @@ export class SonarClient {
 
   constructor(config: SonarClientConfig) {
     this.serverUrl = config.serverUrl.replace(/\/+$/, "");
-    this.token = config.token;
+    this.token = config.token ? config.token.trim() : undefined;
     this.fetchFn = config.fetchFn ?? globalThis.fetch;
   }
 
@@ -82,18 +82,44 @@ export class SonarClient {
   }
 
   /**
+   * Helper that executes fetch with Basic Auth and falls back to Bearer Auth if 401
+   */
+  private async authenticatedFetch(url: string): Promise<Response> {
+    const basicHeaders = {
+      Accept: "application/json",
+      ...this.getAuthHeader(),
+    };
+
+    let response = await this.fetchFn(url, {
+      method: "GET",
+      headers: basicHeaders,
+    });
+
+    if (response.status === 401 && this.token) {
+      // Try Bearer token fallback
+      const bearerHeaders = {
+        Accept: "application/json",
+        Authorization: `Bearer ${this.token}`,
+      };
+      const bearerResponse = await this.fetchFn(url, {
+        method: "GET",
+        headers: bearerHeaders,
+      });
+      if (bearerResponse.ok) {
+        return bearerResponse;
+      }
+    }
+
+    return response;
+  }
+
+  /**
    * Validates credentials against SonarQube /api/authentication/validate
    */
   async verifyConnection(): Promise<VerificationResult> {
     try {
       const url = `${this.serverUrl}/api/authentication/validate`;
-      const response = await this.fetchFn(url, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          ...this.getAuthHeader(),
-        },
-      });
+      const response = await this.authenticatedFetch(url);
 
       if (response.status === 401 || response.status === 403) {
         return {
@@ -127,32 +153,45 @@ export class SonarClient {
   }
 
   /**
-   * Fetches projects from SonarQube /api/projects/search
+   * Fetches projects from SonarQube with multi-endpoint fallback
+   * Supports /api/components/search?qualifiers=TRK, /api/components/search_projects, /api/projects/search
    */
   async fetchProjects(): Promise<{ key: string; name: string }[]> {
-    try {
-      const url = `${this.serverUrl}/api/projects/search?ps=100`;
-      const response = await this.fetchFn(url, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          ...this.getAuthHeader(),
-        },
-      });
+    const endpoints = [
+      `${this.serverUrl}/api/components/search?qualifiers=TRK&ps=100`,
+      `${this.serverUrl}/api/components/search_projects?ps=100`,
+      `${this.serverUrl}/api/projects/search?ps=100`,
+      `${this.serverUrl}/api/projects/search?ps=100&qualifiers=TRK`,
+      `${this.serverUrl}/api/components/search?qualifiers=TRK`,
+    ];
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    for (const url of endpoints) {
+      try {
+        const response = await this.authenticatedFetch(url);
+
+        if (!response.ok) {
+          continue;
+        }
+
+        const data = (await response.json()) as any;
+        const list: any[] =
+          data.components ||
+          data.projects ||
+          data.results ||
+          (Array.isArray(data) ? data : []);
+
+        if (Array.isArray(list) && list.length > 0) {
+          return list.map((p: any) => ({
+            key: p.key || p.id || p.projectKey,
+            name: p.name || p.key,
+          }));
+        }
+      } catch (err: any) {
+        // Try next fallback endpoint
       }
-
-      const data = (await response.json()) as { components?: { key: string; name: string }[] };
-      return (data.components || []).map((p) => ({
-        key: p.key,
-        name: p.name || p.key,
-      }));
-    } catch (err: any) {
-      console.error("Failed to fetch SonarQube projects:", err.message);
-      return [];
     }
+
+    return [];
   }
 
   /**
@@ -174,13 +213,7 @@ export class SonarClient {
     ].join(",");
 
     const url = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
-    const response = await this.fetchFn(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...this.getAuthHeader(),
-      },
-    });
+    const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch measures: HTTP ${response.status} ${response.statusText}`);
@@ -231,9 +264,9 @@ export class SonarClient {
   }
 
   /**
-   * Fetches issues list for a project, optionally filtered by category
+   * Fetches issues list filtered by category/type
    */
-  async getIssues(projectKey: string, category?: "reliability" | "security" | "maintainability"): Promise<SonarDetailItem[]> {
+  async getIssues(projectKey: string, category?: string): Promise<SonarDetailItem[]> {
     let typeParam = "BUG,VULNERABILITY,CODE_SMELL";
     if (category === "reliability") {
       typeParam = "BUG";
@@ -244,13 +277,7 @@ export class SonarClient {
     }
 
     const url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=${typeParam}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`;
-    const response = await this.fetchFn(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...this.getAuthHeader(),
-      },
-    });
+    const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch issues: HTTP ${response.status} ${response.statusText}`);
@@ -278,13 +305,7 @@ export class SonarClient {
    */
   async getHotspots(projectKey: string): Promise<SonarDetailItem[]> {
     const url = `${this.serverUrl}/api/hotspots/search?projectKey=${encodeURIComponent(projectKey)}&status=TO_REVIEW&ps=100`;
-    const response = await this.fetchFn(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...this.getAuthHeader(),
-      },
-    });
+    const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch hotspots: HTTP ${response.status} ${response.statusText}`);
@@ -299,7 +320,7 @@ export class SonarClient {
       filePath: this.extractFilePath(item.component || ""),
       line: item.line,
       type: "HOTSPOT",
-      severity: (item.vulnerabilityProbability === "HIGH" ? "CRITICAL" : "MAJOR") as any,
+      severity: "MAJOR",
       status: item.status || "TO_REVIEW",
       tags: ["security-hotspot"],
       creationDate: item.creationDate || "",
@@ -307,18 +328,12 @@ export class SonarClient {
   }
 
   /**
-   * Fetches rich rule documentation from SonarQube /api/rules/show
+   * Fetches and cleans SonarQube rule details from /api/rules/show
    */
   async getEnrichedRule(ruleKey: string): Promise<SonarRuleDoc> {
     try {
       const url = `${this.serverUrl}/api/rules/show?key=${encodeURIComponent(ruleKey)}`;
-      const response = await this.fetchFn(url, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          ...this.getAuthHeader(),
-        },
-      });
+      const response = await this.authenticatedFetch(url);
 
       if (!response.ok) {
         return {
@@ -362,13 +377,7 @@ export class SonarClient {
    */
   async getCoverageFiles(projectKey: string): Promise<SonarDetailItem[]> {
     const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=uncovered_lines,coverage&qualifiers=FIL&ps=50`;
-    const response = await this.fetchFn(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...this.getAuthHeader(),
-      },
-    });
+    const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch coverage files: HTTP ${response.status} ${response.statusText}`);
@@ -411,13 +420,7 @@ export class SonarClient {
    */
   async getDuplicationFiles(projectKey: string): Promise<SonarDetailItem[]> {
     const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=duplicated_lines_density,duplicated_blocks&qualifiers=FIL&ps=50`;
-    const response = await this.fetchFn(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...this.getAuthHeader(),
-      },
-    });
+    const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch duplication files: HTTP ${response.status} ${response.statusText}`);

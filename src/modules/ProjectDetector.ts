@@ -41,6 +41,8 @@ export class ProjectDetector {
   private readonly workspaceRoot?: string;
   private readonly readFileFn: (filePath: string) => Promise<string>;
 
+  private activeProjectKey?: string;
+
   constructor(options: ProjectDetectorOptions) {
     this.secrets = options.secretStorage;
     this.config = options.workspaceConfig;
@@ -96,7 +98,7 @@ export class ProjectDetector {
   }
 
   async setToken(token: string): Promise<void> {
-    await this.secrets.store(TOKEN_SECRET_KEY, token);
+    await this.secrets.store(TOKEN_SECRET_KEY, token.trim());
   }
 
   async deleteToken(): Promise<void> {
@@ -104,11 +106,12 @@ export class ProjectDetector {
   }
 
   async setServerUrl(url: string): Promise<void> {
-    await this.config.update("serverUrl", url, true);
+    await this.config.update("serverUrl", url.trim(), true);
   }
 
   async setProjectKey(projectKey: string): Promise<void> {
-    await this.config.update("projectKey", projectKey, true);
+    this.activeProjectKey = projectKey.trim();
+    await this.config.update("projectKey", this.activeProjectKey, true);
   }
 
   async detectWorkspaceProperties(): Promise<ParsedSonarProperties | null> {
@@ -127,7 +130,7 @@ export class ProjectDetector {
 
   async getConfig(): Promise<ResolvedProjectConfig> {
     let serverUrl = this.config.get<string>("serverUrl", "");
-    let projectKey = this.config.get<string>("projectKey", "");
+    let projectKey = this.activeProjectKey ?? this.config.get<string>("projectKey", "");
     let detectedFromProperties = false;
     let hasPlaintextCredentialsWarning = false;
 

@@ -1,35 +1,35 @@
-"use strict";var T=Object.create;var k=Object.defineProperty;var L=Object.getOwnPropertyDescriptor;var R=Object.getOwnPropertyNames;var $=Object.getPrototypeOf,U=Object.prototype.hasOwnProperty;var _=(c,e)=>{for(var t in e)k(c,t,{get:e[t],enumerable:!0})},I=(c,e,t,s)=>{if(e&&typeof e=="object"||typeof e=="function")for(let n of R(e))!U.call(c,n)&&n!==t&&k(c,n,{get:()=>e[n],enumerable:!(s=L(e,n))||s.enumerable});return c};var v=(c,e,t)=>(t=c!=null?T($(c)):{},I(e||!c||!c.__esModule?k(t,"default",{value:c,enumerable:!0}):t,c)),M=c=>I(k({},"__esModule",{value:!0}),c);var H={};_(H,{activate:()=>O,deactivate:()=>N});module.exports=M(H);var p=v(require("vscode"));var S=v(require("node:path")),D=v(require("node:fs/promises")),P="sonarAgent.token",C=class c{secrets;config;workspaceRoot;readFileFn;constructor(e){this.secrets=e.secretStorage,this.config=e.workspaceConfig,this.workspaceRoot=e.workspaceRoot,this.readFileFn=e.readFileFn??(t=>D.readFile(t,"utf-8"))}static parseProperties(e){let t=e.split(/\r?\n/),s,n,i=!1;for(let r of t){let a=r.trim();if(!a||a.startsWith("#")||a.startsWith(";"))continue;let o=a.indexOf("=");if(o===-1)continue;let d=a.slice(0,o).trim(),u=a.slice(o+1).trim();d==="sonar.projectKey"?s=u:d==="sonar.host.url"?n=u:(d==="sonar.login"||d==="sonar.password"||d==="sonar.token")&&(i=!0)}return{projectKey:s,serverUrl:n,hasPlaintextCredentials:i}}async getToken(){return this.secrets.get(P)}async setToken(e){await this.secrets.store(P,e)}async deleteToken(){await this.secrets.delete(P)}async setServerUrl(e){await this.config.update("serverUrl",e,!0)}async setProjectKey(e){await this.config.update("projectKey",e,!0)}async detectWorkspaceProperties(){if(!this.workspaceRoot)return null;let e=S.join(this.workspaceRoot,"sonar-project.properties");try{let t=await this.readFileFn(e);return c.parseProperties(t)}catch{return null}}async getConfig(){let e=this.config.get("serverUrl",""),t=this.config.get("projectKey",""),s=!1,n=!1,i=await this.detectWorkspaceProperties();i&&(i.projectKey&&(t=i.projectKey,s=!0),!e&&i.serverUrl&&(e=i.serverUrl),i.hasPlaintextCredentials&&(n=!0));let r=await this.getToken();return{serverUrl:e,projectKey:t,hasToken:!!(r&&r.trim().length>0),detectedFromProperties:s,hasPlaintextCredentialsWarning:n}}};var g=v(require("vscode"));var m=class{serverUrl;token;fetchFn;constructor(e){this.serverUrl=e.serverUrl.replace(/\/+$/,""),this.token=e.token,this.fetchFn=e.fetchFn??globalThis.fetch}getAuthHeader(){return this.token?{Authorization:`Basic ${Buffer.from(`${this.token}:`).toString("base64")}`}:{}}parseRating(e){let t=typeof e=="number"?e:parseFloat(String(e||"1.0"));return t<=1?"A":t<=2?"B":t<=3?"C":t<=4?"D":"E"}extractFilePath(e){let t=e.indexOf(":");return t!==-1?e.slice(t+1):e}async verifyConnection(){try{let e=`${this.serverUrl}/api/authentication/validate`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(t.status===401||t.status===403)return{ok:!1,message:`Authentication failed (HTTP ${t.status}). Please verify your token.`};if(!t.ok)return{ok:!1,message:`Server returned HTTP ${t.status}: ${t.statusText}`};let s=await t.json();return s&&s.valid===!0?{ok:!0}:{ok:!1,message:"Invalid credentials: SonarQube reported token as invalid."}}catch(e){return{ok:!1,message:`Cannot reach SonarQube server at ${this.serverUrl}: ${e.message||String(e)}`}}}async fetchProjects(){try{let e=`${this.serverUrl}/api/projects/search?ps=100`,t=await this.fetchFn(e,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!t.ok)throw new Error(`HTTP ${t.status}: ${t.statusText}`);return((await t.json()).components||[]).map(n=>({key:n.key,name:n.name||n.key}))}catch(e){return console.error("Failed to fetch SonarQube projects:",e.message),[]}}async getOverview(e){let t=["bugs","reliability_rating","vulnerabilities","security_rating","code_smells","sqale_rating","coverage","lines_to_cover","duplicated_lines_density","duplicated_lines","security_hotspots"].join(","),s=`${this.serverUrl}/api/measures/component?component=${encodeURIComponent(e)}&metricKeys=${t}`,n=await this.fetchFn(s,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!n.ok)throw new Error(`Failed to fetch measures: HTTP ${n.status} ${n.statusText}`);let i=await n.json(),r={};for(let a of i.component?.measures||[])a.value!==void 0&&(r[a.metric]=a.value);return{security:{count:parseInt(r.vulnerabilities||"0",10),rating:this.parseRating(r.security_rating)},reliability:{count:parseInt(r.bugs||"0",10),rating:this.parseRating(r.reliability_rating)},maintainability:{count:parseInt(r.code_smells||"0",10),rating:this.parseRating(r.sqale_rating)},acceptedIssues:{count:0},coverage:{percentage:parseFloat(r.coverage||"0"),linesToCover:parseInt(r.lines_to_cover||"0",10)},duplications:{percentage:parseFloat(r.duplicated_lines_density||"0"),duplicatedLines:parseInt(r.duplicated_lines||"0",10)},securityHotspots:{count:parseInt(r.security_hotspots||"0",10),rating:"A"}}}async getIssues(e,t){let s="BUG,VULNERABILITY,CODE_SMELL";t==="reliability"?s="BUG":t==="security"?s="VULNERABILITY":t==="maintainability"&&(s="CODE_SMELL");let n=`${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(e)}&types=${s}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`,i=await this.fetchFn(n,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!i.ok)throw new Error(`Failed to fetch issues: HTTP ${i.status} ${i.statusText}`);return((await i.json()).issues||[]).map(a=>({id:a.key,ruleKey:a.rule||"",message:a.message||"",component:a.component||"",filePath:this.extractFilePath(a.component||""),line:a.line,type:a.type||"CODE_SMELL",severity:a.severity||"MAJOR",status:a.status||"OPEN",effort:a.effort,tags:a.tags||[],creationDate:a.creationDate||""}))}async getHotspots(e){let t=`${this.serverUrl}/api/hotspots/search?projectKey=${encodeURIComponent(e)}&status=TO_REVIEW&ps=100`,s=await this.fetchFn(t,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!s.ok)throw new Error(`Failed to fetch hotspots: HTTP ${s.status} ${s.statusText}`);return((await s.json()).hotspots||[]).map(i=>({id:i.key,ruleKey:i.ruleKey||"",message:i.message||"",component:i.component||"",filePath:this.extractFilePath(i.component||""),line:i.line,type:"HOTSPOT",severity:i.vulnerabilityProbability==="HIGH"?"CRITICAL":"MAJOR",status:i.status||"TO_REVIEW",tags:["security-hotspot"],creationDate:i.creationDate||""}))}async getEnrichedRule(e){try{let t=`${this.serverUrl}/api/rules/show?key=${encodeURIComponent(e)}`,s=await this.fetchFn(t,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!s.ok)return{key:e,name:e,cleanDesc:"Verify code adherence to Sonar rule guidelines."};let n=await s.json(),r=(n.rule?.mdDesc||n.rule?.htmlDesc||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();return{key:n.rule?.key||e,name:n.rule?.name||e,cleanDesc:r||"Verify code adherence to Sonar rule guidelines."}}catch{return{key:e,name:e,cleanDesc:"Verify code adherence to Sonar rule guidelines."}}}async getCoverageFiles(e){let t=`${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(e)}&metricKeys=uncovered_lines,coverage&qualifiers=FIL&ps=50`,s=await this.fetchFn(t,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!s.ok)throw new Error(`Failed to fetch coverage files: HTTP ${s.status} ${s.statusText}`);let n=await s.json(),i=[];for(let r of n.components||[]){let a={};for(let u of r.measures||[])a[u.metric]=u.value;let o=parseInt(a.uncovered_lines||"0",10),d=parseFloat(a.coverage||"0");(o>0||d<80)&&i.push({id:r.key,ruleKey:"coverage:uncovered_lines",message:`${o} uncovered lines (${d.toFixed(0)}% coverage)`,component:r.key,filePath:r.path||this.extractFilePath(r.key),type:"COVERAGE",severity:d<50?"CRITICAL":"MAJOR",status:"UNCOVERED",effort:`${o} lines`,tags:["test-coverage","unit-test"],creationDate:new Date().toISOString()})}return i}async getDuplicationFiles(e){let t=`${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(e)}&metricKeys=duplicated_lines_density,duplicated_blocks&qualifiers=FIL&ps=50`,s=await this.fetchFn(t,{method:"GET",headers:{Accept:"application/json",...this.getAuthHeader()}});if(!s.ok)throw new Error(`Failed to fetch duplication files: HTTP ${s.status} ${s.statusText}`);let n=await s.json(),i=[];for(let r of n.components||[]){let a={};for(let u of r.measures||[])a[u.metric]=u.value;let o=parseFloat(a.duplicated_lines_density||"0"),d=parseInt(a.duplicated_blocks||"0",10);(o>0||d>0)&&i.push({id:r.key,ruleKey:"duplications:duplicated_code",message:`${o.toFixed(1)}% duplicated lines (${d} duplicated blocks)`,component:r.key,filePath:r.path||this.extractFilePath(r.key),type:"DUPLICATION",severity:o>20?"CRITICAL":"MAJOR",status:"DUPLICATED",effort:`${d} blocks`,tags:["code-duplication","refactoring"],creationDate:new Date().toISOString()})}return i}};var b=v(require("node:path")),E=v(require("node:fs/promises")),l=v(require("vscode")),f=class{workspaceRoot;fileExistsFn;findFilesFn;constructor(e){this.workspaceRoot=e?.workspaceRoot??l.workspace.workspaceFolders?.[0]?.uri.fsPath,this.fileExistsFn=e?.fileExistsFn??(async t=>{try{return await E.stat(t),!0}catch{return!1}}),this.findFilesFn=e?.findFilesFn??(async t=>(await l.workspace.findFiles(t,"**/node_modules/**",5)).map(n=>n.fsPath))}async resolveFilePath(e){if(!this.workspaceRoot)return null;let t=b.isAbsolute(e)?e:b.join(this.workspaceRoot,e);if(await this.fileExistsFn(t))return t;let s=b.basename(e);if(s){let n=await this.findFilesFn(`**/${s}`);if(n&&n.length>0)return n[0]}return null}async openFileAtLine(e,t){let s=await this.resolveFilePath(e);if(!s)return l.window.showWarningMessage(`Could not find file locally: ${e}`),!1;try{let n=l.Uri.file(s),i=await l.workspace.openTextDocument(n),r=await l.window.showTextDocument(i,{preview:!1});if(t!==void 0&&t>0){let a=t-1,o=new l.Position(a,0);r.selection=new l.Selection(o,o),r.revealRange(new l.Range(o,o),l.TextEditorRevealType.InCenter)}return!0}catch(n){return l.window.showErrorMessage(`Failed to open file: ${n.message||String(n)}`),!1}}};var A=v(require("node:path")),j=v(require("node:fs/promises")),h=v(require("vscode"));var y=class{ruleCache=new Map;fileNavigator;fetchRuleFn;readCodeSnippetFn;constructor(e){this.fileNavigator=e?.fileNavigator??new f,this.fetchRuleFn=e?.fetchRuleFn,this.readCodeSnippetFn=e?.readCodeSnippetFn}getAvailableAgents(){return[{id:"copilot",name:"GitHub Copilot",description:"VS Code Copilot Chat"},{id:"antigravity",name:"Antigravity",description:"Deepmind Antigravity Agent"},{id:"codex",name:"Codex",description:"Codex Agent"},{id:"clipboard",name:"Clipboard Only",description:"Copy prompt to clipboard"}]}async getRule(e){if(this.ruleCache.has(e))return this.ruleCache.get(e);let t;return this.fetchRuleFn?t=await this.fetchRuleFn(e):t={key:e,name:e,cleanDesc:"Adhere to SonarQube quality standard for this rule."},this.ruleCache.set(e,t),t}detectLanguage(e){switch(A.extname(e).toLowerCase()){case".ts":case".tsx":return"typescript";case".js":case".jsx":return"javascript";case".vue":return"vue";case".html":return"html";case".css":return"css";case".py":return"python";case".java":return"java";case".go":return"go";case".rs":return"rust";default:return""}}async readCodeSnippet(e,t){if(this.readCodeSnippetFn)return this.readCodeSnippetFn(e,t);let s=await this.fileNavigator.resolveFilePath(e);if(!s)return null;try{let i=(await j.readFile(s,"utf-8")).split(/\r?\n/),r=i.length,a=t!==void 0&&t>0?t:1,o=Math.max(1,a-10),d=Math.min(r,a+10),u=[];for(let w=o;w<=d;w++){let F=i[w-1],B=w===a?" ---> [ISSUE HERE] ":"      ";u.push(`${w.toString().padStart(4," ")} |${B}${F}`)}return{snippet:u.join(`
-`),startLine:o,endLine:d,language:this.detectLanguage(e)}}catch{return null}}async assemblePrompt(e){let t=await this.readCodeSnippet(e.filePath,e.line);if(e.type==="COVERAGE"){let i=`@workspace Mohon buatkan unit test untuk meningkatkan test coverage pada file berikut:
+"use strict";var L=Object.create;var k=Object.defineProperty;var T=Object.getOwnPropertyDescriptor;var R=Object.getOwnPropertyNames;var $=Object.getPrototypeOf,U=Object.prototype.hasOwnProperty;var M=(d,e)=>{for(var t in e)k(d,t,{get:e[t],enumerable:!0})},j=(d,e,t,i)=>{if(e&&typeof e=="object"||typeof e=="function")for(let n of R(e))!U.call(d,n)&&n!==t&&k(d,n,{get:()=>e[n],enumerable:!(i=T(e,n))||i.enumerable});return d};var m=(d,e,t)=>(t=d!=null?L($(d)):{},j(e||!d||!d.__esModule?k(t,"default",{value:d,enumerable:!0}):t,d)),_=d=>j(k({},"__esModule",{value:!0}),d);var K={};M(K,{activate:()=>N,deactivate:()=>O});module.exports=_(K);var p=m(require("vscode"));var S=m(require("node:path")),I=m(require("node:fs/promises")),P="sonarAgent.token",C=class d{secrets;config;workspaceRoot;readFileFn;activeProjectKey;constructor(e){this.secrets=e.secretStorage,this.config=e.workspaceConfig,this.workspaceRoot=e.workspaceRoot,this.readFileFn=e.readFileFn??(t=>I.readFile(t,"utf-8"))}static parseProperties(e){let t=e.split(/\r?\n/),i,n,r=!1;for(let o of t){let a=o.trim();if(!a||a.startsWith("#")||a.startsWith(";"))continue;let s=a.indexOf("=");if(s===-1)continue;let c=a.slice(0,s).trim(),g=a.slice(s+1).trim();c==="sonar.projectKey"?i=g:c==="sonar.host.url"?n=g:(c==="sonar.login"||c==="sonar.password"||c==="sonar.token")&&(r=!0)}return{projectKey:i,serverUrl:n,hasPlaintextCredentials:r}}async getToken(){return this.secrets.get(P)}async setToken(e){await this.secrets.store(P,e.trim())}async deleteToken(){await this.secrets.delete(P)}async setServerUrl(e){await this.config.update("serverUrl",e.trim(),!0)}async setProjectKey(e){this.activeProjectKey=e.trim(),await this.config.update("projectKey",this.activeProjectKey,!0)}async detectWorkspaceProperties(){if(!this.workspaceRoot)return null;let e=S.join(this.workspaceRoot,"sonar-project.properties");try{let t=await this.readFileFn(e);return d.parseProperties(t)}catch{return null}}async getConfig(){let e=this.config.get("serverUrl",""),t=this.activeProjectKey??this.config.get("projectKey",""),i=!1,n=!1,r=await this.detectWorkspaceProperties();r&&(r.projectKey&&(t=r.projectKey,i=!0),!e&&r.serverUrl&&(e=r.serverUrl),r.hasPlaintextCredentials&&(n=!0));let o=await this.getToken();return{serverUrl:e,projectKey:t,hasToken:!!(o&&o.trim().length>0),detectedFromProperties:i,hasPlaintextCredentialsWarning:n}}};var u=m(require("vscode"));var v=class{serverUrl;token;fetchFn;constructor(e){this.serverUrl=e.serverUrl.replace(/\/+$/,""),this.token=e.token?e.token.trim():void 0,this.fetchFn=e.fetchFn??globalThis.fetch}getAuthHeader(){return this.token?{Authorization:`Basic ${Buffer.from(`${this.token}:`).toString("base64")}`}:{}}parseRating(e){let t=typeof e=="number"?e:parseFloat(String(e||"1.0"));return t<=1?"A":t<=2?"B":t<=3?"C":t<=4?"D":"E"}extractFilePath(e){let t=e.indexOf(":");return t!==-1?e.slice(t+1):e}async authenticatedFetch(e){let t={Accept:"application/json",...this.getAuthHeader()},i=await this.fetchFn(e,{method:"GET",headers:t});if(i.status===401&&this.token){let n={Accept:"application/json",Authorization:`Bearer ${this.token}`},r=await this.fetchFn(e,{method:"GET",headers:n});if(r.ok)return r}return i}async verifyConnection(){try{let e=`${this.serverUrl}/api/authentication/validate`,t=await this.authenticatedFetch(e);if(t.status===401||t.status===403)return{ok:!1,message:`Authentication failed (HTTP ${t.status}). Please verify your token.`};if(!t.ok)return{ok:!1,message:`Server returned HTTP ${t.status}: ${t.statusText}`};let i=await t.json();return i&&i.valid===!0?{ok:!0}:{ok:!1,message:"Invalid credentials: SonarQube reported token as invalid."}}catch(e){return{ok:!1,message:`Cannot reach SonarQube server at ${this.serverUrl}: ${e.message||String(e)}`}}}async fetchProjects(){let e=[`${this.serverUrl}/api/components/search?qualifiers=TRK&ps=100`,`${this.serverUrl}/api/components/search_projects?ps=100`,`${this.serverUrl}/api/projects/search?ps=100`,`${this.serverUrl}/api/projects/search?ps=100&qualifiers=TRK`,`${this.serverUrl}/api/components/search?qualifiers=TRK`];for(let t of e)try{let i=await this.authenticatedFetch(t);if(!i.ok)continue;let n=await i.json(),r=n.components||n.projects||n.results||(Array.isArray(n)?n:[]);if(Array.isArray(r)&&r.length>0)return r.map(o=>({key:o.key||o.id||o.projectKey,name:o.name||o.key}))}catch{}return[]}async getOverview(e){let t=["bugs","reliability_rating","vulnerabilities","security_rating","code_smells","sqale_rating","coverage","lines_to_cover","duplicated_lines_density","duplicated_lines","security_hotspots"].join(","),i=`${this.serverUrl}/api/measures/component?component=${encodeURIComponent(e)}&metricKeys=${t}`,n=await this.authenticatedFetch(i);if(!n.ok)throw new Error(`Failed to fetch measures: HTTP ${n.status} ${n.statusText}`);let r=await n.json(),o={};for(let a of r.component?.measures||[])a.value!==void 0&&(o[a.metric]=a.value);return{security:{count:parseInt(o.vulnerabilities||"0",10),rating:this.parseRating(o.security_rating)},reliability:{count:parseInt(o.bugs||"0",10),rating:this.parseRating(o.reliability_rating)},maintainability:{count:parseInt(o.code_smells||"0",10),rating:this.parseRating(o.sqale_rating)},acceptedIssues:{count:0},coverage:{percentage:parseFloat(o.coverage||"0"),linesToCover:parseInt(o.lines_to_cover||"0",10)},duplications:{percentage:parseFloat(o.duplicated_lines_density||"0"),duplicatedLines:parseInt(o.duplicated_lines||"0",10)},securityHotspots:{count:parseInt(o.security_hotspots||"0",10),rating:"A"}}}async getIssues(e,t){let i="BUG,VULNERABILITY,CODE_SMELL";t==="reliability"?i="BUG":t==="security"?i="VULNERABILITY":t==="maintainability"&&(i="CODE_SMELL");let n=`${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(e)}&types=${i}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`,r=await this.authenticatedFetch(n);if(!r.ok)throw new Error(`Failed to fetch issues: HTTP ${r.status} ${r.statusText}`);return((await r.json()).issues||[]).map(a=>({id:a.key,ruleKey:a.rule||"",message:a.message||"",component:a.component||"",filePath:this.extractFilePath(a.component||""),line:a.line,type:a.type||"CODE_SMELL",severity:a.severity||"MAJOR",status:a.status||"OPEN",effort:a.effort,tags:a.tags||[],creationDate:a.creationDate||""}))}async getHotspots(e){let t=`${this.serverUrl}/api/hotspots/search?projectKey=${encodeURIComponent(e)}&status=TO_REVIEW&ps=100`,i=await this.authenticatedFetch(t);if(!i.ok)throw new Error(`Failed to fetch hotspots: HTTP ${i.status} ${i.statusText}`);return((await i.json()).hotspots||[]).map(r=>({id:r.key,ruleKey:r.ruleKey||"",message:r.message||"",component:r.component||"",filePath:this.extractFilePath(r.component||""),line:r.line,type:"HOTSPOT",severity:"MAJOR",status:r.status||"TO_REVIEW",tags:["security-hotspot"],creationDate:r.creationDate||""}))}async getEnrichedRule(e){try{let t=`${this.serverUrl}/api/rules/show?key=${encodeURIComponent(e)}`,i=await this.authenticatedFetch(t);if(!i.ok)return{key:e,name:e,cleanDesc:"Verify code adherence to Sonar rule guidelines."};let n=await i.json(),o=(n.rule?.mdDesc||n.rule?.htmlDesc||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();return{key:n.rule?.key||e,name:n.rule?.name||e,cleanDesc:o||"Verify code adherence to Sonar rule guidelines."}}catch{return{key:e,name:e,cleanDesc:"Verify code adherence to Sonar rule guidelines."}}}async getCoverageFiles(e){let t=`${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(e)}&metricKeys=uncovered_lines,coverage&qualifiers=FIL&ps=50`,i=await this.authenticatedFetch(t);if(!i.ok)throw new Error(`Failed to fetch coverage files: HTTP ${i.status} ${i.statusText}`);let n=await i.json(),r=[];for(let o of n.components||[]){let a={};for(let g of o.measures||[])a[g.metric]=g.value;let s=parseInt(a.uncovered_lines||"0",10),c=parseFloat(a.coverage||"0");(s>0||c<80)&&r.push({id:o.key,ruleKey:"coverage:uncovered_lines",message:`${s} uncovered lines (${c.toFixed(0)}% coverage)`,component:o.key,filePath:o.path||this.extractFilePath(o.key),type:"COVERAGE",severity:c<50?"CRITICAL":"MAJOR",status:"UNCOVERED",effort:`${s} lines`,tags:["test-coverage","unit-test"],creationDate:new Date().toISOString()})}return r}async getDuplicationFiles(e){let t=`${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(e)}&metricKeys=duplicated_lines_density,duplicated_blocks&qualifiers=FIL&ps=50`,i=await this.authenticatedFetch(t);if(!i.ok)throw new Error(`Failed to fetch duplication files: HTTP ${i.status} ${i.statusText}`);let n=await i.json(),r=[];for(let o of n.components||[]){let a={};for(let g of o.measures||[])a[g.metric]=g.value;let s=parseFloat(a.duplicated_lines_density||"0"),c=parseInt(a.duplicated_blocks||"0",10);(s>0||c>0)&&r.push({id:o.key,ruleKey:"duplications:duplicated_code",message:`${s.toFixed(1)}% duplicated lines (${c} duplicated blocks)`,component:o.key,filePath:o.path||this.extractFilePath(o.key),type:"DUPLICATION",severity:s>20?"CRITICAL":"MAJOR",status:"DUPLICATED",effort:`${c} blocks`,tags:["code-duplication","refactoring"],creationDate:new Date().toISOString()})}return r}};var b=m(require("node:path")),D=m(require("node:fs/promises")),l=m(require("vscode")),f=class{workspaceRoot;fileExistsFn;findFilesFn;constructor(e){this.workspaceRoot=e?.workspaceRoot??l.workspace.workspaceFolders?.[0]?.uri.fsPath,this.fileExistsFn=e?.fileExistsFn??(async t=>{try{return await D.stat(t),!0}catch{return!1}}),this.findFilesFn=e?.findFilesFn??(async t=>(await l.workspace.findFiles(t,"**/node_modules/**",5)).map(n=>n.fsPath))}async resolveFilePath(e){if(!this.workspaceRoot)return null;let t=b.isAbsolute(e)?e:b.join(this.workspaceRoot,e);if(await this.fileExistsFn(t))return t;let i=b.basename(e);if(i){let n=await this.findFilesFn(`**/${i}`);if(n&&n.length>0)return n[0]}return null}async openFileAtLine(e,t){let i=await this.resolveFilePath(e);if(!i)return l.window.showWarningMessage(`Could not find file locally: ${e}`),!1;try{let n=l.Uri.file(i),r=await l.workspace.openTextDocument(n),o=await l.window.showTextDocument(r,{preview:!1});if(t!==void 0&&t>0){let a=t-1,s=new l.Position(a,0);o.selection=new l.Selection(s,s),o.revealRange(new l.Range(s,s),l.TextEditorRevealType.InCenter)}return!0}catch(n){return l.window.showErrorMessage(`Failed to open file: ${n.message||String(n)}`),!1}}};var E=m(require("node:path")),B=m(require("node:fs/promises")),h=m(require("vscode"));var y=class{ruleCache=new Map;fileNavigator;fetchRuleFn;readCodeSnippetFn;constructor(e){this.fileNavigator=e?.fileNavigator??new f,this.fetchRuleFn=e?.fetchRuleFn,this.readCodeSnippetFn=e?.readCodeSnippetFn}getAvailableAgents(){return[{id:"copilot",name:"GitHub Copilot",description:"VS Code Copilot Chat"},{id:"antigravity",name:"Antigravity",description:"Deepmind Antigravity Agent"},{id:"codex",name:"Codex",description:"Codex Agent"},{id:"clipboard",name:"Clipboard Only",description:"Copy prompt to clipboard"}]}async getRule(e){if(this.ruleCache.has(e))return this.ruleCache.get(e);let t;return this.fetchRuleFn?t=await this.fetchRuleFn(e):t={key:e,name:e,cleanDesc:"Adhere to SonarQube quality standard for this rule."},this.ruleCache.set(e,t),t}detectLanguage(e){switch(E.extname(e).toLowerCase()){case".ts":case".tsx":return"typescript";case".js":case".jsx":return"javascript";case".vue":return"vue";case".html":return"html";case".css":return"css";case".py":return"python";case".java":return"java";case".go":return"go";case".rs":return"rust";default:return""}}async readCodeSnippet(e,t){if(this.readCodeSnippetFn)return this.readCodeSnippetFn(e,t);let i=await this.fileNavigator.resolveFilePath(e);if(!i)return null;try{let r=(await B.readFile(i,"utf-8")).split(/\r?\n/),o=r.length,a=t!==void 0&&t>0?t:1,s=Math.max(1,a-10),c=Math.min(o,a+10),g=[];for(let w=s;w<=c;w++){let F=r[w-1],A=w===a?" ---> [ISSUE HERE] ":"      ";g.push(`${w.toString().padStart(4," ")} |${A}${F}`)}return{snippet:g.join(`
+`),startLine:s,endLine:c,language:this.detectLanguage(e)}}catch{return null}}async assemblePrompt(e){let t=await this.readCodeSnippet(e.filePath,e.line);if(e.type==="COVERAGE"){let r=`@workspace Mohon buatkan unit test untuk meningkatkan test coverage pada file berikut:
 
-`;return i+=`### \u{1F4CD} File Target
-`,i+=`- File: \`${e.filePath}\`
-`,i+=`- Status: ${e.message}
+`;return r+=`### \u{1F4CD} File Target
+`,r+=`- File: \`${e.filePath}\`
+`,r+=`- Status: ${e.message}
 
-`,t&&(i+=`### \u{1F4BB} Potongan Kode Lokal (\`${e.filePath}\`)
-`,i+=`\`\`\`${t.language}
+`,t&&(r+=`### \u{1F4BB} Potongan Kode Lokal (\`${e.filePath}\`)
+`,r+=`\`\`\`${t.language}
 ${t.snippet}
 \`\`\`
 
-`),i+=`### \u{1F3AF} Instruksi untuk Agent
-`,i+=`1. Analisis kode pada file \`${e.filePath}\`.
-`,i+=`2. Buatkan unit test lengkap untuk meng-cover fungsi, branch, dan baris yang belum teruji.
-`,i+=`3. Gunakan framework testing yang konsisten dengan project ini.
-`,i}if(e.type==="DUPLICATION"){let i=`@workspace Mohon refactor kode duplikat pada file berikut:
+`),r+=`### \u{1F3AF} Instruksi untuk Agent
+`,r+=`1. Analisis kode pada file \`${e.filePath}\`.
+`,r+=`2. Buatkan unit test lengkap untuk meng-cover fungsi, branch, dan baris yang belum teruji.
+`,r+=`3. Gunakan framework testing yang konsisten dengan project ini.
+`,r}if(e.type==="DUPLICATION"){let r=`@workspace Mohon refactor kode duplikat pada file berikut:
 
-`;return i+=`### \u{1F4CD} File Target
-`,i+=`- File: \`${e.filePath}\`
-`,i+=`- Status: ${e.message}
+`;return r+=`### \u{1F4CD} File Target
+`,r+=`- File: \`${e.filePath}\`
+`,r+=`- Status: ${e.message}
 
-`,t&&(i+=`### \u{1F4BB} Potongan Kode Lokal (\`${e.filePath}\`)
-`,i+=`\`\`\`${t.language}
+`,t&&(r+=`### \u{1F4BB} Potongan Kode Lokal (\`${e.filePath}\`)
+`,r+=`\`\`\`${t.language}
 ${t.snippet}
 \`\`\`
 
-`),i+=`### \u{1F3AF} Instruksi untuk Agent
-`,i+=`1. Identifikasi blok kode yang berulang/duplikat pada file \`${e.filePath}\`.
-`,i+=`2. Ekstrak logic yang berulang menjadi helper function, method bersama, atau modul reusable.
-`,i+=`3. Pastikan tidak mengubah output atau perilaku fungsi yang ada.
-`,i}let s=await this.getRule(e.ruleKey),n=`@workspace Mohon perbaiki SonarQube issue berikut:
+`),r+=`### \u{1F3AF} Instruksi untuk Agent
+`,r+=`1. Identifikasi blok kode yang berulang/duplikat pada file \`${e.filePath}\`.
+`,r+=`2. Ekstrak logic yang berulang menjadi helper function, method bersama, atau modul reusable.
+`,r+=`3. Pastikan tidak mengubah output atau perilaku fungsi yang ada.
+`,r}let i=await this.getRule(e.ruleKey),n=`@workspace Mohon perbaiki SonarQube issue berikut:
 
 `;return n+=`### \u{1F4CD} Lokasi
 `,n+=`- File: \`${e.filePath}\`
@@ -38,11 +38,11 @@ ${t.snippet}
 `,n+=`### \u26A0\uFE0F Detail Masalah
 `,n+=`- Pesan: "${e.message}"
 `,n+=`- Tipe: ${e.type} | Severity: ${e.severity}
-`,n+=`- Sonar Rule: \`${s.key}\` - ${s.name}
+`,n+=`- Sonar Rule: \`${i.key}\` - ${i.name}
 
 `,n+=`### \u{1F4D6} Penjelasan Aturan SonarQube
-`,n+=`${s.cleanDesc}
-`,s.recommendation&&(n+=`> Rekomendasi Sonar: ${s.recommendation}
+`,n+=`${i.cleanDesc}
+`,i.recommendation&&(n+=`> Rekomendasi Sonar: ${i.recommendation}
 `),n+=`
 `,t&&(n+=`### \u{1F4BB} Potongan Kode Lokal (\`${e.filePath}\` L${t.startLine}-L${t.endLine})
 `,n+=`\`\`\`${t.language}
@@ -55,21 +55,21 @@ ${t.snippet}
 `,n+=`3. Berikan kode perbaikan yang lengkap dan jelaskan perubahannya secara ringkas.
 `,n}async assembleBatchPrompt(e){if(e.length===1)return this.assemblePrompt(e[0]);let t=`@workspace Mohon perbaiki ${e.length} SonarQube issues berikut sekaligus:
 
-`,s=new Map;for(let n of e){let i=s.get(n.filePath)||[];i.push(n),s.set(n.filePath,i)}for(let[n,i]of s){t+=`## \u{1F4C1} File: \`${n}\` (${i.length} issues)
+`,i=new Map;for(let n of e){let r=i.get(n.filePath)||[];r.push(n),i.set(n.filePath,r)}for(let[n,r]of i){t+=`## \u{1F4C1} File: \`${n}\` (${r.length} issues)
 
-`;for(let r=0;r<i.length;r++){let a=i[r],o=await this.getRule(a.ruleKey),d=await this.readCodeSnippet(a.filePath,a.line);t+=`### Issue #${r+1}: Line ${a.line||"File level"} [${a.severity}] ${o.name}
+`;for(let o=0;o<r.length;o++){let a=r[o],s=await this.getRule(a.ruleKey),c=await this.readCodeSnippet(a.filePath,a.line);t+=`### Issue #${o+1}: Line ${a.line||"File level"} [${a.severity}] ${s.name}
 `,t+=`- Pesan: "${a.message}"
-`,t+=`- Rule: \`${o.key}\`
-`,t+=`- Panduan: ${o.cleanDesc}
-`,d&&(t+=`\`\`\`${d.language}
-${d.snippet}
+`,t+=`- Rule: \`${s.key}\`
+`,t+=`- Panduan: ${s.cleanDesc}
+`,c&&(t+=`\`\`\`${c.language}
+${c.snippet}
 \`\`\`
 `),t+=`
 `}}return t+=`### \u{1F3AF} Instruksi untuk Agent
 `,t+=`1. Selesaikan semua issue di atas secara terstruktur per file.
 `,t+=`2. Pastikan tidak ada regresi dan kode tetap bersih.
 `,t+=`3. Rangkum perbaikan yang dilakukan untuk setiap issue.
-`,t}async dispatch(e,t,s){try{await h.env.clipboard.writeText(e)}catch{}if(s&&s.line&&await this.fileNavigator.openFileAtLine(s.filePath,s.line),t==="copilot")try{return await h.commands.executeCommand("workbench.action.chat.open",{query:e}),h.window.showInformationMessage("Dispatched Fix Prompt to GitHub Copilot Chat!"),{ok:!0,message:"Dispatched to GitHub Copilot Chat."}}catch{return h.window.showInformationMessage("Prompt copied to clipboard! Paste it into GitHub Copilot Chat."),{ok:!0,message:"Copied to clipboard (Copilot chat command not found)."}}let n=t==="antigravity"?"Antigravity Agent":t==="codex"?"Codex Agent":"Clipboard";return h.window.showInformationMessage(`Fix Prompt copied to clipboard for ${n}! Paste it into your agent chat.`),{ok:!0,message:`Prompt ready in clipboard for ${n}.`}}};var x=class{constructor(e,t,s,n){this.extensionUri=e;this.projectDetector=t;this.fileNavigator=s??new f,this.agentDispatcher=n??new y({fileNavigator:this.fileNavigator})}static viewType="sonarAgent.overviewView";_view;fileNavigator;agentDispatcher;resolveWebviewView(e,t,s){this._view=e,e.webview.options={enableScripts:!0,localResourceRoots:[this.extensionUri]},e.webview.html=this._getHtmlForWebview(e.webview),e.webview.onDidReceiveMessage(async n=>{switch(n.command){case"init":{await this._syncState();break}case"connect":{await this._handleConnect(n.serverUrl,n.token);break}case"disconnect":{await this._handleDisconnect();break}case"selectProject":{n.projectKey&&(await this.projectDetector.setProjectKey(n.projectKey),await this._syncState());break}case"openProjectPicker":{await this.promptProjectSelection();break}case"fetchDetails":{await this._handleFetchDetails(n.category);break}case"openFile":{await this.fileNavigator.openFileAtLine(n.filePath,n.line);break}case"sendToAgent":{await this._handleSendToAgent(n.item,n.targetAgentId);break}case"sendBatchToAgent":{await this._handleSendBatchToAgent(n.items,n.targetAgentId);break}case"setTargetAgent":{await g.workspace.getConfiguration("sonarAgent").update("defaultAgent",n.agentId,!0);break}case"refresh":{await this._syncState();break}}})}async refresh(){this._view&&await this._syncState()}async promptProjectSelection(){let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(!e.serverUrl||!t){g.window.showWarningMessage("Please connect to SonarQube first.");return}let n=await new m({serverUrl:e.serverUrl,token:t}).fetchProjects();if(n.length===0){g.window.showInformationMessage("No projects found on the SonarQube server.");return}let i=n.map(a=>({label:a.name,description:a.key,detail:a.key===e.projectKey?"(Currently selected)":void 0})),r=await g.window.showQuickPick(i,{placeHolder:"Select a SonarQube project for this workspace",matchOnDescription:!0});r&&r.description&&(await this.projectDetector.setProjectKey(r.description),await this._syncState(),g.window.showInformationMessage(`Active SonarQube project set to: ${r.label}`))}async _handleSendToAgent(e,t){let s=await this.projectDetector.getConfig(),n=await this.projectDetector.getToken(),i=t||g.workspace.getConfiguration("sonarAgent").get("defaultAgent","copilot"),r;s.serverUrl&&n&&(r=new m({serverUrl:s.serverUrl,token:n}));let a=new y({fileNavigator:this.fileNavigator,fetchRuleFn:r?d=>r.getEnrichedRule(d):void 0}),o=await a.assemblePrompt(e);await a.dispatch(o,i,e)}async _handleSendBatchToAgent(e,t){if(!e||e.length===0)return;let s=await this.projectDetector.getConfig(),n=await this.projectDetector.getToken(),i=t||g.workspace.getConfiguration("sonarAgent").get("defaultAgent","copilot"),r;s.serverUrl&&n&&(r=new m({serverUrl:s.serverUrl,token:n}));let a=new y({fileNavigator:this.fileNavigator,fetchRuleFn:r?d=>r.getEnrichedRule(d):void 0}),o=await a.assembleBatchPrompt(e);await a.dispatch(o,i,e[0])}async _handleFetchDetails(e){if(!this._view)return;let t=await this.projectDetector.getConfig(),s=await this.projectDetector.getToken();if(!(!t.serverUrl||!t.projectKey||!s)){this._view.webview.postMessage({type:"loadingDetails",loading:!0});try{let n=new m({serverUrl:t.serverUrl,token:s}),i=[];e==="hotspots"?i=await n.getHotspots(t.projectKey):e==="coverage"?i=await n.getCoverageFiles(t.projectKey):e==="duplications"?i=await n.getDuplicationFiles(t.projectKey):e==="reliability"||e==="security"||e==="maintainability"?i=await n.getIssues(t.projectKey,e):i=await n.getIssues(t.projectKey),this._view.webview.postMessage({type:"details",category:e,items:i})}catch(n){this._view.webview.postMessage({type:"detailsError",message:n.message||"Failed to load issues."})}finally{this._view.webview.postMessage({type:"loadingDetails",loading:!1})}}}async _syncState(){if(!this._view)return;let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken(),s=g.workspace.getConfiguration("sonarAgent").get("defaultAgent","copilot");if(e.serverUrl&&e.hasToken&&t){this._view.webview.postMessage({type:"loading",loading:!0});let n=new m({serverUrl:e.serverUrl,token:t}),i=await n.fetchProjects(),r=e.projectKey;!r&&i.length>0&&(r=i[0].key,await this.projectDetector.setProjectKey(r));let a=null,o;if(r)try{a=await n.getOverview(r)}catch(d){o=d.message||"Failed to fetch project measures."}this._view.webview.postMessage({type:"state",state:"connected",serverUrl:e.serverUrl,projectKey:r,detectedFromProperties:e.detectedFromProperties??!1,hasPlaintextWarning:e.hasPlaintextCredentialsWarning??!1,projects:i,overview:a,overviewError:o,defaultAgent:s}),this._view.webview.postMessage({type:"loading",loading:!1})}else this._view.webview.postMessage({type:"state",state:"onboarding",serverUrl:e.serverUrl||"http://localhost:9000",defaultAgent:s})}async _handleConnect(e,t){if(!e||!t){this._view?.webview.postMessage({type:"error",message:"Server URL and User Token are required."});return}this._view?.webview.postMessage({type:"connecting"});let n=await new m({serverUrl:e,token:t}).verifyConnection();if(!n.ok){this._view?.webview.postMessage({type:"error",message:n.message||"Connection verification failed."});return}await this.projectDetector.setServerUrl(e),await this.projectDetector.setToken(t),g.window.showInformationMessage("SonarQube connection successfully verified!"),await this._syncState()}async _handleDisconnect(){await this.projectDetector.deleteToken(),g.window.showInformationMessage("Disconnected from SonarQube."),await this._syncState()}_getHtmlForWebview(e){return`<!DOCTYPE html>
+`,t}async dispatch(e,t,i){try{await h.env.clipboard.writeText(e)}catch{}if(i&&i.line&&await this.fileNavigator.openFileAtLine(i.filePath,i.line),t==="copilot")try{return await h.commands.executeCommand("workbench.action.chat.open",{query:e}),h.window.showInformationMessage("Dispatched Fix Prompt to GitHub Copilot Chat!"),{ok:!0,message:"Dispatched to GitHub Copilot Chat."}}catch{return h.window.showInformationMessage("Prompt copied to clipboard! Paste it into GitHub Copilot Chat."),{ok:!0,message:"Copied to clipboard (Copilot chat command not found)."}}let n=t==="antigravity"?"Antigravity Agent":t==="codex"?"Codex Agent":"Clipboard";return h.window.showInformationMessage(`Fix Prompt copied to clipboard for ${n}! Paste it into your agent chat.`),{ok:!0,message:`Prompt ready in clipboard for ${n}.`}}};var x=class{constructor(e,t,i,n){this.extensionUri=e;this.projectDetector=t;this.fileNavigator=i??new f,this.agentDispatcher=n??new y({fileNavigator:this.fileNavigator})}static viewType="sonarAgent.overviewView";_view;fileNavigator;agentDispatcher;resolveWebviewView(e,t,i){this._view=e,e.webview.options={enableScripts:!0,localResourceRoots:[this.extensionUri]},e.webview.html=this._getHtmlForWebview(e.webview),e.webview.onDidReceiveMessage(async n=>{switch(n.command){case"init":{await this._syncState();break}case"connect":{await this._handleConnect(n.serverUrl,n.token);break}case"disconnect":{await this._handleDisconnect();break}case"selectProject":{n.projectKey&&(await this.projectDetector.setProjectKey(n.projectKey),await this._syncState());break}case"openProjectPicker":{await this.promptProjectSelection();break}case"fetchDetails":{await this._handleFetchDetails(n.category);break}case"openFile":{await this.fileNavigator.openFileAtLine(n.filePath,n.line);break}case"sendToAgent":{await this._handleSendToAgent(n.item,n.targetAgentId);break}case"sendBatchToAgent":{await this._handleSendBatchToAgent(n.items,n.targetAgentId);break}case"setTargetAgent":{await u.workspace.getConfiguration("sonarAgent").update("defaultAgent",n.agentId,!0);break}case"refresh":{await this._syncState();break}}})}async refresh(){this._view&&await this._syncState()}async promptProjectSelection(){let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken();if(!e.serverUrl||!t){u.window.showWarningMessage("Please connect to SonarQube first.");return}let n=await new v({serverUrl:e.serverUrl,token:t}).fetchProjects(),r={label:"$(edit) Enter Project Key manually...",description:"Type the exact project key from SonarQube",detail:"Use this if your project is not listed or search is restricted"},o=[r,...n.map(s=>({label:s.name,description:s.key,detail:s.key===e.projectKey?"(Currently selected)":void 0}))],a=await u.window.showQuickPick(o,{placeHolder:"Select a SonarQube project or enter key manually",matchOnDescription:!0});if(a===r){let s=await u.window.showInputBox({prompt:"Enter the SonarQube Project Key",placeHolder:"e.g. org.company:my-project",value:e.projectKey||"",validateInput:c=>c.trim()?null:"Project Key cannot be empty"});if(s&&s.trim()){let c=s.trim();await this.projectDetector.setProjectKey(c),await this._syncState(),u.window.showInformationMessage(`Active SonarQube project set to: ${c}`)}return}a&&a.description&&(await this.projectDetector.setProjectKey(a.description),await this._syncState(),u.window.showInformationMessage(`Active SonarQube project set to: ${a.label}`))}async _handleSendToAgent(e,t){let i=await this.projectDetector.getConfig(),n=await this.projectDetector.getToken(),r=t||u.workspace.getConfiguration("sonarAgent").get("defaultAgent","copilot"),o;i.serverUrl&&n&&(o=new v({serverUrl:i.serverUrl,token:n}));let a=new y({fileNavigator:this.fileNavigator,fetchRuleFn:o?c=>o.getEnrichedRule(c):void 0}),s=await a.assemblePrompt(e);await a.dispatch(s,r,e)}async _handleSendBatchToAgent(e,t){if(!e||e.length===0)return;let i=await this.projectDetector.getConfig(),n=await this.projectDetector.getToken(),r=t||u.workspace.getConfiguration("sonarAgent").get("defaultAgent","copilot"),o;i.serverUrl&&n&&(o=new v({serverUrl:i.serverUrl,token:n}));let a=new y({fileNavigator:this.fileNavigator,fetchRuleFn:o?c=>o.getEnrichedRule(c):void 0}),s=await a.assembleBatchPrompt(e);await a.dispatch(s,r,e[0])}async _handleFetchDetails(e){if(!this._view)return;let t=await this.projectDetector.getConfig(),i=await this.projectDetector.getToken();if(!(!t.serverUrl||!t.projectKey||!i)){this._view.webview.postMessage({type:"loadingDetails",loading:!0});try{let n=new v({serverUrl:t.serverUrl,token:i}),r=[];e==="hotspots"?r=await n.getHotspots(t.projectKey):e==="coverage"?r=await n.getCoverageFiles(t.projectKey):e==="duplications"?r=await n.getDuplicationFiles(t.projectKey):e==="reliability"||e==="security"||e==="maintainability"?r=await n.getIssues(t.projectKey,e):r=await n.getIssues(t.projectKey),this._view.webview.postMessage({type:"details",category:e,items:r})}catch(n){this._view.webview.postMessage({type:"detailsError",message:n.message||"Failed to load issues."})}finally{this._view.webview.postMessage({type:"loadingDetails",loading:!1})}}}async _syncState(){if(!this._view)return;let e=await this.projectDetector.getConfig(),t=await this.projectDetector.getToken(),i=u.workspace.getConfiguration("sonarAgent").get("defaultAgent","copilot");if(e.serverUrl&&e.hasToken&&t){this._view.webview.postMessage({type:"loading",loading:!0});let n=new v({serverUrl:e.serverUrl,token:t}),r=await n.fetchProjects(),o=e.projectKey;!o&&r.length>0&&(o=r[0].key,await this.projectDetector.setProjectKey(o));let a=null,s;if(o)try{a=await n.getOverview(o)}catch(c){s=c.message||"Failed to fetch project measures."}this._view.webview.postMessage({type:"state",state:"connected",serverUrl:e.serverUrl,projectKey:o,detectedFromProperties:e.detectedFromProperties??!1,hasPlaintextWarning:e.hasPlaintextCredentialsWarning??!1,projects:r,overview:a,overviewError:s,defaultAgent:i}),this._view.webview.postMessage({type:"loading",loading:!1})}else this._view.webview.postMessage({type:"state",state:"onboarding",serverUrl:e.serverUrl||"http://localhost:9000",defaultAgent:i})}async _handleConnect(e,t){if(!e||!t){this._view?.webview.postMessage({type:"error",message:"Server URL and User Token are required."});return}this._view?.webview.postMessage({type:"connecting"});let n=await new v({serverUrl:e,token:t}).verifyConnection();if(!n.ok){this._view?.webview.postMessage({type:"error",message:n.message||"Connection verification failed."});return}await this.projectDetector.setServerUrl(e),await this.projectDetector.setToken(t),u.window.showInformationMessage("SonarQube connection successfully verified!"),await this._syncState()}async _handleDisconnect(){await this.projectDetector.deleteToken(),u.window.showInformationMessage("Disconnected from SonarQube."),await this._syncState()}_getHtmlForWebview(e){return`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -286,6 +286,96 @@ ${d.snippet}
       background: rgba(234, 190, 6, 0.15);
       border: 1px solid var(--sonar-yellow);
       color: var(--sonar-yellow);
+    }
+
+    /* Searchable Project Selector */
+    .project-selector-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    .search-input-group {
+      display: flex;
+      align-items: center;
+      position: relative;
+    }
+
+    #project-search-input {
+      width: 100%;
+      padding-right: 26px;
+      cursor: pointer;
+    }
+
+    #project-search-toggle-btn {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: transparent;
+      border: none;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      padding: 2px 4px;
+      font-size: 11px;
+    }
+
+    .project-dropdown-popup {
+      position: absolute;
+      top: calc(100% + 2px);
+      left: 0;
+      right: 0;
+      max-height: 220px;
+      overflow-y: auto;
+      background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+      border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border));
+      border-radius: 4px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      z-index: 100;
+    }
+
+    .project-items-container {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .project-item {
+      padding: 6px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.15));
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .project-item:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+
+    .project-item.active {
+      background: var(--vscode-list-activeSelectionBackground);
+      color: var(--vscode-list-activeSelectionForeground);
+    }
+
+    .project-item-name {
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .project-item-key {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .project-item.active .project-item-key {
+      color: inherit;
+      opacity: 0.85;
+    }
+
+    .project-item.manual-item {
+      font-size: 11px;
+      color: var(--vscode-textLink-foreground, #3794ff);
+      border-bottom: none;
+      padding: 8px 10px;
     }
 
     /* Container Queries for Metric Grid */
@@ -631,12 +721,24 @@ ${d.snippet}
       <div class="card" style="padding: 8px 10px; gap: 8px;">
         <div>
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
-            <label style="font-size: 10px;">PROJECT BINDING</label>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <label style="font-size: 10px;">PROJECT BINDING</label>
+              <button id="manual-project-btn" class="icon-btn" title="Enter Project Key manually" style="font-size: 11px; padding: 0 4px; height: 18px; line-height: 18px;">\u270F\uFE0F</button>
+            </div>
             <span id="detected-badge" class="source-badge hidden">sonar-project.properties</span>
           </div>
-          <select id="project-dropdown">
-            <option value="">Loading projects...</option>
-          </select>
+          <div class="project-selector-wrapper">
+            <div class="search-input-group">
+              <input id="project-search-input" type="text" placeholder="Type to search or click to pick project..." autocomplete="off" />
+              <button id="project-search-toggle-btn" type="button" title="Toggle project list">\u25BE</button>
+            </div>
+            <div id="project-dropdown-popup" class="project-dropdown-popup hidden">
+              <div id="project-items-container" class="project-items-container"></div>
+              <div id="manual-project-item" class="project-item manual-item">
+                <span>\u270F\uFE0F Enter Project Key manually...</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div>
@@ -670,7 +772,7 @@ ${d.snippet}
         <span>Fetching Overall Code measures...</span>
       </div>
 
-      <div id="overview-error" class="alert error"></div>
+      <div id="overview-error" class="alert error hidden"></div>
 
       <!-- Metric Cards Grid (Container Query Controlled) -->
       <div id="metrics-grid" class="metrics-grid">
@@ -814,9 +916,109 @@ ${d.snippet}
     const connectBtn = document.getElementById("connect-btn");
     const headerRefreshBtn = document.getElementById("header-refresh-btn");
     const headerDisconnectBtn = document.getElementById("header-disconnect-btn");
-    const projectDropdown = document.getElementById("project-dropdown");
+    const projectSearchInput = document.getElementById("project-search-input");
+    const projectSearchToggleBtn = document.getElementById("project-search-toggle-btn");
+    const projectDropdownPopup = document.getElementById("project-dropdown-popup");
+    const projectItemsContainer = document.getElementById("project-items-container");
+    const manualProjectItem = document.getElementById("manual-project-item");
     const targetAgentDropdown = document.getElementById("target-agent-dropdown");
     const detectedBadge = document.getElementById("detected-badge");
+
+    let cachedProjects = [];
+    let currentSelectedProjectKey = "";
+
+    function renderProjectList(filterText) {
+      projectItemsContainer.innerHTML = "";
+      const q = (filterText || "").trim().toLowerCase();
+
+      const filtered = cachedProjects.filter((p) => {
+        if (!q) return true;
+        const nameMatch = (p.name || "").toLowerCase().includes(q);
+        const keyMatch = (p.key || "").toLowerCase().includes(q);
+        return nameMatch || keyMatch;
+      });
+
+      if (filtered.length === 0) {
+        const emptyDiv = document.createElement("div");
+        emptyDiv.style.padding = "8px 10px";
+        emptyDiv.style.fontSize = "11px";
+        emptyDiv.style.color = "var(--vscode-descriptionForeground)";
+        emptyDiv.textContent = cachedProjects.length === 0 ? "No projects found" : "No matching projects";
+        projectItemsContainer.appendChild(emptyDiv);
+      } else {
+        filtered.forEach((p) => {
+          const itemDiv = document.createElement("div");
+          itemDiv.className = "project-item" + (p.key === currentSelectedProjectKey ? " active" : "");
+
+          const nameRow = document.createElement("div");
+          nameRow.style.display = "flex";
+          nameRow.style.justifyContent = "space-between";
+          nameRow.style.alignItems = "center";
+
+          const nameSpan = document.createElement("span");
+          nameSpan.className = "project-item-name";
+          nameSpan.textContent = p.name;
+          nameRow.appendChild(nameSpan);
+
+          if (p.key === currentSelectedProjectKey) {
+            const check = document.createElement("span");
+            check.style.fontSize = "11px";
+            check.textContent = "\u2713";
+            nameRow.appendChild(check);
+          }
+
+          const keySpan = document.createElement("span");
+          keySpan.className = "project-item-key";
+          keySpan.textContent = p.key;
+
+          itemDiv.appendChild(nameRow);
+          itemDiv.appendChild(keySpan);
+
+          itemDiv.addEventListener("click", () => {
+            currentSelectedProjectKey = p.key;
+            projectSearchInput.value = p.name + " (" + p.key + ")";
+            projectDropdownPopup.classList.add("hidden");
+            vscode.postMessage({ command: "selectProject", projectKey: p.key });
+          });
+
+          projectItemsContainer.appendChild(itemDiv);
+        });
+      }
+    }
+
+    projectSearchInput.addEventListener("focus", () => {
+      projectDropdownPopup.classList.remove("hidden");
+      renderProjectList(projectSearchInput.value);
+    });
+
+    projectSearchInput.addEventListener("input", () => {
+      projectDropdownPopup.classList.remove("hidden");
+      renderProjectList(projectSearchInput.value);
+    });
+
+    projectSearchToggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (projectDropdownPopup.classList.contains("hidden")) {
+        projectDropdownPopup.classList.remove("hidden");
+        renderProjectList("");
+      } else {
+        projectDropdownPopup.classList.add("hidden");
+      }
+    });
+
+    if (manualProjectItem) {
+      manualProjectItem.addEventListener("click", () => {
+        projectDropdownPopup.classList.add("hidden");
+        vscode.postMessage({ command: "openProjectPicker" });
+      });
+    }
+
+    document.addEventListener("click", (e) => {
+      const wrapper = document.querySelector(".project-selector-wrapper");
+      if (wrapper && !wrapper.contains(e.target)) {
+        projectDropdownPopup.classList.add("hidden");
+      }
+    });
 
     // Metric DOM elements
     const securityCount = document.getElementById("metric-security-count");
@@ -1062,12 +1264,12 @@ ${d.snippet}
       vscode.postMessage({ command: "connect", serverUrl, token });
     });
 
-    projectDropdown.addEventListener("change", () => {
-      const selectedKey = projectDropdown.value;
-      if (selectedKey) {
-        vscode.postMessage({ command: "selectProject", projectKey: selectedKey });
-      }
-    });
+    const manualProjectBtn = document.getElementById("manual-project-btn");
+    if (manualProjectBtn) {
+      manualProjectBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "openProjectPicker" });
+      });
+    }
 
     headerRefreshBtn.addEventListener("click", () => {
       vscode.postMessage({ command: "refresh" });
@@ -1126,31 +1328,29 @@ ${d.snippet}
               detectedBadge.classList.add("hidden");
             }
 
-            projectDropdown.innerHTML = "";
-            const projects = message.projects || [];
-            if (projects.length === 0) {
-              const opt = document.createElement("option");
-              opt.value = message.projectKey || "";
-              opt.textContent = message.projectKey || "No projects found";
-              projectDropdown.appendChild(opt);
+            cachedProjects = message.projects || [];
+            currentSelectedProjectKey = message.projectKey || "";
+
+            const matched = cachedProjects.find((p) => p.key === currentSelectedProjectKey);
+            if (matched) {
+              projectSearchInput.value = matched.name + " (" + matched.key + ")";
+            } else if (currentSelectedProjectKey) {
+              projectSearchInput.value = currentSelectedProjectKey;
             } else {
-              projects.forEach((proj) => {
-                const opt = document.createElement("option");
-                opt.value = proj.key;
-                opt.textContent = proj.name + " (" + proj.key + ")";
-                if (proj.key === message.projectKey) {
-                  opt.selected = true;
-                }
-                projectDropdown.appendChild(opt);
-              });
+              projectSearchInput.value = "";
             }
+
+            renderProjectList("");
 
             if (message.overviewError) {
               overviewError.textContent = message.overviewError;
               overviewError.className = "alert error";
-            } else if (message.overview) {
-              overviewError.className = "alert";
-              renderOverview(message.overview);
+            } else {
+              overviewError.className = "alert error hidden";
+              overviewError.textContent = "";
+              if (message.overview) {
+                renderOverview(message.overview);
+              }
             }
           } else {
             connectedView.classList.add("hidden");
@@ -1179,4 +1379,4 @@ ${d.snippet}
     vscode.postMessage({ command: "init" });
   </script>
 </body>
-</html>`}};function O(c){let e=p.workspace.workspaceFolders?.[0]?.uri.fsPath,t=p.workspace.getConfiguration("sonarAgent"),s=new C({secretStorage:c.secrets,workspaceConfig:t,workspaceRoot:e}),n=new x(c.extensionUri,s);c.subscriptions.push(p.window.registerWebviewViewProvider(x.viewType,n)),c.subscriptions.push(p.commands.registerCommand("sonarAgent.refresh",async()=>{await n.refresh()})),c.subscriptions.push(p.commands.registerCommand("sonarAgent.configure",async()=>{await p.commands.executeCommand("sonarAgent.overviewView.focus")})),c.subscriptions.push(p.commands.registerCommand("sonarAgent.selectProject",async()=>{await n.promptProjectSelection()})),c.subscriptions.push(p.commands.registerCommand("sonarAgent.resetConnection",async()=>{await p.window.showWarningMessage("Are you sure you want to disconnect and remove stored SonarQube credentials?",{modal:!0},"Disconnect")==="Disconnect"&&(await s.deleteToken(),await n.refresh(),p.window.showInformationMessage("SonarQube credentials have been removed."))}))}function N(){}0&&(module.exports={activate,deactivate});
+</html>`}};function N(d){let e=p.workspace.workspaceFolders?.[0]?.uri.fsPath,t=new C({secretStorage:d.secrets,workspaceConfig:{get:(n,r)=>p.workspace.getConfiguration("sonarAgent").get(n,r),update:(n,r,o)=>p.workspace.getConfiguration("sonarAgent").update(n,r,o)},workspaceRoot:e}),i=new x(d.extensionUri,t);d.subscriptions.push(p.window.registerWebviewViewProvider(x.viewType,i)),d.subscriptions.push(p.commands.registerCommand("sonarAgent.refresh",async()=>{await i.refresh()})),d.subscriptions.push(p.commands.registerCommand("sonarAgent.configure",async()=>{await p.commands.executeCommand("sonarAgent.overviewView.focus")})),d.subscriptions.push(p.commands.registerCommand("sonarAgent.selectProject",async()=>{await i.promptProjectSelection()})),d.subscriptions.push(p.commands.registerCommand("sonarAgent.resetConnection",async()=>{await p.window.showWarningMessage("Are you sure you want to disconnect and remove stored SonarQube credentials?",{modal:!0},"Disconnect")==="Disconnect"&&(await t.deleteToken(),await i.refresh(),p.window.showInformationMessage("SonarQube credentials have been removed."))}))}function O(){}0&&(module.exports={activate,deactivate});
