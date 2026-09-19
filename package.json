@@ -3,7 +3,12 @@
   "displayName": "Sonar Agent - SonarQube AI Fix & Quality Metrics",
   "description": "SonarQube & SonarCloud metrics dashboard with AI-powered fix dispatcher for GitHub Copilot, Antigravity, and Claude.",
   "version": "0.1.0",
-  "publisher": "sonar-agent",
+  "icon": "media/icon.png",
+  "publisher": "chulit",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chulit/sonar-agent"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -129,13 +134,30 @@
     "build": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
     "check": "tsc --noEmit",
-    "test": "vitest run"
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "package": "vsce package --no-git-tag-version",
+    "release:dry-run": "semantic-release --dry-run"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/git": "^11.0.1",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
     "esbuild": "^0.20.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.8",
+    "semantic-release": "^25.0.9",
     "typescript": "^5.3.3",
+    "typescript-eslint": "^8.70.0",
     "vitest": "^1.3.1"
   }
 }

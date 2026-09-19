@@ -13,6 +13,7 @@ Guidance and operating rules for AI coding agents working on the **Sonar Agent**
 Work the frontier: pick the lowest-numbered ticket in `.scratch/sonar-agent/issues/` whose blockers are marked complete.
 
 For each ticket:
+
 1. **Vertical slice**: Touch all layers (UI, API/Client, State, Tests) needed to deliver the ticket's end-to-end behavior.
 2. **Deep module discipline**: Keep interfaces minimal. Place complex behavior, formatting, caching, and network details behind small module interfaces.
 3. **Verify locally**: Run tests and verify the build before marking acceptance criteria.
@@ -32,7 +33,8 @@ The codebase is organized around four deep modules:
 - **Build**: `npm run build` (bundles with esbuild into `dist/extension.js`)
 - **Watch**: `npm run watch` (fast iterative re-bundle)
 - **Test**: `npm test` (executes unit tests against module seams)
-- **Lint / Typecheck**: `npm run check` (TypeScript static analysis)
+- **Lint / Typecheck**: `npm run lint` (ESLint analysis), `npm run lint:fix` (auto-fix), & `npm run check` (TypeScript static analysis)
+- **Format**: `npm run format` (Prettier code formatter) & `npm run format:check` (verify formatting)
 
 ## Conventions
 
