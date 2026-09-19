@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Background Squircle -->
+  <rect width="256" height="256" rx="56" fill="#0F172A"/>
+
+  <!-- Sonar Arc 1 (Outer - Cyan) -->
+  <path d="M 64 200 A 136 136 0 0 1 200 64" fill="none" stroke="#38BDF8" stroke-width="20" stroke-linecap="round"/>
+
+  <!-- Sonar Arc 2 (Middle - Electric Blue) -->
+  <path d="M 64 200 A 92 92 0 0 1 156 108" fill="none" stroke="#0284C7" stroke-width="20" stroke-linecap="round"/>
+
+  <!-- Sonar Arc 3 (Inner - Deep Blue) -->
+  <path d="M 64 200 A 48 48 0 0 1 112 152" fill="none" stroke="#2563EB" stroke-width="20" stroke-linecap="round"/>
+
+  <!-- Origin dot -->
+  <circle cx="64" cy="200" r="12" fill="#38BDF8"/>
+
+  <!-- AI Agent Sparkle (top-right focal point) -->
+  <path d="M 178 30 Q 178 52 156 52 Q 178 52 178 74 Q 178 52 200 52 Q 178 52 178 30 Z" fill="#F8FAFC"/>
+  <circle cx="178" cy="52" r="4" fill="#38BDF8"/>
+</svg>
