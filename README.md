@@ -1,6 +1,8 @@
-# Sonar Agent
+# Sonar Agent: SonarQube & SonarCloud AI Assistant for VS Code
 
-A VS Code extension that connects to your SonarQube server, displays real-time **Overall Code** metrics (not just New Code), provides drilldowns with ratings (A–E), and offers a **"Send to Agent"** workflow to dispatch enriched fix prompts to your editor AI assistant (GitHub Copilot, Antigravity, Codex, or clipboard).
+A modern VS Code extension connecting your **SonarQube** and **SonarCloud** projects directly into the editor. Monitor real-time **Overall Code quality metrics**, inspect ratings (A–E), and use the **"Send to Agent"** workflow to automatically generate enriched AI fix prompts for **GitHub Copilot**, **Antigravity / Gemini**, **Codex**, or your clipboard.
+
+A powerful companion to SonarLint that bridges clean code analysis with AI-assisted remediations.
 
 ---
 

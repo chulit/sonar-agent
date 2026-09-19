@@ -1,7 +1,7 @@
 {
   "name": "sonar-agent",
-  "displayName": "Sonar Agent",
-  "description": "SonarQube Overall Code metrics dashboard and AI Agent fix dispatcher",
+  "displayName": "Sonar Agent - SonarQube AI Fix & Quality Metrics",
+  "description": "SonarQube & SonarCloud metrics dashboard with AI-powered fix dispatcher for GitHub Copilot, Antigravity, and Claude.",
   "version": "0.1.0",
   "publisher": "sonar-agent",
   "engines": {
@@ -9,8 +9,25 @@
   },
   "categories": [
     "Linters",
-    "Programming Languages",
+    "Testing",
     "Other"
+  ],
+  "keywords": [
+    "sonarqube",
+    "sonarcloud",
+    "sonar",
+    "sonarlint",
+    "code quality",
+    "ai fix",
+    "copilot",
+    "ai agent",
+    "code smell",
+    "security hotspots",
+    "vulnerability",
+    "clean code",
+    "linter",
+    "static analysis",
+    "code coverage"
   ],
   "activationEvents": [
     "onView:sonarAgent.overviewView"
