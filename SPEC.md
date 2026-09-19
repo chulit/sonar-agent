@@ -7,6 +7,7 @@ Developers using SonarQube often struggle with context switching between the web
 ## Solution
 
 **Sonar Agent** is a VS Code extension that brings SonarQube's Overall Code metrics directly into the editor's sidebar with high visual fidelity. It allows developers to:
+
 1. View overall code metrics (Security, Reliability, Maintainability, Coverage, Duplications, Security Hotspots) with Sonar rating badges (A–E) in a responsive, container-aware sidebar card layout.
 2. Filter and inspect issues, uncovered lines, code duplications, and security hotspots directly inside VS Code.
 3. Jump instantly to the affected file and line with one click.
@@ -39,17 +40,20 @@ Developers using SonarQube often struggle with context switching between the web
 ## Implementation Decisions
 
 ### 1. Module Boundaries & Deep Modules
+
 - **`ProjectDetector`**: Small interface exposing `detectConfig(workspaceRoot)` and `saveConfig(config)`. Hides file parsing of `sonar-project.properties`, VS Code configuration lookup, and `context.secrets` management.
 - **`SonarClient`**: Small interface exposing `verifyConnection()`, `getOverview()`, `getDetails(category)`, `getEnrichedRule(ruleKey)`, and `fetchProjects()`. Hides HTTP authentication headers, pagination, error code translation, in-memory caching of rule documentation, and JSON mapping.
 - **`AgentDispatcher`**: Small interface exposing `getAvailableAgents()`, `dispatchSingle(item, targetAgentId)`, and `dispatchBatch(items, targetAgentId)`. Hides path resolution, code context extraction from local text documents, rule enrichment assembly, command dispatching, and clipboard fallback.
 - **`SonarOverviewViewProvider`**: Implements `vscode.WebviewViewProvider`. Encapsulates the Webview HTML lifecycle, container-aware styles, and the two-way message protocol between webview scripts and the extension host.
 
 ### 2. UI & Webview Architecture
+
 - Built with **Vanilla TypeScript + HTML/CSS** with zero third-party UI framework bloat, guaranteeing instant load times in the VS Code sidebar.
 - Styled using CSS **Container Queries** (`container-type: inline-size`) on the root container, allowing adaptive reflow between 1-column and 2-column metric cards based on sidebar width rather than viewport width.
 - Colors and typography bound strictly to VS Code theme variables (`var(--vscode-*)`) combined with standardized Sonar rating palette tokens.
 
 ### 3. Agent Dispatch Contracts
+
 - **Supported Target Agents**:
   - `copilot`: Triggers `workbench.action.chat.open` with `{ query: prompt }`.
   - `antigravity`: Triggers Antigravity chat command if available, with automatic clipboard copy fallback.
@@ -64,15 +68,18 @@ Developers using SonarQube often struggle with context switching between the web
 ## Testing Decisions
 
 ### 1. Definition of a Good Test
+
 - Tests must verify external module behavior across clean seams, not internal private state.
 - No mocking of internal helper functions; test through the public methods of `SonarClient`, `ProjectDetector`, and `AgentDispatcher`.
 
 ### 2. Modules to Test
+
 - **`ProjectDetector`**: Test parsing valid, invalid, and missing `sonar-project.properties` files, and fallback priority between properties, VS Code settings, and secrets.
 - **`SonarClient`**: Test endpoint call construction, successful mapping of measures into `SonarOverview`, handling of HTTP 401/403/404 errors, and rule caching behavior.
 - **`AgentDispatcher`**: Test prompt construction for single issues, batch issues, coverage prompts, duplication prompts, and verifying clipboard fallback when chat commands are mocked as unavailable.
 
 ### 3. Test Harness
+
 - Unit testing with `mocha` or `vitest` with Node.js assertions.
 - Fast execution decoupled from the live VS Code GUI via dependency injection of workspace and storage adapters.
 

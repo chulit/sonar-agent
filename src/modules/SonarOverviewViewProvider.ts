@@ -1,11 +1,11 @@
-import * as vscode from "vscode";
-import { ProjectDetector } from "./ProjectDetector.js";
-import { SonarClient, SonarDetailItem, SonarOverview } from "./SonarClient.js";
-import { FileNavigator } from "./FileNavigator.js";
-import { AgentDispatcher } from "./AgentDispatcher.js";
+import * as vscode from 'vscode';
+import { ProjectDetector } from './ProjectDetector.js';
+import { SonarClient, SonarDetailItem, SonarOverview } from './SonarClient.js';
+import { FileNavigator } from './FileNavigator.js';
+import { AgentDispatcher } from './AgentDispatcher.js';
 
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = "sonarAgent.overviewView";
+  public static readonly viewType = 'sonarAgent.overviewView';
   private _view?: vscode.WebviewView;
   private readonly fileNavigator: FileNavigator;
   private readonly agentDispatcher: AgentDispatcher;
@@ -14,16 +14,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     private readonly projectDetector: ProjectDetector,
     fileNavigator?: FileNavigator,
-    agentDispatcher?: AgentDispatcher
+    agentDispatcher?: AgentDispatcher,
   ) {
     this.fileNavigator = fileNavigator ?? new FileNavigator();
-    this.agentDispatcher = agentDispatcher ?? new AgentDispatcher({ fileNavigator: this.fileNavigator });
+    this.agentDispatcher =
+      agentDispatcher ?? new AgentDispatcher({ fileNavigator: this.fileNavigator });
   }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
+    _token: vscode.CancellationToken,
   ): void {
     this._view = webviewView;
 
@@ -36,51 +37,51 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
-        case "init": {
+        case 'init': {
           await this._syncState();
           break;
         }
-        case "connect": {
+        case 'connect': {
           await this._handleConnect(message.serverUrl, message.token);
           break;
         }
-        case "disconnect": {
+        case 'disconnect': {
           await this._handleDisconnect();
           break;
         }
-        case "selectProject": {
+        case 'selectProject': {
           if (message.projectKey) {
             await this.projectDetector.setProjectKey(message.projectKey);
             await this._syncState();
           }
           break;
         }
-        case "openProjectPicker": {
+        case 'openProjectPicker': {
           await this.promptProjectSelection();
           break;
         }
-        case "fetchDetails": {
+        case 'fetchDetails': {
           await this._handleFetchDetails(message.category);
           break;
         }
-        case "openFile": {
+        case 'openFile': {
           await this.fileNavigator.openFileAtLine(message.filePath, message.line);
           break;
         }
-        case "sendToAgent": {
+        case 'sendToAgent': {
           await this._handleSendToAgent(message.item, message.targetAgentId);
           break;
         }
-        case "sendBatchToAgent": {
+        case 'sendBatchToAgent': {
           await this._handleSendBatchToAgent(message.items, message.targetAgentId);
           break;
         }
-        case "setTargetAgent": {
-          const config = vscode.workspace.getConfiguration("sonarAgent");
-          await config.update("defaultAgent", message.agentId, true);
+        case 'setTargetAgent': {
+          const config = vscode.workspace.getConfiguration('sonarAgent');
+          await config.update('defaultAgent', message.agentId, true);
           break;
         }
-        case "refresh": {
+        case 'refresh': {
           await this._syncState();
           break;
         }
@@ -99,7 +100,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const token = await this.projectDetector.getToken();
 
     if (!config.serverUrl || !token) {
-      vscode.window.showWarningMessage("Please connect to SonarQube first.");
+      vscode.window.showWarningMessage('Please connect to SonarQube first.');
       return;
     }
 
@@ -107,9 +108,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const projects = await client.fetchProjects();
 
     const manualOption = {
-      label: "$(edit) Enter Project Key manually...",
-      description: "Type the exact project key from SonarQube",
-      detail: "Use this if your project is not listed or search is restricted",
+      label: '$(edit) Enter Project Key manually...',
+      description: 'Type the exact project key from SonarQube',
+      detail: 'Use this if your project is not listed or search is restricted',
     };
 
     const items = [
@@ -117,21 +118,21 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       ...projects.map((p) => ({
         label: p.name,
         description: p.key,
-        detail: p.key === config.projectKey ? "(Currently selected)" : undefined,
+        detail: p.key === config.projectKey ? '(Currently selected)' : undefined,
       })),
     ];
 
     const selected = await vscode.window.showQuickPick(items, {
-      placeHolder: "Select a SonarQube project or enter key manually",
+      placeHolder: 'Select a SonarQube project or enter key manually',
       matchOnDescription: true,
     });
 
     if (selected === manualOption) {
       const manualKey = await vscode.window.showInputBox({
-        prompt: "Enter the SonarQube Project Key",
-        placeHolder: "e.g. org.company:my-project",
-        value: config.projectKey || "",
-        validateInput: (val) => (!val.trim() ? "Project Key cannot be empty" : null),
+        prompt: 'Enter the SonarQube Project Key',
+        placeHolder: 'e.g. org.company:my-project',
+        value: config.projectKey || '',
+        validateInput: (val) => (!val.trim() ? 'Project Key cannot be empty' : null),
       });
 
       if (manualKey && manualKey.trim()) {
@@ -153,7 +154,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private async _handleSendToAgent(item: SonarDetailItem, targetAgentId?: string): Promise<void> {
     const config = await this.projectDetector.getConfig();
     const token = await this.projectDetector.getToken();
-    const agentId = targetAgentId || vscode.workspace.getConfiguration("sonarAgent").get<string>("defaultAgent", "copilot");
+    const agentId =
+      targetAgentId ||
+      vscode.workspace.getConfiguration('sonarAgent').get<string>('defaultAgent', 'copilot');
 
     let client: SonarClient | undefined;
     if (config.serverUrl && token) {
@@ -170,12 +173,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     await dispatcher.dispatch(prompt, agentId, item);
   }
 
-  private async _handleSendBatchToAgent(items: SonarDetailItem[], targetAgentId?: string): Promise<void> {
+  private async _handleSendBatchToAgent(
+    items: SonarDetailItem[],
+    targetAgentId?: string,
+  ): Promise<void> {
     if (!items || items.length === 0) return;
 
     const config = await this.projectDetector.getConfig();
     const token = await this.projectDetector.getToken();
-    const agentId = targetAgentId || vscode.workspace.getConfiguration("sonarAgent").get<string>("defaultAgent", "copilot");
+    const agentId =
+      targetAgentId ||
+      vscode.workspace.getConfiguration('sonarAgent').get<string>('defaultAgent', 'copilot');
 
     let client: SonarClient | undefined;
     if (config.serverUrl && token) {
@@ -198,36 +206,41 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const token = await this.projectDetector.getToken();
     if (!config.serverUrl || !config.projectKey || !token) return;
 
-    this._view.webview.postMessage({ type: "loadingDetails", loading: true });
+    this._view.webview.postMessage({ type: 'loadingDetails', loading: true });
 
     try {
       const client = new SonarClient({ serverUrl: config.serverUrl, token });
       let items: SonarDetailItem[] = [];
 
-      if (category === "hotspots") {
+      if (category === 'hotspots') {
         items = await client.getHotspots(config.projectKey);
-      } else if (category === "coverage") {
+      } else if (category === 'coverage') {
         items = await client.getCoverageFiles(config.projectKey);
-      } else if (category === "duplications") {
+      } else if (category === 'duplications') {
         items = await client.getDuplicationFiles(config.projectKey);
-      } else if (category === "reliability" || category === "security" || category === "maintainability" || category === "accepted") {
+      } else if (
+        category === 'reliability' ||
+        category === 'security' ||
+        category === 'maintainability' ||
+        category === 'accepted'
+      ) {
         items = await client.getIssues(config.projectKey, category);
       } else {
         items = await client.getIssues(config.projectKey);
       }
 
       this._view.webview.postMessage({
-        type: "details",
+        type: 'details',
         category,
         items,
       });
     } catch (err: any) {
       this._view.webview.postMessage({
-        type: "detailsError",
-        message: err.message || "Failed to load issues.",
+        type: 'detailsError',
+        message: err.message || 'Failed to load issues.',
       });
     } finally {
-      this._view.webview.postMessage({ type: "loadingDetails", loading: false });
+      this._view.webview.postMessage({ type: 'loadingDetails', loading: false });
     }
   }
 
@@ -238,10 +251,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     const config = await this.projectDetector.getConfig();
     const token = await this.projectDetector.getToken();
-    const defaultAgent = vscode.workspace.getConfiguration("sonarAgent").get<string>("defaultAgent", "copilot");
+    const defaultAgent = vscode.workspace
+      .getConfiguration('sonarAgent')
+      .get<string>('defaultAgent', 'copilot');
 
     if (config.serverUrl && config.hasToken && token) {
-      this._view.webview.postMessage({ type: "loading", loading: true });
+      this._view.webview.postMessage({ type: 'loading', loading: true });
 
       const client = new SonarClient({ serverUrl: config.serverUrl, token });
       const projects = await client.fetchProjects();
@@ -259,13 +274,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         try {
           overview = await client.getOverview(effectiveProjectKey);
         } catch (err: any) {
-          overviewError = err.message || "Failed to fetch project measures.";
+          overviewError = err.message || 'Failed to fetch project measures.';
         }
       }
 
       this._view.webview.postMessage({
-        type: "state",
-        state: "connected",
+        type: 'state',
+        state: 'connected',
         serverUrl: config.serverUrl,
         projectKey: effectiveProjectKey,
         detectedFromProperties: config.detectedFromProperties ?? false,
@@ -276,12 +291,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         defaultAgent,
       });
 
-      this._view.webview.postMessage({ type: "loading", loading: false });
+      this._view.webview.postMessage({ type: 'loading', loading: false });
     } else {
       this._view.webview.postMessage({
-        type: "state",
-        state: "onboarding",
-        serverUrl: config.serverUrl || "http://localhost:9000",
+        type: 'state',
+        state: 'onboarding',
+        serverUrl: config.serverUrl || 'http://localhost:9000',
         defaultAgent,
       });
     }
@@ -290,21 +305,21 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private async _handleConnect(serverUrl: string, token: string): Promise<void> {
     if (!serverUrl || !token) {
       this._view?.webview.postMessage({
-        type: "error",
-        message: "Server URL and User Token are required.",
+        type: 'error',
+        message: 'Server URL and User Token are required.',
       });
       return;
     }
 
-    this._view?.webview.postMessage({ type: "connecting" });
+    this._view?.webview.postMessage({ type: 'connecting' });
 
     const client = new SonarClient({ serverUrl, token });
     const result = await client.verifyConnection();
 
     if (!result.ok) {
       this._view?.webview.postMessage({
-        type: "error",
-        message: result.message || "Connection verification failed.",
+        type: 'error',
+        message: result.message || 'Connection verification failed.',
       });
       return;
     }
@@ -312,14 +327,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     await this.projectDetector.setServerUrl(serverUrl);
     await this.projectDetector.setToken(token);
 
-    vscode.window.showInformationMessage("SonarQube connection successfully verified!");
+    vscode.window.showInformationMessage('SonarQube connection successfully verified!');
 
     await this._syncState();
   }
 
   private async _handleDisconnect(): Promise<void> {
     await this.projectDetector.deleteToken();
-    vscode.window.showInformationMessage("Disconnected from SonarQube.");
+    vscode.window.showInformationMessage('Disconnected from SonarQube.');
     await this._syncState();
   }
 

@@ -1,6 +1,6 @@
-import * as path from "node:path";
-import * as fs from "node:fs/promises";
-import * as vscode from "vscode";
+import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
+import * as vscode from 'vscode';
 
 export interface FileNavigatorOptions {
   workspaceRoot?: string;
@@ -14,7 +14,8 @@ export class FileNavigator {
   private readonly findFilesFn: (pattern: string) => Promise<string[]>;
 
   constructor(options?: FileNavigatorOptions) {
-    this.workspaceRoot = options?.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    this.workspaceRoot =
+      options?.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
     this.fileExistsFn =
       options?.fileExistsFn ??
@@ -30,7 +31,7 @@ export class FileNavigator {
     this.findFilesFn =
       options?.findFilesFn ??
       (async (pattern: string) => {
-        const uris = await vscode.workspace.findFiles(pattern, "**/node_modules/**", 5);
+        const uris = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 5);
         return uris.map((u) => u.fsPath);
       });
   }
@@ -83,10 +84,7 @@ export class FileNavigator {
         const lineIndex = line - 1;
         const pos = new vscode.Position(lineIndex, 0);
         editor.selection = new vscode.Selection(pos, pos);
-        editor.revealRange(
-          new vscode.Range(pos, pos),
-          vscode.TextEditorRevealType.InCenter
-        );
+        editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
       }
 
       return true;

@@ -1,6 +1,6 @@
-import * as vscode from "vscode";
-import { ProjectDetector } from "./modules/ProjectDetector.js";
-import { SonarOverviewViewProvider } from "./modules/SonarOverviewViewProvider.js";
+import * as vscode from 'vscode';
+import { ProjectDetector } from './modules/ProjectDetector.js';
+import { SonarOverviewViewProvider } from './modules/SonarOverviewViewProvider.js';
 
 export function activate(context: vscode.ExtensionContext) {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -9,56 +9,50 @@ export function activate(context: vscode.ExtensionContext) {
     secretStorage: context.secrets,
     workspaceConfig: {
       get: <T>(sec: string, def?: T) =>
-        vscode.workspace.getConfiguration("sonarAgent").get<T>(sec, def as T),
+        vscode.workspace.getConfiguration('sonarAgent').get<T>(sec, def as T),
       update: (sec: string, val: any, target?: boolean | number) =>
-        vscode.workspace.getConfiguration("sonarAgent").update(sec, val, target),
+        vscode.workspace.getConfiguration('sonarAgent').update(sec, val, target),
     },
     workspaceRoot,
   });
 
-  const overviewProvider = new SonarOverviewViewProvider(
-    context.extensionUri,
-    projectDetector
+  const overviewProvider = new SonarOverviewViewProvider(context.extensionUri, projectDetector);
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(SonarOverviewViewProvider.viewType, overviewProvider),
   );
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      SonarOverviewViewProvider.viewType,
-      overviewProvider
-    )
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("sonarAgent.refresh", async () => {
+    vscode.commands.registerCommand('sonarAgent.refresh', async () => {
       await overviewProvider.refresh();
-    })
+    }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("sonarAgent.configure", async () => {
-      await vscode.commands.executeCommand("sonarAgent.overviewView.focus");
-    })
+    vscode.commands.registerCommand('sonarAgent.configure', async () => {
+      await vscode.commands.executeCommand('sonarAgent.overviewView.focus');
+    }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("sonarAgent.selectProject", async () => {
+    vscode.commands.registerCommand('sonarAgent.selectProject', async () => {
       await overviewProvider.promptProjectSelection();
-    })
+    }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("sonarAgent.resetConnection", async () => {
+    vscode.commands.registerCommand('sonarAgent.resetConnection', async () => {
       const confirm = await vscode.window.showWarningMessage(
-        "Are you sure you want to disconnect and remove stored SonarQube credentials?",
+        'Are you sure you want to disconnect and remove stored SonarQube credentials?',
         { modal: true },
-        "Disconnect"
+        'Disconnect',
       );
-      if (confirm === "Disconnect") {
+      if (confirm === 'Disconnect') {
         await projectDetector.deleteToken();
         await overviewProvider.refresh();
-        vscode.window.showInformationMessage("SonarQube credentials have been removed.");
+        vscode.window.showInformationMessage('SonarQube credentials have been removed.');
       }
-    })
+    }),
   );
 }
 

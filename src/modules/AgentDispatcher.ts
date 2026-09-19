@@ -1,8 +1,8 @@
-import * as path from "node:path";
-import * as fs from "node:fs/promises";
-import * as vscode from "vscode";
-import { SonarDetailItem, SonarRuleDoc } from "./SonarClient.js";
-import { FileNavigator } from "./FileNavigator.js";
+import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
+import * as vscode from 'vscode';
+import { SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
+import { FileNavigator } from './FileNavigator.js';
 
 export interface CodeSnippetContext {
   snippet: string;
@@ -18,7 +18,7 @@ export interface AgentDispatcherOptions {
 }
 
 export interface TargetAgent {
-  id: "copilot" | "antigravity" | "codex" | "clipboard";
+  id: 'copilot' | 'antigravity' | 'codex' | 'clipboard';
   name: string;
   description: string;
 }
@@ -27,7 +27,10 @@ export class AgentDispatcher {
   private readonly ruleCache = new Map<string, SonarRuleDoc>();
   private readonly fileNavigator: FileNavigator;
   private readonly fetchRuleFn?: (ruleKey: string) => Promise<SonarRuleDoc>;
-  private readonly readCodeSnippetFn?: (filePath: string, line?: number) => Promise<CodeSnippetContext | null>;
+  private readonly readCodeSnippetFn?: (
+    filePath: string,
+    line?: number,
+  ) => Promise<CodeSnippetContext | null>;
 
   constructor(options?: AgentDispatcherOptions) {
     this.fileNavigator = options?.fileNavigator ?? new FileNavigator();
@@ -37,10 +40,10 @@ export class AgentDispatcher {
 
   getAvailableAgents(): TargetAgent[] {
     return [
-      { id: "copilot", name: "GitHub Copilot", description: "VS Code Copilot Chat" },
-      { id: "antigravity", name: "Antigravity", description: "Deepmind Antigravity Agent" },
-      { id: "codex", name: "Codex", description: "Codex Agent" },
-      { id: "clipboard", name: "Clipboard Only", description: "Copy prompt to clipboard" },
+      { id: 'copilot', name: 'GitHub Copilot', description: 'VS Code Copilot Chat' },
+      { id: 'antigravity', name: 'Antigravity', description: 'Deepmind Antigravity Agent' },
+      { id: 'codex', name: 'Codex', description: 'Codex Agent' },
+      { id: 'clipboard', name: 'Clipboard Only', description: 'Copy prompt to clipboard' },
     ];
   }
 
@@ -56,7 +59,7 @@ export class AgentDispatcher {
       doc = {
         key: ruleKey,
         name: ruleKey,
-        cleanDesc: "Adhere to SonarQube quality standard for this rule.",
+        cleanDesc: 'Adhere to SonarQube quality standard for this rule.',
       };
     }
 
@@ -67,28 +70,28 @@ export class AgentDispatcher {
   private detectLanguage(filePath: string): string {
     const ext = path.extname(filePath).toLowerCase();
     switch (ext) {
-      case ".ts":
-      case ".tsx":
-        return "typescript";
-      case ".js":
-      case ".jsx":
-        return "javascript";
-      case ".vue":
-        return "vue";
-      case ".html":
-        return "html";
-      case ".css":
-        return "css";
-      case ".py":
-        return "python";
-      case ".java":
-        return "java";
-      case ".go":
-        return "go";
-      case ".rs":
-        return "rust";
+      case '.ts':
+      case '.tsx':
+        return 'typescript';
+      case '.js':
+      case '.jsx':
+        return 'javascript';
+      case '.vue':
+        return 'vue';
+      case '.html':
+        return 'html';
+      case '.css':
+        return 'css';
+      case '.py':
+        return 'python';
+      case '.java':
+        return 'java';
+      case '.go':
+        return 'go';
+      case '.rs':
+        return 'rust';
       default:
-        return "";
+        return '';
     }
   }
 
@@ -103,7 +106,7 @@ export class AgentDispatcher {
     }
 
     try {
-      const content = await fs.readFile(resolvedPath, "utf-8");
+      const content = await fs.readFile(resolvedPath, 'utf-8');
       const lines = content.split(/\r?\n/);
       const total = lines.length;
 
@@ -114,12 +117,12 @@ export class AgentDispatcher {
       const snippetLines: string[] = [];
       for (let i = startLine; i <= endLine; i++) {
         const lineContent = lines[i - 1];
-        const marker = i === targetLine ? " ---> [ISSUE HERE] " : "      ";
-        snippetLines.push(`${i.toString().padStart(4, " ")} |${marker}${lineContent}`);
+        const marker = i === targetLine ? ' ---> [ISSUE HERE] ' : '      ';
+        snippetLines.push(`${i.toString().padStart(4, ' ')} |${marker}${lineContent}`);
       }
 
       return {
-        snippet: snippetLines.join("\n"),
+        snippet: snippetLines.join('\n'),
         startLine,
         endLine,
         language: this.detectLanguage(filePath),
@@ -135,7 +138,7 @@ export class AgentDispatcher {
   async assemblePrompt(item: SonarDetailItem): Promise<string> {
     const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
 
-    if (item.type === "COVERAGE") {
+    if (item.type === 'COVERAGE') {
       let prompt = `@workspace Please generate unit tests to improve test coverage for the following file:\n\n`;
       prompt += `### 📍 Target File\n`;
       prompt += `- File: \`${item.filePath}\`\n`;
@@ -153,7 +156,7 @@ export class AgentDispatcher {
       return prompt;
     }
 
-    if (item.type === "DUPLICATION") {
+    if (item.type === 'DUPLICATION') {
       let prompt = `@workspace Please refactor duplicated code in the following file:\n\n`;
       prompt += `### 📍 Target File\n`;
       prompt += `- File: \`${item.filePath}\`\n`;
@@ -176,7 +179,7 @@ export class AgentDispatcher {
     let prompt = `@workspace Please fix the following SonarQube issue:\n\n`;
     prompt += `### 📍 Location\n`;
     prompt += `- File: \`${item.filePath}\`\n`;
-    prompt += `- Line: ${item.line || "File level"}\n\n`;
+    prompt += `- Line: ${item.line || 'File level'}\n\n`;
 
     prompt += `### ⚠️ Issue Details\n`;
     prompt += `- Message: "${item.message}"\n`;
@@ -229,7 +232,7 @@ export class AgentDispatcher {
         const rule = await this.getRule(item.ruleKey);
         const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
 
-        prompt += `### Issue #${idx + 1}: Line ${item.line || "File level"} [${item.severity}] ${rule.name}\n`;
+        prompt += `### Issue #${idx + 1}: Line ${item.line || 'File level'} [${item.severity}] ${rule.name}\n`;
         prompt += `- Message: "${item.message}"\n`;
         prompt += `- Rule: \`${rule.key}\`\n`;
         prompt += `- Guidance: ${rule.cleanDesc}\n`;
@@ -252,7 +255,11 @@ export class AgentDispatcher {
   /**
    * Dispatches the assembled prompt to the specified Target Agent or clipboard.
    */
-  async dispatch(prompt: string, targetAgentId: string, item?: SonarDetailItem): Promise<{ ok: boolean; message: string }> {
+  async dispatch(
+    prompt: string,
+    targetAgentId: string,
+    item?: SonarDetailItem,
+  ): Promise<{ ok: boolean; message: string }> {
     // 1. Always copy prompt to clipboard for user convenience and universal backup
     try {
       await vscode.env.clipboard.writeText(prompt);
@@ -266,31 +273,31 @@ export class AgentDispatcher {
     }
 
     // 3. Dispatch to specific Target Agent
-    if (targetAgentId === "copilot") {
+    if (targetAgentId === 'copilot') {
       try {
-        await vscode.commands.executeCommand("workbench.action.chat.open", {
+        await vscode.commands.executeCommand('workbench.action.chat.open', {
           query: prompt,
         });
-        vscode.window.showInformationMessage("Dispatched Fix Prompt to GitHub Copilot Chat!");
-        return { ok: true, message: "Dispatched to GitHub Copilot Chat." };
+        vscode.window.showInformationMessage('Dispatched Fix Prompt to GitHub Copilot Chat!');
+        return { ok: true, message: 'Dispatched to GitHub Copilot Chat.' };
       } catch {
         vscode.window.showInformationMessage(
-          "Prompt copied to clipboard! Paste it into GitHub Copilot Chat."
+          'Prompt copied to clipboard! Paste it into GitHub Copilot Chat.',
         );
-        return { ok: true, message: "Copied to clipboard (Copilot chat command not found)." };
+        return { ok: true, message: 'Copied to clipboard (Copilot chat command not found).' };
       }
     }
 
     // For Antigravity, Codex, or Clipboard fallback:
     const agentName =
-      targetAgentId === "antigravity"
-        ? "Antigravity Agent"
-        : targetAgentId === "codex"
-        ? "Codex Agent"
-        : "Clipboard";
+      targetAgentId === 'antigravity'
+        ? 'Antigravity Agent'
+        : targetAgentId === 'codex'
+          ? 'Codex Agent'
+          : 'Clipboard';
 
     vscode.window.showInformationMessage(
-      `Fix Prompt copied to clipboard for ${agentName}! Paste it into your agent chat.`
+      `Fix Prompt copied to clipboard for ${agentName}! Paste it into your agent chat.`,
     );
 
     return { ok: true, message: `Prompt ready in clipboard for ${agentName}.` };

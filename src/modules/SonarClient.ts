@@ -9,7 +9,7 @@ export interface VerificationResult {
   message?: string;
 }
 
-export type SonarRating = "A" | "B" | "C" | "D" | "E";
+export type SonarRating = 'A' | 'B' | 'C' | 'D' | 'E';
 
 export interface SonarOverview {
   security: { count: number; rating: SonarRating };
@@ -35,8 +35,8 @@ export interface SonarDetailItem {
   component: string;
   filePath: string;
   line?: number;
-  type: "BUG" | "VULNERABILITY" | "CODE_SMELL" | "HOTSPOT" | "COVERAGE" | "DUPLICATION";
-  severity: "BLOCKER" | "CRITICAL" | "MAJOR" | "MINOR" | "INFO";
+  type: 'BUG' | 'VULNERABILITY' | 'CODE_SMELL' | 'HOTSPOT' | 'COVERAGE' | 'DUPLICATION';
+  severity: 'BLOCKER' | 'CRITICAL' | 'MAJOR' | 'MINOR' | 'INFO';
   status: string;
   effort?: string;
   tags: string[];
@@ -49,7 +49,7 @@ export class SonarClient {
   private readonly fetchFn: typeof fetch;
 
   constructor(config: SonarClientConfig) {
-    this.serverUrl = config.serverUrl.replace(/\/+$/, "");
+    this.serverUrl = config.serverUrl.replace(/\/+$/, '');
     this.token = config.token ? config.token.trim() : undefined;
     this.fetchFn = config.fetchFn ?? globalThis.fetch;
   }
@@ -58,23 +58,23 @@ export class SonarClient {
     if (!this.token) {
       return {};
     }
-    const encoded = Buffer.from(`${this.token}:`).toString("base64");
+    const encoded = Buffer.from(`${this.token}:`).toString('base64');
     return {
       Authorization: `Basic ${encoded}`,
     };
   }
 
   private parseRating(val?: string | number): SonarRating {
-    const num = typeof val === "number" ? val : parseFloat(String(val || "1.0"));
-    if (num <= 1.0) return "A";
-    if (num <= 2.0) return "B";
-    if (num <= 3.0) return "C";
-    if (num <= 4.0) return "D";
-    return "E";
+    const num = typeof val === 'number' ? val : parseFloat(String(val || '1.0'));
+    if (num <= 1.0) return 'A';
+    if (num <= 2.0) return 'B';
+    if (num <= 3.0) return 'C';
+    if (num <= 4.0) return 'D';
+    return 'E';
   }
 
   private extractFilePath(component: string): string {
-    const colonIndex = component.indexOf(":");
+    const colonIndex = component.indexOf(':');
     if (colonIndex !== -1) {
       return component.slice(colonIndex + 1);
     }
@@ -86,23 +86,23 @@ export class SonarClient {
    */
   private async authenticatedFetch(url: string): Promise<Response> {
     const basicHeaders = {
-      Accept: "application/json",
+      Accept: 'application/json',
       ...this.getAuthHeader(),
     };
 
-    let response = await this.fetchFn(url, {
-      method: "GET",
+    const response = await this.fetchFn(url, {
+      method: 'GET',
       headers: basicHeaders,
     });
 
     if (response.status === 401 && this.token) {
       // Try Bearer token fallback
       const bearerHeaders = {
-        Accept: "application/json",
+        Accept: 'application/json',
         Authorization: `Bearer ${this.token}`,
       };
       const bearerResponse = await this.fetchFn(url, {
-        method: "GET",
+        method: 'GET',
         headers: bearerHeaders,
       });
       if (bearerResponse.ok) {
@@ -142,7 +142,7 @@ export class SonarClient {
 
       return {
         ok: false,
-        message: "Invalid credentials: SonarQube reported token as invalid.",
+        message: 'Invalid credentials: SonarQube reported token as invalid.',
       };
     } catch (err: any) {
       return {
@@ -175,10 +175,7 @@ export class SonarClient {
 
         const data = (await response.json()) as any;
         const list: any[] =
-          data.components ||
-          data.projects ||
-          data.results ||
-          (Array.isArray(data) ? data : []);
+          data.components || data.projects || data.results || (Array.isArray(data) ? data : []);
 
         if (Array.isArray(list) && list.length > 0) {
           return list.map((p: any) => ({
@@ -186,7 +183,7 @@ export class SonarClient {
             name: p.name || p.key,
           }));
         }
-      } catch (err: any) {
+      } catch {
         // Try next fallback endpoint
       }
     }
@@ -199,20 +196,20 @@ export class SonarClient {
    */
   async getOverview(projectKey: string): Promise<SonarOverview> {
     const metricKeys = [
-      "bugs",
-      "reliability_rating",
-      "vulnerabilities",
-      "security_rating",
-      "code_smells",
-      "sqale_rating",
-      "accepted_issues",
-      "wont_fix_issues",
-      "coverage",
-      "lines_to_cover",
-      "duplicated_lines_density",
-      "duplicated_lines",
-      "security_hotspots",
-    ].join(",");
+      'bugs',
+      'reliability_rating',
+      'vulnerabilities',
+      'security_rating',
+      'code_smells',
+      'sqale_rating',
+      'accepted_issues',
+      'wont_fix_issues',
+      'coverage',
+      'lines_to_cover',
+      'duplicated_lines_density',
+      'duplicated_lines',
+      'security_hotspots',
+    ].join(',');
 
     const url = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
     const response = await this.authenticatedFetch(url);
@@ -236,31 +233,31 @@ export class SonarClient {
 
     return {
       security: {
-        count: parseInt(measureMap.vulnerabilities || "0", 10),
+        count: parseInt(measureMap.vulnerabilities || '0', 10),
         rating: this.parseRating(measureMap.security_rating),
       },
       reliability: {
-        count: parseInt(measureMap.bugs || "0", 10),
+        count: parseInt(measureMap.bugs || '0', 10),
         rating: this.parseRating(measureMap.reliability_rating),
       },
       maintainability: {
-        count: parseInt(measureMap.code_smells || "0", 10),
+        count: parseInt(measureMap.code_smells || '0', 10),
         rating: this.parseRating(measureMap.sqale_rating),
       },
       acceptedIssues: {
-        count: parseInt(measureMap.accepted_issues || measureMap.wont_fix_issues || "0", 10),
+        count: parseInt(measureMap.accepted_issues || measureMap.wont_fix_issues || '0', 10),
       },
       coverage: {
-        percentage: parseFloat(measureMap.coverage || "0"),
-        linesToCover: parseInt(measureMap.lines_to_cover || "0", 10),
+        percentage: parseFloat(measureMap.coverage || '0'),
+        linesToCover: parseInt(measureMap.lines_to_cover || '0', 10),
       },
       duplications: {
-        percentage: parseFloat(measureMap.duplicated_lines_density || "0"),
-        duplicatedLines: parseInt(measureMap.duplicated_lines || "0", 10),
+        percentage: parseFloat(measureMap.duplicated_lines_density || '0'),
+        duplicatedLines: parseInt(measureMap.duplicated_lines || '0', 10),
       },
       securityHotspots: {
-        count: parseInt(measureMap.security_hotspots || "0", 10),
-        rating: "A",
+        count: parseInt(measureMap.security_hotspots || '0', 10),
+        rating: 'A',
       },
     };
   }
@@ -270,16 +267,16 @@ export class SonarClient {
    */
   async getIssues(projectKey: string, category?: string): Promise<SonarDetailItem[]> {
     let url: string;
-    if (category === "accepted") {
+    if (category === 'accepted') {
       url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=BUG,VULNERABILITY,CODE_SMELL&issueStatuses=ACCEPTED&ps=100`;
     } else {
-      let typeParam = "BUG,VULNERABILITY,CODE_SMELL";
-      if (category === "reliability") {
-        typeParam = "BUG";
-      } else if (category === "security") {
-        typeParam = "VULNERABILITY";
-      } else if (category === "maintainability") {
-        typeParam = "CODE_SMELL";
+      let typeParam = 'BUG,VULNERABILITY,CODE_SMELL';
+      if (category === 'reliability') {
+        typeParam = 'BUG';
+      } else if (category === 'security') {
+        typeParam = 'VULNERABILITY';
+      } else if (category === 'maintainability') {
+        typeParam = 'CODE_SMELL';
       }
       url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=${typeParam}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`;
     }
@@ -287,7 +284,7 @@ export class SonarClient {
     let response = await this.authenticatedFetch(url);
 
     // Fallback for older SonarQube versions using resolutions=WONTFIX
-    if (!response.ok && category === "accepted") {
+    if (!response.ok && category === 'accepted') {
       const fallbackUrl = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=BUG,VULNERABILITY,CODE_SMELL&resolutions=WONTFIX&ps=100`;
       const fallbackResponse = await this.authenticatedFetch(fallbackUrl);
       if (fallbackResponse.ok) {
@@ -302,17 +299,17 @@ export class SonarClient {
     const data = (await response.json()) as { issues?: any[] };
     return (data.issues || []).map((item) => ({
       id: item.key,
-      ruleKey: item.rule || "",
-      message: item.message || "",
-      component: item.component || "",
-      filePath: this.extractFilePath(item.component || ""),
+      ruleKey: item.rule || '',
+      message: item.message || '',
+      component: item.component || '',
+      filePath: this.extractFilePath(item.component || ''),
       line: item.line,
-      type: item.type || "CODE_SMELL",
-      severity: item.severity || "MAJOR",
-      status: item.status || "OPEN",
+      type: item.type || 'CODE_SMELL',
+      severity: item.severity || 'MAJOR',
+      status: item.status || 'OPEN',
       effort: item.effort,
       tags: item.tags || [],
-      creationDate: item.creationDate || "",
+      creationDate: item.creationDate || '',
     }));
   }
 
@@ -330,16 +327,16 @@ export class SonarClient {
     const data = (await response.json()) as { hotspots?: any[] };
     return (data.hotspots || []).map((item) => ({
       id: item.key,
-      ruleKey: item.ruleKey || "",
-      message: item.message || "",
-      component: item.component || "",
-      filePath: this.extractFilePath(item.component || ""),
+      ruleKey: item.ruleKey || '',
+      message: item.message || '',
+      component: item.component || '',
+      filePath: this.extractFilePath(item.component || ''),
       line: item.line,
-      type: "HOTSPOT",
-      severity: "MAJOR",
-      status: item.status || "TO_REVIEW",
-      tags: ["security-hotspot"],
-      creationDate: item.creationDate || "",
+      type: 'HOTSPOT',
+      severity: 'MAJOR',
+      status: item.status || 'TO_REVIEW',
+      tags: ['security-hotspot'],
+      creationDate: item.creationDate || '',
     }));
   }
 
@@ -355,7 +352,7 @@ export class SonarClient {
         return {
           key: ruleKey,
           name: ruleKey,
-          cleanDesc: "Verify code adherence to Sonar rule guidelines.",
+          cleanDesc: 'Verify code adherence to Sonar rule guidelines.',
         };
       }
 
@@ -368,22 +365,22 @@ export class SonarClient {
         };
       };
 
-      const desc = data.rule?.mdDesc || data.rule?.htmlDesc || "";
+      const desc = data.rule?.mdDesc || data.rule?.htmlDesc || '';
       const cleanDesc = desc
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
         .trim();
 
       return {
         key: data.rule?.key || ruleKey,
         name: data.rule?.name || ruleKey,
-        cleanDesc: cleanDesc || "Verify code adherence to Sonar rule guidelines.",
+        cleanDesc: cleanDesc || 'Verify code adherence to Sonar rule guidelines.',
       };
     } catch {
       return {
         key: ruleKey,
         name: ruleKey,
-        cleanDesc: "Verify code adherence to Sonar rule guidelines.",
+        cleanDesc: 'Verify code adherence to Sonar rule guidelines.',
       };
     }
   }
@@ -396,7 +393,9 @@ export class SonarClient {
     const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch coverage files: HTTP ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Failed to fetch coverage files: HTTP ${response.status} ${response.statusText}`,
+      );
     }
 
     const data = (await response.json()) as { components?: any[] };
@@ -408,21 +407,21 @@ export class SonarClient {
         measureMap[m.metric] = m.value;
       }
 
-      const uncovered = parseInt(measureMap.uncovered_lines || "0", 10);
-      const coverage = parseFloat(measureMap.coverage || "0");
+      const uncovered = parseInt(measureMap.uncovered_lines || '0', 10);
+      const coverage = parseFloat(measureMap.coverage || '0');
 
       if (uncovered > 0 || coverage < 80) {
         items.push({
           id: comp.key,
-          ruleKey: "coverage:uncovered_lines",
+          ruleKey: 'coverage:uncovered_lines',
           message: `${uncovered} uncovered lines (${coverage.toFixed(0)}% coverage)`,
           component: comp.key,
           filePath: comp.path || this.extractFilePath(comp.key),
-          type: "COVERAGE",
-          severity: (coverage < 50 ? "CRITICAL" : "MAJOR") as any,
-          status: "UNCOVERED",
+          type: 'COVERAGE',
+          severity: (coverage < 50 ? 'CRITICAL' : 'MAJOR') as any,
+          status: 'UNCOVERED',
           effort: `${uncovered} lines`,
-          tags: ["test-coverage", "unit-test"],
+          tags: ['test-coverage', 'unit-test'],
           creationDate: new Date().toISOString(),
         });
       }
@@ -439,7 +438,9 @@ export class SonarClient {
     const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch duplication files: HTTP ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Failed to fetch duplication files: HTTP ${response.status} ${response.statusText}`,
+      );
     }
 
     const data = (await response.json()) as { components?: any[] };
@@ -451,21 +452,21 @@ export class SonarClient {
         measureMap[m.metric] = m.value;
       }
 
-      const density = parseFloat(measureMap.duplicated_lines_density || "0");
-      const blocks = parseInt(measureMap.duplicated_blocks || "0", 10);
+      const density = parseFloat(measureMap.duplicated_lines_density || '0');
+      const blocks = parseInt(measureMap.duplicated_blocks || '0', 10);
 
       if (density > 0 || blocks > 0) {
         items.push({
           id: comp.key,
-          ruleKey: "duplications:duplicated_code",
+          ruleKey: 'duplications:duplicated_code',
           message: `${density.toFixed(1)}% duplicated lines (${blocks} duplicated blocks)`,
           component: comp.key,
           filePath: comp.path || this.extractFilePath(comp.key),
-          type: "DUPLICATION",
-          severity: (density > 20 ? "CRITICAL" : "MAJOR") as any,
-          status: "DUPLICATED",
+          type: 'DUPLICATION',
+          severity: (density > 20 ? 'CRITICAL' : 'MAJOR') as any,
+          status: 'DUPLICATED',
           effort: `${blocks} blocks`,
-          tags: ["code-duplication", "refactoring"],
+          tags: ['code-duplication', 'refactoring'],
           creationDate: new Date().toISOString(),
         });
       }

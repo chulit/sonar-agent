@@ -1,5 +1,5 @@
 export const workspace = {
-  workspaceFolders: [{ uri: { fsPath: "/workspace" } }],
+  workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
   findFiles: async () => [],
   openTextDocument: async () => ({}),
   getConfiguration: () => ({
@@ -11,7 +11,7 @@ export const workspace = {
 export const env = {
   clipboard: {
     writeText: async () => {},
-    readText: async () => "",
+    readText: async () => '',
   },
 };
 
@@ -35,11 +35,17 @@ export const Uri = {
 };
 
 export class Position {
-  constructor(public line: number, public character: number) {}
+  constructor(
+    public line: number,
+    public character: number,
+  ) {}
 }
 
 export class Range {
-  constructor(public start: Position, public end: Position) {}
+  constructor(
+    public start: Position,
+    public end: Position,
+  ) {}
 }
 
 export class Selection extends Range {

@@ -1,5 +1,5 @@
-import * as path from "node:path";
-import * as fs from "node:fs/promises";
+import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
 
 export interface SecretStorageLike {
   get(key: string): Thenable<string | undefined> | Promise<string | undefined>;
@@ -9,7 +9,11 @@ export interface SecretStorageLike {
 
 export interface WorkspaceConfigLike {
   get<T>(section: string, defaultValue?: T): T;
-  update(section: string, value: any, configurationTarget?: boolean | number): Thenable<void> | Promise<void>;
+  update(
+    section: string,
+    value: any,
+    configurationTarget?: boolean | number,
+  ): Thenable<void> | Promise<void>;
 }
 
 export interface ProjectDetectorOptions {
@@ -33,7 +37,7 @@ export interface ResolvedProjectConfig {
   hasPlaintextCredentialsWarning?: boolean;
 }
 
-const TOKEN_SECRET_KEY = "sonarAgent.token";
+const TOKEN_SECRET_KEY = 'sonarAgent.token';
 
 export class ProjectDetector {
   private readonly secrets: SecretStorageLike;
@@ -47,7 +51,7 @@ export class ProjectDetector {
     this.secrets = options.secretStorage;
     this.config = options.workspaceConfig;
     this.workspaceRoot = options.workspaceRoot;
-    this.readFileFn = options.readFileFn ?? ((p: string) => fs.readFile(p, "utf-8"));
+    this.readFileFn = options.readFileFn ?? ((p: string) => fs.readFile(p, 'utf-8'));
   }
 
   /**
@@ -61,11 +65,11 @@ export class ProjectDetector {
 
     for (const rawLine of lines) {
       const line = rawLine.trim();
-      if (!line || line.startsWith("#") || line.startsWith(";")) {
+      if (!line || line.startsWith('#') || line.startsWith(';')) {
         continue;
       }
 
-      const eqIndex = line.indexOf("=");
+      const eqIndex = line.indexOf('=');
       if (eqIndex === -1) {
         continue;
       }
@@ -73,15 +77,11 @@ export class ProjectDetector {
       const key = line.slice(0, eqIndex).trim();
       const value = line.slice(eqIndex + 1).trim();
 
-      if (key === "sonar.projectKey") {
+      if (key === 'sonar.projectKey') {
         projectKey = value;
-      } else if (key === "sonar.host.url") {
+      } else if (key === 'sonar.host.url') {
         serverUrl = value;
-      } else if (
-        key === "sonar.login" ||
-        key === "sonar.password" ||
-        key === "sonar.token"
-      ) {
+      } else if (key === 'sonar.login' || key === 'sonar.password' || key === 'sonar.token') {
         hasPlaintextCredentials = true;
       }
     }
@@ -106,12 +106,12 @@ export class ProjectDetector {
   }
 
   async setServerUrl(url: string): Promise<void> {
-    await this.config.update("serverUrl", url.trim(), true);
+    await this.config.update('serverUrl', url.trim(), true);
   }
 
   async setProjectKey(projectKey: string): Promise<void> {
     this.activeProjectKey = projectKey.trim();
-    await this.config.update("projectKey", this.activeProjectKey, true);
+    await this.config.update('projectKey', this.activeProjectKey, true);
   }
 
   async detectWorkspaceProperties(): Promise<ParsedSonarProperties | null> {
@@ -119,7 +119,7 @@ export class ProjectDetector {
       return null;
     }
 
-    const propertiesPath = path.join(this.workspaceRoot, "sonar-project.properties");
+    const propertiesPath = path.join(this.workspaceRoot, 'sonar-project.properties');
     try {
       const content = await this.readFileFn(propertiesPath);
       return ProjectDetector.parseProperties(content);
@@ -129,8 +129,8 @@ export class ProjectDetector {
   }
 
   async getConfig(): Promise<ResolvedProjectConfig> {
-    let serverUrl = this.config.get<string>("serverUrl", "");
-    let projectKey = this.activeProjectKey ?? this.config.get<string>("projectKey", "");
+    let serverUrl = this.config.get<string>('serverUrl', '');
+    let projectKey = this.activeProjectKey ?? this.config.get<string>('projectKey', '');
     let detectedFromProperties = false;
     let hasPlaintextCredentialsWarning = false;
 

@@ -19,19 +19,25 @@ Use this workflow **ONLY when the user explicitly requests or confirms a commit*
 
 Before running `git commit`, the agent **MUST** validate and ensure all project verification checks pass:
 
-1. **Static Typecheck (TypeScript):**
+1. **Code Formatting (Prettier):**
+   - Run: `npm run format` (or verify with `npm run format:check`)
+   - Ensure all files follow project formatting conventions.
+2. **Linting & Auto-fix (ESLint):**
+   - Run: `npm run lint:fix`
+   - Verify with `npm run lint` that 0 lint errors remain.
+3. **Static Typecheck (TypeScript):**
    - Run: `npm run check`
    - Must pass with 0 errors (`tsc --noEmit`).
-2. **Unit Tests (Vitest):**
+4. **Unit Tests (Vitest):**
    - Run: `npm test`
    - All unit test suites must pass with zero failures.
-3. **Extension Bundle Build (esbuild):**
+5. **Extension Bundle Build (esbuild):**
    - Run: `npm run build`
    - Ensure the extension bundles into `dist/extension.js` without bundle or syntax errors.
-4. **Security & Zero Token Leakage Invariant:**
+6. **Security & Zero Token Leakage Invariant:**
    - Verify that **no** SonarQube tokens, credentials, or secrets are hardcoded in test files, fixtures, workspace settings, or source code.
    - Confirm tokens are persisted strictly via `context.secrets` and not exposed in URLs, logs, or Webview messages.
-5. **Code Hygiene & Diff Cleanliness:**
+7. **Code Hygiene & Diff Cleanliness:**
    - Ensure no temporary `console.log`, debugging dumps, or leftover scratch code remain.
    - Check whitespace and diff cleanliness: `git diff --check`.
 
@@ -90,7 +96,7 @@ Commit messages must strictly follow the Conventional Commits specification:
 
 1. Execute `git commit -m "<message>"`.
 2. If any check or hook fails:
-   - Inspect failure logs in detail (e.g., TypeScript compiler, Vitest, or esbuild output).
+   - Inspect failure logs in detail (e.g., Prettier formatting, ESLint rules, TypeScript compiler, Vitest, or esbuild output).
    - Fix the root cause directly in the code or message.
    - **NEVER attempt to bypass with `git commit --no-verify`**.
    - Re-run verification and commit.

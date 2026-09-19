@@ -10,7 +10,7 @@ Ekstensi ini mereplikasi tampilan dashboard visual SonarQube (kartu metrik Relia
 
 ## 2. Architecture & Deep Modules
 
-Mengikuti prinsip **Deep Modules** (*small interface, rich behavior hidden inside, clear seams*):
+Mengikuti prinsip **Deep Modules** (_small interface, rich behavior hidden inside, clear seams_):
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -38,6 +38,7 @@ Mengikuti prinsip **Deep Modules** (*small interface, rich behavior hidden insid
 ```
 
 ### 2.1. `ProjectDetector` Module
+
 - **Tanggung Jawab**: Mendeteksi konfigurasi SonarQube untuk workspace saat ini.
 - **Interface**:
   ```typescript
@@ -58,6 +59,7 @@ Mengikuti prinsip **Deep Modules** (*small interface, rich behavior hidden insid
   - Mengambil token secara aman dari `vscode.ExtensionContext.secrets`.
 
 ### 2.2. `SonarClient` Module
+
 - **Tanggung Jawab**: Mengabstraksi komunikasi HTTP REST API dengan SonarQube server, caching aturan, pagination, dan error handling.
 - **Interface**:
   ```typescript
@@ -97,7 +99,9 @@ Mengikuti prinsip **Deep Modules** (*small interface, rich behavior hidden insid
   export interface ISonarClient {
     verifyConnection(): Promise<boolean>;
     getOverview(): Promise<SonarOverview>;
-    getDetails(category: 'issues' | 'coverage' | 'duplications' | 'hotspots'): Promise<SonarDetailItem[]>;
+    getDetails(
+      category: 'issues' | 'coverage' | 'duplications' | 'hotspots',
+    ): Promise<SonarDetailItem[]>;
     getEnrichedRule(ruleKey: string): Promise<SonarRuleDoc>;
     fetchProjects(): Promise<{ key: string; name: string }[]>;
   }
@@ -110,6 +114,7 @@ Mengikuti prinsip **Deep Modules** (*small interface, rich behavior hidden insid
   - `GET /api/measures/component_tree?component={projectKey}&metricKeys=uncovered_lines,duplicated_lines_density`
 
 ### 2.3. `AgentDispatcher` Module
+
 - **Tanggung Jawab**: Merangkai prompt cerdas (rule + code context + exact line) dan mengirimkannya ke AI Agent atau clipboard.
 - **Interface**:
   ```typescript
@@ -136,6 +141,7 @@ Mengikuti prinsip **Deep Modules** (*small interface, rich behavior hidden insid
   - Mengirim prompt ke VS Code Chat API (`workbench.action.chat.open`) jika agent mendukung, atau otomatis menyalin ke clipboard + menampilkan notifikasi toast yang ramah.
 
 ### 2.4. `SonarOverviewViewProvider` Module
+
 - **Tanggung Jawab**: Webview sidebar yang menampilkan onboarding / metrics dashboard / list issues.
 - **Interface**: Implements `vscode.WebviewViewProvider`.
 - **Fitur UI**:
@@ -153,7 +159,7 @@ Mengikuti prinsip **Deep Modules** (*small interface, rich behavior hidden insid
   - Lebar < 340px: Grid metrik berubah otomatis menjadi 1 kolom vertikal.
   - Lebar >= 340px: Grid metrik tampil 2 kolom (sesuai layout asli SonarQube).
 - **Visual Design**:
-  - Sesuai panduan *size-aware-styling* dan *VS Code Webview guidelines*.
+  - Sesuai panduan _size-aware-styling_ dan _VS Code Webview guidelines_.
   - Warna rating Sonar:
     - Rating A: `#00aa5e`
     - Rating B: `#81b300`
