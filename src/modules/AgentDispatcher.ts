@@ -149,7 +149,7 @@ export class AgentDispatcher {
         id: 'antigravity',
         name: 'Antigravity Agent',
         description: 'DeepMind Antigravity Agent',
-        focusCommand: 'antigravity.openChatView',
+        focusCommand: 'antigravity.panel.focus',
       });
     }
 
@@ -470,19 +470,41 @@ export class AgentDispatcher {
   }
 
   private async tryOpenAntigravityChat(prompt: string): Promise<boolean> {
-    const commands = [
-      'workbench.action.chat.open',
-      'antigravity.prioritized.chat.open',
-      'workbench.action.openChat',
-    ];
-    for (const cmd of commands) {
+    // 1. Google Antigravity extension for VS Code:
+    // antigravity.addContext injects the prompt directly into Antigravity conversation context!
+    try {
+      await this.executeCommandFn('antigravity.addContext', prompt);
       try {
-        await this.executeCommandFn(cmd, { query: prompt });
-        return true;
+        await this.executeCommandFn('antigravity.panel.focus');
       } catch {
-        // continue trying next command
+        try {
+          await this.executeCommandFn('antigravity.toggleChatFocus');
+        } catch {
+          // ignore focus error if context was added
+        }
+      }
+      return true;
+    } catch {
+      // antigravity.addContext not available
+    }
+
+    // 2. Only in standalone Antigravity IDE (where Antigravity is the native built-in IDE agent):
+    if (this.isAntigravityEnvFn()) {
+      const ideCommands = [
+        'antigravity.prioritized.chat.open',
+        'workbench.action.chat.open',
+        'workbench.action.openChat',
+      ];
+      for (const cmd of ideCommands) {
+        try {
+          await this.executeCommandFn(cmd, { query: prompt });
+          return true;
+        } catch {
+          // continue trying next command
+        }
       }
     }
+
     return false;
   }
 
@@ -518,7 +540,10 @@ export class AgentDispatcher {
     }
 
     const antigravityViewCommands = [
+      'antigravity.panel.focus',
+      'antigravity.toggleChatFocus',
       'antigravity.openChatView',
+      'workbench.view.extension.antigravity-sidebar',
       'google-antigravity.openChatView',
       'antigravity.focus',
     ];

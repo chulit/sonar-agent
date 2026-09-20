@@ -117,7 +117,7 @@ describe('AgentDispatcher - Dynamic Target Agent Discovery', () => {
     const agents = dispatcher.getAvailableAgents();
     expect(agents.map((a) => a.id)).toEqual(['antigravity', 'clipboard']);
     expect(agents[0].name).toBe('Antigravity Agent');
-    expect(agents[0].focusCommand).toBe('antigravity.openChatView');
+    expect(agents[0].focusCommand).toBe('antigravity.panel.focus');
   });
 
   it('should prioritize google.google-antigravity directly after copilot in regular VS Code', () => {
@@ -295,6 +295,9 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
       isExtensionInstalledFn: () => false,
       isAntigravityEnvFn: () => true,
       executeCommandFn: async (cmd, args) => {
+        if (cmd === 'antigravity.addContext') {
+          throw new Error('Not available in standalone IDE');
+        }
         executedCommands.push({ cmd, args });
         return undefined;
       },
@@ -303,7 +306,7 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     const res = await dispatcher.dispatch('prompt content', 'antigravity', sampleItem);
     expect(res.ok).toBe(true);
     expect(res.message).toBe('Dispatched to Antigravity Chat.');
-    expect(executedCommands[0].cmd).toBe('workbench.action.chat.open');
+    expect(executedCommands[0].cmd).toBe('antigravity.prioritized.chat.open');
     expect(executedCommands[0].args).toEqual({ query: 'prompt content' });
     expect(openFileAtLine).toHaveBeenCalledWith('src/App.vue', 42);
   });
@@ -356,6 +359,61 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     expect(res.message).toBe('Chat opened and prompt ready in clipboard.');
     expect(executedCommands).toContain('antigravity.openChatView');
     expect(executedCommands).toContain('google-antigravity.openChatView');
+  });
+
+  it('should dispatch to antigravity.addContext and focus panel in regular VS Code without invoking workbench.action.chat.open', async () => {
+    const executedCommands: { cmd: string; args?: unknown }[] = [];
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      isExtensionInstalledFn: (id) => id === 'google.google-antigravity' || id === 'github.copilot',
+      isAntigravityEnvFn: () => false,
+      executeCommandFn: async (cmd, ...args) => {
+        executedCommands.push({ cmd, args: args.length > 0 ? args[0] : undefined });
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'antigravity', sampleItem);
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Dispatched to Antigravity Chat.');
+    expect(
+      executedCommands.some(
+        (c) => c.cmd === 'antigravity.addContext' && c.args === 'prompt content',
+      ),
+    ).toBe(true);
+    expect(executedCommands.some((c) => c.cmd === 'antigravity.panel.focus')).toBe(true);
+    expect(executedCommands.some((c) => c.cmd === 'workbench.action.chat.open')).toBe(false);
+  });
+
+  it('should not invoke workbench.action.chat.open when antigravity.addContext fails in regular VS Code, but instead focus view and copy to clipboard', async () => {
+    const executedCommands: string[] = [];
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      isExtensionInstalledFn: (id) => id === 'google.google-antigravity' || id === 'github.copilot',
+      isAntigravityEnvFn: () => false,
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
+        if (cmd === 'antigravity.panel.focus') {
+          return undefined;
+        }
+        if (cmd === 'antigravity.addContext') {
+          throw new Error('Command failed');
+        }
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'antigravity', sampleItem);
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Chat opened and prompt ready in clipboard.');
+    expect(executedCommands).toContain('antigravity.panel.focus');
+    expect(executedCommands).not.toContain('workbench.action.chat.open');
   });
 
   it('should call sendToAgentPanelFn directly with file mentions and prompt when available', async () => {
