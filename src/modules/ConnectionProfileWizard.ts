@@ -382,95 +382,115 @@ export class ConnectionProfileWizard {
 
   public async runProfileAction(action: ProfileAction): Promise<void> {
     switch (action) {
-      case 'switchProfile': {
-        const picked = await this.pickProfile('Select the connection profile to activate');
-        if (!picked) {
-          return;
-        }
-        try {
-          await this.projectDetector.activateProfile(picked.id);
-        } catch (err: unknown) {
-          const msg = (err as Error)?.message || `Unknown connection profile: ${picked.id}`;
-          this.showErrorMessageFn(msg);
-          return;
-        }
-        this.showInformationMessageFn(`Active connection profile: ${picked.name}`);
-        await this.notifyConfigChanged();
+      case 'switchProfile':
+        await this.handleSwitchProfile();
         break;
-      }
       case 'newProfile':
         await this.promptCreateProfile();
         break;
-      case 'renameProfile': {
-        const picked = await this.pickProfile('Select the connection profile to rename');
-        if (!picked) {
-          return;
-        }
-        const name = await this.showInputBoxFn({
-          prompt: `New name for profile "${picked.name}"`,
-          value: picked.name,
-          ignoreFocusOut: true,
-          validateInput: (value) => (!value.trim() ? 'Profile name is required' : null),
-        });
-        if (!name?.trim()) {
-          return;
-        }
-        await this.projectDetector.renameProfile(picked.id, name.trim());
-        await this.notifyConfigChanged();
+      case 'renameProfile':
+        await this.handleRenameProfile();
         break;
-      }
-      case 'deleteProfile': {
-        const picked = await this.pickProfile('Select the connection profile to delete');
-        if (!picked) {
-          return;
-        }
-        const confirm = await this.showWarningMessageFn(
-          `Delete connection profile "${picked.name}" and its stored token?`,
-          { modal: true },
-          'Delete',
-        );
-        if (confirm !== 'Delete') {
-          return;
-        }
-        await this.projectDetector.deleteProfile(picked.id);
-        this.showInformationMessageFn(
-          `Connection profile "${picked.name}" deleted. Create a profile to reconnect.`,
-        );
-        await this.notifyConfigChanged();
+      case 'deleteProfile':
+        await this.handleDeleteProfile();
         break;
-      }
-      case 'verifyConnection': {
-        const binding = await this.projectDetector.getConfig();
-        const bindingToken = await this.projectDetector.getToken();
-        if (!binding.serverUrl || !bindingToken) {
-          this.showWarningMessageFn('No active connection profile to verify.');
-          return;
-        }
-        let result: { ok: boolean; message?: string } = { ok: false };
-        await this.withProgressFn(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: 'Verifying SonarQube connection...',
-            cancellable: false,
-          },
-          async () => {
-            const client = this.sonarClientFactory({
-              serverUrl: binding.serverUrl,
-              token: bindingToken,
-            });
-            result = await client.verifyConnection();
-          },
-        );
-        if (result.ok) {
-          this.showInformationMessageFn('SonarQube connection verified.');
-        } else {
-          this.showErrorMessageFn(
-            `SonarQube connection verification failed: ${result.message || 'Unknown error'}`,
-          );
-        }
+      case 'verifyConnection':
+        await this.handleVerifyActiveConnection();
         break;
-      }
     }
+  }
+
+  private async handleSwitchProfile(): Promise<void> {
+    const picked = await this.pickProfile('Select the connection profile to activate');
+    if (!picked) {
+      return;
+    }
+    try {
+      await this.projectDetector.activateProfile(picked.id);
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || `Unknown connection profile: ${picked.id}`;
+      this.showErrorMessageFn(msg);
+      return;
+    }
+    this.showInformationMessageFn(`Active connection profile: ${picked.name}`);
+    await this.notifyConfigChanged();
+  }
+
+  private async handleRenameProfile(): Promise<void> {
+    const picked = await this.pickProfile('Select the connection profile to rename');
+    if (!picked) {
+      return;
+    }
+    const name = await this.showInputBoxFn({
+      prompt: `New name for profile "${picked.name}"`,
+      value: picked.name,
+      ignoreFocusOut: true,
+      validateInput: (value) => (!value.trim() ? 'Profile name is required' : null),
+    });
+    if (!name?.trim()) {
+      return;
+    }
+    await this.projectDetector.renameProfile(picked.id, name.trim());
+    await this.notifyConfigChanged();
+  }
+
+  private async handleDeleteProfile(): Promise<void> {
+    const picked = await this.pickProfile('Select the connection profile to delete');
+    if (!picked) {
+      return;
+    }
+    const confirm = await this.showWarningMessageFn(
+      `Delete connection profile "${picked.name}" and its stored token?`,
+      { modal: true },
+      'Delete',
+    );
+    if (confirm !== 'Delete') {
+      return;
+    }
+    await this.projectDetector.deleteProfile(picked.id);
+    this.showInformationMessageFn(
+      `Connection profile "${picked.name}" deleted. Create a profile to reconnect.`,
+    );
+    await this.notifyConfigChanged();
+  }
+
+  private async handleVerifyActiveConnection(): Promise<void> {
+    const binding = await this.projectDetector.getConfig();
+    const bindingToken = await this.projectDetector.getToken();
+    if (!binding.serverUrl || !bindingToken) {
+      this.showWarningMessageFn('No active connection profile to verify.');
+      return;
+    }
+    const result = await this.verifyConnectionWithProgress(binding.serverUrl, bindingToken);
+    if (result.ok) {
+      this.showInformationMessageFn('SonarQube connection verified.');
+    } else {
+      this.showErrorMessageFn(
+        `SonarQube connection verification failed: ${result.message || 'Unknown error'}`,
+      );
+    }
+  }
+
+  private async verifyConnectionWithProgress(
+    serverUrl: string,
+    token: string,
+  ): Promise<{ ok: boolean; message?: string }> {
+    let result: { ok: boolean; message?: string } = { ok: false };
+    await this.withProgressFn(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Verifying SonarQube connection...',
+        cancellable: false,
+      },
+      async () => {
+        const client = this.sonarClientFactory({
+          serverUrl,
+          token,
+        });
+        result = await client.verifyConnection();
+      },
+    );
+    return result;
   }
 
   public async pickProfile(placeHolder: string): Promise<{ id: string; name: string } | undefined> {
@@ -495,78 +515,85 @@ export class ConnectionProfileWizard {
     return picked ? profiles.find((p) => p.id === picked.description) : undefined;
   }
 
+  private async promptProfileInputs(initial: {
+    name: string;
+    serverUrl: string;
+    token: string;
+    projectKey: string;
+  }): Promise<{ name: string; serverUrl: string; token: string; projectKey: string } | undefined> {
+    const name = await this.showInputBoxFn({
+      title: 'New Connection Profile (1/4)',
+      prompt: 'Name this profile (e.g. kantor-prod)',
+      value: initial.name,
+      ignoreFocusOut: true,
+      validateInput: (value) => (!value.trim() ? 'Profile name is required' : null),
+    });
+    if (name === undefined) {
+      return undefined;
+    }
+
+    const serverUrl = await this.showInputBoxFn({
+      title: 'New Connection Profile (2/4)',
+      prompt: 'Enter the SonarQube Server URL',
+      placeHolder: 'http://localhost:9000 or https://sonar.example.com',
+      value: initial.serverUrl,
+      ignoreFocusOut: true,
+      validateInput: (value) => this.validateServerUrlInput(value),
+    });
+    if (serverUrl === undefined) {
+      return undefined;
+    }
+
+    const token = await this.showInputBoxFn({
+      title: 'New Connection Profile (3/4)',
+      prompt: 'Enter your SonarQube User Token',
+      placeHolder: 'sqp_...',
+      value: initial.token,
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (value) => (!value.trim() ? 'User Token is required' : null),
+    });
+    if (token === undefined) {
+      return undefined;
+    }
+
+    const projectKey = await this.showInputBoxFn({
+      title: 'New Connection Profile (4/4)',
+      prompt: 'Enter the SonarQube Project Key (optional, pick later)',
+      value: initial.projectKey,
+      ignoreFocusOut: true,
+    });
+    if (projectKey === undefined) {
+      return undefined;
+    }
+
+    return {
+      name: name.trim(),
+      serverUrl: serverUrl.trim(),
+      token: token.trim(),
+      projectKey: projectKey.trim(),
+    };
+  }
+
   public async promptCreateProfile(): Promise<void> {
     const suggested = await this.projectDetector.getCreationSuggestion();
-    let currentName = '';
-    let currentUrl = suggested?.serverUrl ?? 'http://localhost:9000';
-    let currentToken = '';
-    let currentKey = suggested?.projectKey ?? '';
+    let current = {
+      name: '',
+      serverUrl: suggested?.serverUrl ?? 'http://localhost:9000',
+      token: '',
+      projectKey: suggested?.projectKey ?? '',
+    };
 
     while (true) {
-      const name = await this.showInputBoxFn({
-        title: 'New Connection Profile (1/4)',
-        prompt: 'Name this profile (e.g. kantor-prod)',
-        value: currentName,
-        ignoreFocusOut: true,
-        validateInput: (value) => (!value.trim() ? 'Profile name is required' : null),
-      });
-      if (name === undefined) {
+      const inputs = await this.promptProfileInputs(current);
+      if (!inputs) {
         return;
       }
-      currentName = name.trim();
+      current = inputs;
 
-      const serverUrl = await this.showInputBoxFn({
-        title: 'New Connection Profile (2/4)',
-        prompt: 'Enter the SonarQube Server URL',
-        placeHolder: 'http://localhost:9000 or https://sonar.example.com',
-        value: currentUrl,
-        ignoreFocusOut: true,
-        validateInput: (value) => this.validateServerUrlInput(value),
-      });
-      if (serverUrl === undefined) {
-        return;
-      }
-      currentUrl = serverUrl.trim();
-
-      const token = await this.showInputBoxFn({
-        title: 'New Connection Profile (3/4)',
-        prompt: 'Enter your SonarQube User Token',
-        placeHolder: 'sqp_...',
-        value: currentToken,
-        password: true,
-        ignoreFocusOut: true,
-        validateInput: (value) => (!value.trim() ? 'User Token is required' : null),
-      });
-      if (token === undefined) {
-        return;
-      }
-      currentToken = token.trim();
-
-      const projectKey = await this.showInputBoxFn({
-        title: 'New Connection Profile (4/4)',
-        prompt: 'Enter the SonarQube Project Key (optional, pick later)',
-        value: currentKey,
-        ignoreFocusOut: true,
-      });
-      if (projectKey === undefined) {
-        return;
-      }
-      currentKey = projectKey.trim();
-
-      let verificationResult: { ok: boolean; message?: string } = { ok: false };
-      await this.withProgressFn(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Verifying SonarQube connection...',
-          cancellable: false,
-        },
-        async () => {
-          const client = this.sonarClientFactory({
-            serverUrl: currentUrl,
-            token: currentToken,
-          });
-          verificationResult = await client.verifyConnection();
-        },
+      const verificationResult = await this.verifyConnectionWithProgress(
+        current.serverUrl,
+        current.token,
       );
 
       if (!verificationResult.ok) {
@@ -581,23 +608,25 @@ export class ConnectionProfileWizard {
         return;
       }
 
-      const created = await this.projectDetector.createProfile({
-        name: currentName,
-        serverUrl: currentUrl,
-        projectKey: currentKey,
-        token: currentToken,
-      });
-      if (suggested?.hasPlaintextCredentials) {
-        this.showWarningMessageFn(
-          'sonar-project.properties contains plaintext credentials. They were not imported; remove them to avoid leaking secrets.',
-        );
-      }
-      this.showInformationMessageFn(`Connection profile "${created.name}" created and activated.`);
-      if (!created.projectKey) {
-        await this.promptProjectSelection();
-      }
-      await this.notifyConfigChanged();
+      await this.finalizeProfileCreation(current, suggested?.hasPlaintextCredentials);
       return;
     }
+  }
+
+  private async finalizeProfileCreation(
+    profile: { name: string; serverUrl: string; token: string; projectKey: string },
+    hasPlaintextCredentials?: boolean,
+  ): Promise<void> {
+    const created = await this.projectDetector.createProfile(profile);
+    if (hasPlaintextCredentials) {
+      this.showWarningMessageFn(
+        'sonar-project.properties contains plaintext credentials. They were not imported; remove them to avoid leaking secrets.',
+      );
+    }
+    this.showInformationMessageFn(`Connection profile "${created.name}" created and activated.`);
+    if (!created.projectKey) {
+      await this.promptProjectSelection();
+    }
+    await this.notifyConfigChanged();
   }
 }

@@ -237,13 +237,11 @@ export class AgentDispatcher {
       }
     }
 
-    if (!doc) {
-      doc = {
-        key: ruleKey,
-        name: ruleKey,
-        cleanDesc: 'Adhere to SonarQube quality standard for this rule.',
-      };
-    }
+    doc ??= {
+      key: ruleKey,
+      name: ruleKey,
+      cleanDesc: 'Adhere to SonarQube quality standard for this rule.',
+    };
 
     this.ruleCache.set(ruleKey, doc);
     return doc;
@@ -433,111 +431,106 @@ export class AgentDispatcher {
     return prompt;
   }
 
-  /**
-   * Dispatches the assembled prompt to the specified Target Agent or clipboard.
-   */
-  async dispatch(
+  private async dispatchCopilot(prompt: string): Promise<{ ok: boolean; message: string }> {
+    try {
+      await this.executeCommandFn('workbench.action.chat.open', {
+        query: prompt,
+      });
+      vscode.window.showInformationMessage('Dispatched Fix Prompt to GitHub Copilot Chat!');
+      return { ok: true, message: 'Dispatched to GitHub Copilot Chat.' };
+    } catch {
+      vscode.window.showInformationMessage(
+        'Prompt copied to clipboard! Paste it into GitHub Copilot Chat.',
+      );
+      return { ok: true, message: 'Copied to clipboard (Copilot chat command not found).' };
+    }
+  }
+
+  private async collectAntigravityFiles(
+    items: SonarDetailItem[],
+  ): Promise<Array<{ uri: vscode.Uri; startLine?: number; endLine?: number }>> {
+    const files: Array<{ uri: vscode.Uri; startLine?: number; endLine?: number }> = [];
+    const seenUris = new Set<string>();
+
+    for (const it of items) {
+      if (!it.filePath) continue;
+      const resolvedPath = await this.fileNavigator.resolveFilePath(it.filePath);
+      if (resolvedPath && !seenUris.has(resolvedPath)) {
+        seenUris.add(resolvedPath);
+        const line = it.line && it.line > 0 ? it.line - 1 : 0;
+        files.push({
+          uri: vscode.Uri.file(resolvedPath),
+          startLine: line,
+          endLine: line,
+        });
+      }
+    }
+    return files;
+  }
+
+  private async tryOpenAntigravityChat(prompt: string): Promise<boolean> {
+    const commands = [
+      'workbench.action.chat.open',
+      'antigravity.prioritized.chat.open',
+      'workbench.action.openChat',
+    ];
+    for (const cmd of commands) {
+      try {
+        await this.executeCommandFn(cmd, { query: prompt });
+        return true;
+      } catch {
+        // continue trying next command
+      }
+    }
+    return false;
+  }
+
+  private async dispatchAntigravity(
     prompt: string,
-    targetAgentId: string,
     item?: SonarDetailItem,
     allItems?: SonarDetailItem[],
   ): Promise<{ ok: boolean; message: string }> {
     try {
-      await vscode.env.clipboard.writeText(prompt);
+      let itemsToProcess: SonarDetailItem[] = [];
+      if (allItems && allItems.length > 0) {
+        itemsToProcess = allItems;
+      } else if (item) {
+        itemsToProcess = [item];
+      }
+      const files = await this.collectAntigravityFiles(itemsToProcess);
+
+      await this.sendToAgentPanelFn({
+        message: prompt,
+        files: files.length > 0 ? files : undefined,
+        autoSend: false,
+      });
+
+      vscode.window.showInformationMessage('Dispatched Fix Prompt to Antigravity Chat!');
+      return { ok: true, message: 'Dispatched to Antigravity Chat.' };
     } catch {
-      // ignore clipboard error in headless test environments
+      // Fallback to command execution if sendToAgentPanel fails
     }
 
-    if (item?.line) {
-      await this.fileNavigator.openFileAtLine(item.filePath, item.line);
+    if (await this.tryOpenAntigravityChat(prompt)) {
+      vscode.window.showInformationMessage('Dispatched Fix Prompt to Antigravity Chat!');
+      return { ok: true, message: 'Dispatched to Antigravity Chat.' };
     }
 
-    if (targetAgentId === 'copilot') {
-      try {
-        await this.executeCommandFn('workbench.action.chat.open', {
-          query: prompt,
-        });
-        vscode.window.showInformationMessage('Dispatched Fix Prompt to GitHub Copilot Chat!');
-        return { ok: true, message: 'Dispatched to GitHub Copilot Chat.' };
-      } catch {
-        vscode.window.showInformationMessage(
-          'Prompt copied to clipboard! Paste it into GitHub Copilot Chat.',
-        );
-        return { ok: true, message: 'Copied to clipboard (Copilot chat command not found).' };
-      }
+    try {
+      await this.executeCommandFn('antigravity.openChatView');
+      vscode.window.showInformationMessage(
+        'Antigravity Chat opened & prompt copied to clipboard! Press Cmd+V / Ctrl+V to paste.',
+      );
+      return { ok: true, message: 'Chat opened and prompt ready in clipboard.' };
+    } catch {
+      vscode.window.showInformationMessage(
+        'Fix Prompt copied to clipboard for Antigravity Agent! Paste it into your agent chat.',
+      );
+      return { ok: true, message: 'Prompt ready in clipboard for Antigravity Agent.' };
     }
+  }
 
-    if (targetAgentId === 'antigravity') {
-      try {
-        const files: Array<{ uri: vscode.Uri; startLine?: number; endLine?: number }> = [];
-        const itemsToProcess = allItems && allItems.length > 0 ? allItems : item ? [item] : [];
-        const seenUris = new Set<string>();
-
-        for (const it of itemsToProcess) {
-          if (it.filePath) {
-            const resolvedPath = await this.fileNavigator.resolveFilePath(it.filePath);
-            if (resolvedPath && !seenUris.has(resolvedPath)) {
-              seenUris.add(resolvedPath);
-              const line = it.line && it.line > 0 ? it.line - 1 : 0;
-              files.push({
-                uri: vscode.Uri.file(resolvedPath),
-                startLine: line,
-                endLine: line,
-              });
-            }
-          }
-        }
-
-        await this.sendToAgentPanelFn({
-          message: prompt,
-          files: files.length > 0 ? files : undefined,
-          autoSend: false,
-        });
-
-        vscode.window.showInformationMessage('Dispatched Fix Prompt to Antigravity Chat!');
-        return { ok: true, message: 'Dispatched to Antigravity Chat.' };
-      } catch {
-        // Fallback to command execution if sendToAgentPanel fails
-      }
-
-      for (const cmd of [
-        'workbench.action.chat.open',
-        'antigravity.prioritized.chat.open',
-        'workbench.action.openChat',
-      ]) {
-        try {
-          await this.executeCommandFn(cmd, { query: prompt });
-          vscode.window.showInformationMessage('Dispatched Fix Prompt to Antigravity Chat!');
-          return { ok: true, message: 'Dispatched to Antigravity Chat.' };
-        } catch {
-          // continue trying next command
-        }
-      }
-
-      try {
-        await this.executeCommandFn('antigravity.openChatView');
-        vscode.window.showInformationMessage(
-          'Antigravity Chat opened & prompt copied to clipboard! Press Cmd+V / Ctrl+V to paste.',
-        );
-        return { ok: true, message: 'Chat opened and prompt ready in clipboard.' };
-      } catch {
-        vscode.window.showInformationMessage(
-          'Fix Prompt copied to clipboard for Antigravity Agent! Paste it into your agent chat.',
-        );
-        return { ok: true, message: 'Prompt ready in clipboard for Antigravity Agent.' };
-      }
-    }
-
-    const matchedAgent = this.getAvailableAgents().find((a) => a.id === targetAgentId);
-    const fallbackNames: Record<string, string> = {
-      'claude-code': 'Claude Code',
-      cline: 'Cline',
-      'roo-code': 'Roo Code',
-      continue: 'Continue',
-      codex: 'Codex Agent',
-    };
-    const agentName = matchedAgent?.name ?? fallbackNames[targetAgentId] ?? 'Clipboard';
-
+  private async focusTargetAgent(targetAgentId: string, matchedAgent?: TargetAgent): Promise<void> {
     if (targetAgentId === 'claude-code') {
       const claudeCommands = [
         'workbench.view.extension.claude-sidebar',
@@ -569,6 +562,46 @@ export class AgentDispatcher {
         // focus command failed or not registered, proceed to clipboard notice
       }
     }
+  }
+
+  /**
+   * Dispatches the assembled prompt to the specified Target Agent or clipboard.
+   */
+  async dispatch(
+    prompt: string,
+    targetAgentId: string,
+    item?: SonarDetailItem,
+    allItems?: SonarDetailItem[],
+  ): Promise<{ ok: boolean; message: string }> {
+    try {
+      await vscode.env.clipboard.writeText(prompt);
+    } catch {
+      // ignore clipboard error in headless test environments
+    }
+
+    if (item?.line) {
+      await this.fileNavigator.openFileAtLine(item.filePath, item.line);
+    }
+
+    if (targetAgentId === 'copilot') {
+      return this.dispatchCopilot(prompt);
+    }
+
+    if (targetAgentId === 'antigravity') {
+      return this.dispatchAntigravity(prompt, item, allItems);
+    }
+
+    const matchedAgent = this.getAvailableAgents().find((a) => a.id === targetAgentId);
+    const fallbackNames: Record<string, string> = {
+      'claude-code': 'Claude Code',
+      cline: 'Cline',
+      'roo-code': 'Roo Code',
+      continue: 'Continue',
+      codex: 'Codex Agent',
+    };
+    const agentName = matchedAgent?.name ?? fallbackNames[targetAgentId] ?? 'Clipboard';
+
+    await this.focusTargetAgent(targetAgentId, matchedAgent);
 
     if (targetAgentId === 'clipboard') {
       vscode.window.showInformationMessage('Fix Prompt copied to clipboard!');
@@ -586,7 +619,7 @@ export class AgentDispatcher {
    * Resolves target agent using requested ID or active configuration fallback.
    */
   async resolveTargetAgent(requestedAgentId?: string): Promise<string> {
-    const available = await this.getAvailableAgents();
+    const available = this.getAvailableAgents();
     if (requestedAgentId && available.some((a) => a.id === requestedAgentId)) {
       return requestedAgentId;
     }

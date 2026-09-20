@@ -409,10 +409,7 @@ export class SonarClient {
       };
 
       const desc = data.rule?.mdDesc || data.rule?.htmlDesc || '';
-      const cleanDesc = desc
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      const cleanDesc = stripHtmlTags(desc).replace(/\s+/g, ' ').trim();
 
       return {
         key: data.rule?.key || ruleKey,
@@ -517,4 +514,20 @@ export class SonarClient {
 
     return items;
   }
+}
+
+function stripHtmlTags(str: string): string {
+  let result = '';
+  let insideTag = false;
+  for (const char of str) {
+    if (char === '<') {
+      insideTag = true;
+      result += ' ';
+    } else if (char === '>') {
+      insideTag = false;
+    } else if (!insideTag) {
+      result += char;
+    }
+  }
+  return result;
 }

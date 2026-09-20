@@ -35,9 +35,6 @@
     "static analysis",
     "code coverage"
   ],
-  "activationEvents": [
-    "onView:sonarAgent.overviewView"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {

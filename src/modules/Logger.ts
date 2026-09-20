@@ -52,17 +52,21 @@ export class Logger {
       this.initialize();
     }
     let errorDetail = '';
-    if (error) {
+    if (error !== undefined && error !== null) {
       if (error instanceof Error) {
         errorDetail = ` - ${error.message}`;
-      } else if (typeof error === 'object') {
+      } else if (
+        typeof error === 'string' ||
+        typeof error === 'number' ||
+        typeof error === 'boolean'
+      ) {
+        errorDetail = ` - ${error}`;
+      } else {
         try {
           errorDetail = ` - ${JSON.stringify(error)}`;
         } catch {
           errorDetail = ' - [Object]';
         }
-      } else {
-        errorDetail = ` - ${String(error)}`;
       }
     }
     this.channel?.error(this.sanitize(`${message}${errorDetail}`));

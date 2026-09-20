@@ -282,6 +282,188 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     await this._syncState();
   }
 
+  private _getEffectiveDefaultAgent(): string {
+    const defaultAgent = vscode.workspace
+      .getConfiguration('sonarAgent')
+      .get<string>('defaultAgent', 'copilot');
+    const availableAgents = this.agentDispatcher.getAvailableAgents();
+    if (!availableAgents.some((a) => a.id === defaultAgent)) {
+      return availableAgents[0]?.id || 'clipboard';
+    }
+    return defaultAgent;
+  }
+
+  private async _sendNoProfilesState(
+    profiles: any[],
+    activeProfileId?: string,
+    defaultAgent?: string,
+    availableAgents?: any[],
+  ): Promise<void> {
+    const noProfilesState = {
+      type: 'state',
+      state: 'no-profiles',
+      serverUrl: 'http://localhost:9000',
+      profiles,
+      activeProfileId,
+      defaultAgent,
+      availableAgents,
+    };
+    this._lastStateMessage = noProfilesState;
+    await this._view?.webview.postMessage(noProfilesState);
+  }
+
+  private async _sendOnboardingState(
+    serverUrl: string,
+    profiles: any[],
+    activeProfileId?: string,
+    defaultAgent?: string,
+    availableAgents?: any[],
+  ): Promise<void> {
+    const onboardingState = {
+      type: 'state',
+      state: 'onboarding',
+      serverUrl: serverUrl || 'http://localhost:9000',
+      profiles,
+      activeProfileId,
+      defaultAgent,
+      availableAgents,
+    };
+    this._lastStateMessage = onboardingState;
+    const delivered = await this._view?.webview.postMessage(onboardingState);
+    Logger.info(`[Host] postMessage(onboarding) delivered=${delivered}`);
+  }
+
+  private async _fetchOverviewForProject(
+    client: SonarClient,
+    projectKey?: string,
+  ): Promise<{ overview: SonarOverview | null; overviewError?: string }> {
+    if (!projectKey) {
+      return { overview: null };
+    }
+    try {
+      const overview = await client.getOverview(projectKey);
+      if (overview) {
+        Logger.info(
+          `Measures updated for [${projectKey}]: ${overview.security.count} vulnerabilities, ${overview.reliability.count} bugs, ${overview.maintainability.count} smells, ${overview.coverage.percentage.toFixed(1)}% coverage.`,
+        );
+      }
+      return { overview };
+    } catch (err: any) {
+      const overviewError = err.message || 'Failed to fetch project measures.';
+      Logger.error(`Failed to fetch project measures for [${projectKey}]`, overviewError);
+      return { overview: null, overviewError };
+    }
+  }
+
+  private async _resolveOverview(
+    client: SonarClient,
+    resolvedProjectKey?: string,
+    effectiveProjectKey?: string,
+    initialOverview?: PromiseSettledResult<SonarOverview | null>,
+  ): Promise<{ overview: SonarOverview | null; overviewError?: string }> {
+    if (!resolvedProjectKey) {
+      return { overview: null };
+    }
+
+    if (resolvedProjectKey === effectiveProjectKey && initialOverview) {
+      if (initialOverview.status === 'fulfilled') {
+        const overview = initialOverview.value;
+        if (overview) {
+          Logger.info(
+            `Measures updated for [${resolvedProjectKey}]: ${overview.security.count} vulnerabilities, ${overview.reliability.count} bugs, ${overview.maintainability.count} smells, ${overview.coverage.percentage.toFixed(1)}% coverage.`,
+          );
+        }
+        return { overview };
+      }
+      const overviewError = initialOverview.reason?.message || 'Failed to fetch project measures.';
+      Logger.error(`Failed to fetch project measures for [${resolvedProjectKey}]`, overviewError);
+      return { overview: null, overviewError };
+    }
+
+    return this._fetchOverviewForProject(client, resolvedProjectKey);
+  }
+
+  private async _syncConnectedState(params: {
+    config: { serverUrl: string; projectKey?: string; hasToken: boolean };
+    token: string;
+    profiles: any[];
+    activeProfileId?: string;
+    effectiveDefaultAgent: string;
+    availableAgents: any[];
+  }): Promise<void> {
+    const { config, token, profiles, activeProfileId, effectiveDefaultAgent, availableAgents } =
+      params;
+    const immediateState = {
+      type: 'state',
+      state: 'connected',
+      serverUrl: config.serverUrl,
+      projectKey: config.projectKey,
+      projects: [],
+      profiles,
+      activeProfileId,
+      defaultAgent: effectiveDefaultAgent,
+      availableAgents,
+    };
+    this._lastStateMessage = immediateState;
+    const deliveredImmediate = await this._view?.webview.postMessage(immediateState);
+    Logger.info(`[Host] Immediate postMessage(connected) delivered=${deliveredImmediate}`);
+
+    await this._view?.webview.postMessage({ type: 'loading', loading: true });
+
+    const client = new SonarClient({ serverUrl: config.serverUrl, token });
+    const effectiveProjectKey = config.projectKey;
+
+    const [projectsResult, initialOverview] = await Promise.allSettled([
+      client.fetchProjects(),
+      effectiveProjectKey ? client.getOverview(effectiveProjectKey) : Promise.resolve(null),
+    ]);
+
+    const projects = projectsResult.status === 'fulfilled' ? projectsResult.value : [];
+    if (projectsResult.status === 'rejected') {
+      console.error('[SonarAgent] fetchProjects error:', projectsResult.reason);
+    }
+
+    let resolvedProjectKey = effectiveProjectKey;
+    if (!resolvedProjectKey && projects.length > 0) {
+      resolvedProjectKey = projects[0].key;
+      await this.projectDetector.setProjectKey(resolvedProjectKey);
+    }
+
+    const { overview, overviewError } = await this._resolveOverview(
+      client,
+      resolvedProjectKey,
+      effectiveProjectKey,
+      initialOverview,
+    );
+
+    const fullState = {
+      type: 'state',
+      state: 'connected',
+      serverUrl: config.serverUrl,
+      projectKey: resolvedProjectKey,
+      projects,
+      overview,
+      overviewError,
+      profiles,
+      activeProfileId,
+      defaultAgent: effectiveDefaultAgent,
+      availableAgents,
+    };
+    this._lastStateMessage = fullState;
+    const deliveredFull = await this._view?.webview.postMessage(fullState);
+    Logger.info(`[Host] Full postMessage(connected) delivered=${deliveredFull}`);
+
+    await this._view?.webview.postMessage({ type: 'loading', loading: false });
+
+    if (!this._webviewReady && this._view) {
+      setTimeout(async () => {
+        if (!this._webviewReady && this._view && this._lastStateMessage) {
+          await this._view.webview.postMessage(this._lastStateMessage);
+        }
+      }, 350);
+    }
+  }
+
   private async _syncState(): Promise<void> {
     if (!this._view) {
       return;
@@ -290,16 +472,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     try {
       const config = await this.projectDetector.getConfig();
       const token = await this.projectDetector.getToken();
-      const defaultAgent = vscode.workspace
-        .getConfiguration('sonarAgent')
-        .get<string>('defaultAgent', 'copilot');
-
+      const effectiveDefaultAgent = this._getEffectiveDefaultAgent();
       const availableAgents = this.agentDispatcher.getAvailableAgents();
-      let effectiveDefaultAgent = defaultAgent;
-      if (!availableAgents.some((a) => a.id === effectiveDefaultAgent)) {
-        effectiveDefaultAgent = availableAgents[0]?.id || 'clipboard';
-      }
-
       const profiles = (await this.projectDetector.listProfiles?.()) ?? [];
       const activeProfile = (await this.projectDetector.getActiveProfile?.()) ?? null;
 
@@ -308,131 +482,32 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       );
 
       if (profiles.length === 0 && !config.serverUrl && !token) {
-        const noProfilesState = {
-          type: 'state',
-          state: 'no-profiles',
-          serverUrl: 'http://localhost:9000',
+        await this._sendNoProfilesState(
           profiles,
-          activeProfileId: activeProfile?.id,
-          defaultAgent: effectiveDefaultAgent,
+          activeProfile?.id,
+          effectiveDefaultAgent,
           availableAgents,
-        };
-        this._lastStateMessage = noProfilesState;
-        await this._view.webview.postMessage(noProfilesState);
+        );
         return;
       }
 
       if (config.serverUrl && config.hasToken && token) {
-        const immediateState = {
-          type: 'state',
-          state: 'connected',
-          serverUrl: config.serverUrl,
-          projectKey: config.projectKey,
-          projects: [],
+        await this._syncConnectedState({
+          config,
+          token,
           profiles,
           activeProfileId: activeProfile?.id,
-          defaultAgent: effectiveDefaultAgent,
+          effectiveDefaultAgent,
           availableAgents,
-        };
-        this._lastStateMessage = immediateState;
-        const deliveredImmediate = await this._view.webview.postMessage(immediateState);
-        Logger.info(`[Host] Immediate postMessage(connected) delivered=${deliveredImmediate}`);
-
-        await this._view.webview.postMessage({ type: 'loading', loading: true });
-
-        const client = new SonarClient({ serverUrl: config.serverUrl, token });
-        const effectiveProjectKey = config.projectKey;
-
-        const [projectsResult, overviewResult] = await Promise.allSettled([
-          client.fetchProjects(),
-          effectiveProjectKey ? client.getOverview(effectiveProjectKey) : Promise.resolve(null),
-        ]);
-
-        const projects = projectsResult.status === 'fulfilled' ? projectsResult.value : [];
-        if (projectsResult.status === 'rejected') {
-          console.error('[SonarAgent] fetchProjects error:', projectsResult.reason);
-        }
-
-        let resolvedProjectKey = effectiveProjectKey;
-        if (!resolvedProjectKey && projects.length > 0) {
-          resolvedProjectKey = projects[0].key;
-          await this.projectDetector.setProjectKey(resolvedProjectKey);
-        }
-
-        let overview: SonarOverview | null = null;
-        let overviewError: string | undefined;
-
-        if (resolvedProjectKey && resolvedProjectKey === effectiveProjectKey) {
-          if (overviewResult.status === 'fulfilled') {
-            overview = overviewResult.value;
-            if (overview) {
-              Logger.info(
-                `Measures updated for [${resolvedProjectKey}]: ${overview.security.count} vulnerabilities, ${overview.reliability.count} bugs, ${overview.maintainability.count} smells, ${overview.coverage.percentage.toFixed(1)}% coverage.`,
-              );
-            }
-          } else {
-            overviewError = overviewResult.reason?.message || 'Failed to fetch project measures.';
-            Logger.error(
-              `Failed to fetch project measures for [${resolvedProjectKey}]`,
-              overviewError,
-            );
-          }
-        } else if (resolvedProjectKey) {
-          try {
-            overview = await client.getOverview(resolvedProjectKey);
-            if (overview) {
-              Logger.info(
-                `Measures updated for [${resolvedProjectKey}]: ${overview.security.count} vulnerabilities, ${overview.reliability.count} bugs, ${overview.maintainability.count} smells, ${overview.coverage.percentage.toFixed(1)}% coverage.`,
-              );
-            }
-          } catch (err: any) {
-            overviewError = err.message || 'Failed to fetch project measures.';
-            Logger.error(
-              `Failed to fetch project measures for [${resolvedProjectKey}]`,
-              overviewError,
-            );
-          }
-        }
-
-        const fullState = {
-          type: 'state',
-          state: 'connected',
-          serverUrl: config.serverUrl,
-          projectKey: resolvedProjectKey,
-          projects,
-          overview,
-          overviewError,
-          profiles,
-          activeProfileId: activeProfile?.id,
-          defaultAgent: effectiveDefaultAgent,
-          availableAgents,
-        };
-        this._lastStateMessage = fullState;
-        const deliveredFull = await this._view.webview.postMessage(fullState);
-        Logger.info(`[Host] Full postMessage(connected) delivered=${deliveredFull}`);
-
-        await this._view.webview.postMessage({ type: 'loading', loading: false });
-
-        if (!this._webviewReady && this._view) {
-          setTimeout(async () => {
-            if (!this._webviewReady && this._view && this._lastStateMessage) {
-              await this._view.webview.postMessage(this._lastStateMessage);
-            }
-          }, 350);
-        }
+        });
       } else {
-        const onboardingState = {
-          type: 'state',
-          state: 'onboarding',
-          serverUrl: config.serverUrl || 'http://localhost:9000',
+        await this._sendOnboardingState(
+          config.serverUrl,
           profiles,
-          activeProfileId: activeProfile?.id,
-          defaultAgent: effectiveDefaultAgent,
+          activeProfile?.id,
+          effectiveDefaultAgent,
           availableAgents,
-        };
-        this._lastStateMessage = onboardingState;
-        const deliveredOnboarding = await this._view.webview.postMessage(onboardingState);
-        Logger.info(`[Host] postMessage(onboarding) delivered=${deliveredOnboarding}`);
+        );
       }
     } catch (err: any) {
       console.error('[SonarAgent] _syncState error:', err);

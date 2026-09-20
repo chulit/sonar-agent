@@ -70,13 +70,22 @@ const ACTIVE_PROFILE_CONFIG_KEY = 'activeProfileId';
 const tokenKeyFor = (id: string): string => `${TOKEN_SECRET_KEY}.${id}`;
 
 function slugify(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '');
-  return slug || 'profile';
+  let result = '';
+  const lower = name.toLowerCase().trim();
+  let lastWasHyphen = false;
+  for (const ch of lower) {
+    if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+      result += ch;
+      lastWasHyphen = false;
+    } else if (!lastWasHyphen && result.length > 0) {
+      result += '-';
+      lastWasHyphen = true;
+    }
+  }
+  while (result.endsWith('-')) {
+    result = result.slice(0, -1);
+  }
+  return result || 'profile';
 }
 
 export class ProjectDetector {
