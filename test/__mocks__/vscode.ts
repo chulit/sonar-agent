@@ -2,11 +2,21 @@ export const workspace = {
   workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
   findFiles: async () => [],
   openTextDocument: async () => ({}),
+  asRelativePath: (uri: any) => (typeof uri === 'string' ? uri : (uri?.fsPath ?? String(uri))),
   getConfiguration: () => ({
     get: (key: string, def?: any) => def,
     update: async () => {},
   }),
 };
+
+export const extensions = {
+  getExtension: (_id: string) => undefined,
+};
+
+export enum StatusBarAlignment {
+  Left = 1,
+  Right = 2,
+}
 
 export const env = {
   clipboard: {
@@ -28,6 +38,8 @@ export const languages = {
     dispose: () => {},
   }),
   registerCodeActionsProvider: () => ({ dispose: () => {} }),
+  getDiagnostics: (): Array<readonly [unknown, any[]]> => [],
+  onDidChangeDiagnostics: (_listener: (e: any) => void) => ({ dispose: () => {} }),
 };
 
 export enum ProgressLocation {
@@ -37,6 +49,13 @@ export enum ProgressLocation {
 }
 
 export const window = {
+  createStatusBarItem: (_alignment?: number, _priority?: number) => ({
+    text: '',
+    tooltip: '',
+    show: () => {},
+    hide: () => {},
+    dispose: () => {},
+  }),
   showTextDocument: async () => ({
     selection: {},
     revealRange: () => {},

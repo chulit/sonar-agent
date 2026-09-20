@@ -6,11 +6,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] Add tab bar HTML (`#tab-bar`) with buttons `#tab-overall` and `#tab-current` below the project/agent selector card in `SonarOverviewViewProvider`'s HTML template. Tab bar is rendered only when `sonarAgent.currentCode.enabled` is `true`.
-- [ ] Add `#overall-tab-panel` and `#current-tab-panel` wrapper divs; existing metrics grid and issues section move inside `#overall-tab-panel`.
-- [ ] Webview script: clicking a tab sends `{ command: 'switchTab', tab: 'overallCode' | 'currentCode' }` to the extension host.
-- [ ] Extension host handles `switchTab` message and responds with `{ type: 'tabState', activeTab: string }`.
-- [ ] Webview script toggles `.active` class on tab buttons and shows/hides the correct panel on `tabState` message receipt.
-- [ ] Extension host updates the badge count via `{ type: 'currentCodeCount', count: number }` message; webview script reflects this in the tab label.
-- [ ] Tab switcher uses VS Code theme variables for active/inactive states; follows existing icon-btn hover and focus-visible patterns.
-- [ ] Build, typecheck, lint, and tests all pass.
+- [x] Add tab bar HTML (`#tab-bar`) with buttons `#tab-overall` and `#tab-current` below the project/agent selector card in `SonarOverviewViewProvider`'s HTML template. Tab bar is rendered only when `sonarAgent.currentCode.enabled` is `true`.
+- [x] Add `#overall-tab-panel` and `#current-tab-panel` wrapper divs; existing metrics grid and issues section move inside `#overall-tab-panel`.
+- [x] Webview script: clicking a tab sends `{ command: 'switchTab', tab: 'overallCode' | 'currentCode' }` to the extension host.
+- [x] Extension host handles `switchTab` message and responds with `{ type: 'tabState', activeTab: string }`.
+- [x] Webview script toggles `.active` class on tab buttons and shows/hides the correct panel on `tabState` message receipt.
+- [x] Extension host updates the badge count via `{ type: 'currentCodeCount', count: number }` message; webview script reflects this in the tab label.
+- [x] Tab switcher uses VS Code theme variables for active/inactive states; follows existing icon-btn hover and focus-visible patterns.
+- [x] Build, typecheck, lint, and tests all pass.

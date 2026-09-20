@@ -5,7 +5,10 @@ import { SonarClient, SonarDetailItem, SonarOverview } from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
 import { AgentDispatcher } from './AgentDispatcher.js';
 import { ConnectionProfileWizard } from './ConnectionProfileWizard.js';
+import { SonarLocalScanner } from './SonarLocalScanner.js';
 import { Logger } from './Logger.js';
+
+export type CurrentCodeTab = 'overallCode' | 'currentCode';
 
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'sonarAgent.overviewView';
@@ -16,6 +19,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private readonly agentDispatcher: AgentDispatcher;
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
   private readonly connectionWizard: ConnectionProfileWizard;
+  private readonly localScanner: SonarLocalScanner;
+  private readonly workspaceRoot?: string;
+  private _currentCodeEnabled = true;
+  private _activeTab: CurrentCodeTab = 'overallCode';
+  private _currentCodeItems: SonarDetailItem[] = [];
+  private _currentCodeSubscription?: vscode.Disposable;
+  private _statusBarItem?: vscode.StatusBarItem;
+  private _scanInProgress = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -24,8 +35,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     agentDispatcher?: AgentDispatcher,
     diagnosticCollection?: vscode.DiagnosticCollection,
     connectionWizard?: ConnectionProfileWizard,
+    localScanner?: SonarLocalScanner,
+    workspaceRoot?: string,
   ) {
+    this.workspaceRoot = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     this.fileNavigator = fileNavigator ?? new FileNavigator();
+    this.localScanner =
+      localScanner ?? new SonarLocalScanner({ workspaceRoot: this.workspaceRoot });
     this.agentDispatcher =
       agentDispatcher ??
       new AgentDispatcher({
@@ -50,6 +66,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   ): void {
     this._view = webviewView;
     this._webviewReady = false;
+    this._currentCodeEnabled = this.readCurrentCodeEnabled();
     const isConfigured = this.projectDetector.isConfiguredSync?.() ?? false;
     Logger.info(
       `[Host] resolveWebviewView called. visible=${webviewView.visible}, isConfigured=${isConfigured}`,
@@ -60,7 +77,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this.extensionUri],
     };
 
-    webviewView.webview.html = this._getHtmlForWebview(webviewView.webview, isConfigured);
+    webviewView.webview.html = this._getHtmlForWebview(
+      webviewView.webview,
+      isConfigured,
+      this._currentCodeEnabled,
+    );
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       try {
@@ -132,6 +153,30 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
             await this._syncState();
             break;
           }
+          case 'switchTab': {
+            await this.handleSwitchTab(
+              message.tab === 'currentCode' ? 'currentCode' : 'overallCode',
+            );
+            break;
+          }
+          case 'runCliScan': {
+            await this.handleRunCliScan();
+            break;
+          }
+          case 'installSonarLint': {
+            try {
+              await vscode.commands.executeCommand(
+                'workbench.extensions.installExtension',
+                'sonarsource.sonarlint-vscode',
+              );
+            } catch (err: any) {
+              this._view?.webview.postMessage({
+                type: 'error',
+                message: err?.message || 'Failed to install SonarLint.',
+              });
+            }
+            break;
+          }
         }
       } catch (err: any) {
         console.error('[SonarAgent] Webview message handling error:', err);
@@ -148,13 +193,175 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
         this._syncState();
+        if (this._currentCodeEnabled && this._activeTab === 'currentCode') {
+          this.subscribeCurrentCode();
+        }
+      } else {
+        this.unsubscribeCurrentCode();
       }
+    });
+    webviewView.onDidDispose?.(() => {
+      this.unsubscribeCurrentCode();
+      this.hideScanStatus();
     });
   }
 
   public async refresh(): Promise<void> {
     if (this._view) {
       await this._syncState();
+    }
+  }
+
+  public isCurrentCodeEnabled(): boolean {
+    return this._currentCodeEnabled;
+  }
+
+  public getActiveTab(): CurrentCodeTab {
+    return this._activeTab;
+  }
+
+  private readCurrentCodeEnabled(): boolean {
+    try {
+      return vscode.workspace
+        .getConfiguration('sonarAgent')
+        .get<boolean>('currentCode.enabled', true);
+    } catch {
+      return true;
+    }
+  }
+
+  private readCurrentCodeSource(): 'sonarlint' | 'cli' {
+    try {
+      const source = vscode.workspace
+        .getConfiguration('sonarAgent')
+        .get<string>('currentCode.source', 'sonarlint');
+      return source === 'cli' ? 'cli' : 'sonarlint';
+    } catch {
+      return 'sonarlint';
+    }
+  }
+
+  public async handleSwitchTab(tab: CurrentCodeTab): Promise<void> {
+    this._activeTab = tab;
+    await this._view?.webview.postMessage({ type: 'tabState', activeTab: this._activeTab });
+    if (!this._currentCodeEnabled) {
+      return;
+    }
+    if (tab === 'currentCode') {
+      await this.subscribeCurrentCode();
+    } else {
+      this.unsubscribeCurrentCode();
+    }
+  }
+
+  private async subscribeCurrentCode(): Promise<void> {
+    if (!this._currentCodeEnabled || !this._view) {
+      return;
+    }
+    this.unsubscribeCurrentCode();
+    await this.pushCurrentCodeItems();
+    try {
+      this._currentCodeSubscription = this.localScanner.onDiagnosticsChanged((items) => {
+        void this.pushCurrentCodeItems(items);
+      });
+    } catch {
+      // listener registration is best-effort in headless environments
+    }
+  }
+
+  private unsubscribeCurrentCode(): void {
+    try {
+      this._currentCodeSubscription?.dispose();
+    } catch {
+      // ignore dispose errors
+    }
+    this._currentCodeSubscription = undefined;
+  }
+
+  private async pushCurrentCodeItems(items?: SonarDetailItem[]): Promise<void> {
+    if (!this._view || !this._currentCodeEnabled) {
+      return;
+    }
+    try {
+      const resolved = items ?? this.localScanner.getLocalDiagnostics();
+      this._currentCodeItems = resolved;
+      const source = this.readCurrentCodeSource();
+      const sourceLabel = source === 'cli' ? 'Source: SonarScanner' : 'Source: SonarLint (Live)';
+      await this._view.webview.postMessage({
+        type: 'currentCodeItems',
+        items: resolved,
+        source,
+        sourceLabel,
+        sonarLintInstalled: this.localScanner.isSonarLintInstalled(),
+      });
+      await this._view.webview.postMessage({ type: 'currentCodeCount', count: resolved.length });
+    } catch (err: any) {
+      await this._view?.webview.postMessage({
+        type: 'error',
+        message: err?.message || 'Failed to load Current Code issues.',
+      });
+    }
+  }
+
+  private showScanStatus(): void {
+    try {
+      this._statusBarItem ??= vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Left,
+        100,
+      );
+      this._statusBarItem.text = '$(sync~spin) Sonar Agent: Scanning…';
+      this._statusBarItem.tooltip = 'Sonar Agent full project scan in progress';
+      this._statusBarItem.show();
+    } catch {
+      // status bar is unavailable in headless test environments
+    }
+  }
+
+  private hideScanStatus(): void {
+    try {
+      this._statusBarItem?.hide();
+    } catch {
+      // ignore
+    }
+  }
+
+  public async handleRunCliScan(): Promise<{ ok: boolean; errorMessage?: string }> {
+    if (!this._view || this._scanInProgress) {
+      return { ok: false, errorMessage: 'Scan already in progress.' };
+    }
+    this._scanInProgress = true;
+    this.showScanStatus();
+    await this._view.webview.postMessage({ type: 'scanStatus', scanning: true });
+    try {
+      const result = await this.localScanner.runCliScan(this.workspaceRoot);
+      if (result.ok) {
+        const refreshed = await this.refreshCurrentCodeFromServer();
+        await this.pushCurrentCodeItems(refreshed ?? undefined);
+      } else {
+        await this._view.webview.postMessage({
+          type: 'error',
+          message: result.errorMessage ?? 'Full scan failed.',
+        });
+      }
+      return result;
+    } finally {
+      this._scanInProgress = false;
+      this.hideScanStatus();
+      await this._view?.webview.postMessage({ type: 'scanStatus', scanning: false });
+    }
+  }
+
+  private async refreshCurrentCodeFromServer(): Promise<SonarDetailItem[] | null> {
+    try {
+      const config = await this.projectDetector.getConfig();
+      const token = await this.projectDetector.getToken();
+      if (!config.serverUrl || !config.projectKey || !token) {
+        return null;
+      }
+      const client = new SonarClient({ serverUrl: config.serverUrl, token });
+      return await client.getIssues(config.projectKey);
+    } catch {
+      return null;
     }
   }
 
@@ -488,6 +695,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           effectiveDefaultAgent,
           availableAgents,
         );
+        await this.syncTabState();
         return;
       }
 
@@ -509,6 +717,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           availableAgents,
         );
       }
+      await this.syncTabState();
     } catch (err: any) {
       console.error('[SonarAgent] _syncState error:', err);
       Logger.error('Failed to synchronize Sonar Agent state', err);
@@ -517,6 +726,23 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         message: err.message || 'Failed to synchronize Sonar Agent state.',
       });
       this._view?.webview.postMessage({ type: 'loading', loading: false });
+    }
+  }
+
+  private async syncTabState(): Promise<void> {
+    if (!this._view || !this._currentCodeEnabled) {
+      return;
+    }
+    try {
+      await this._view.webview.postMessage({ type: 'tabState', activeTab: this._activeTab });
+      if (this._activeTab === 'currentCode') {
+        await this.subscribeCurrentCode();
+      } else {
+        const items = this.localScanner.getLocalDiagnostics();
+        await this._view.webview.postMessage({ type: 'currentCodeCount', count: items.length });
+      }
+    } catch {
+      // best-effort tab sync
     }
   }
 
@@ -604,7 +830,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview, isConfigured: boolean = false): string {
+  private _getHtmlForWebview(
+    webview: vscode.Webview,
+    isConfigured: boolean = false,
+    currentCodeEnabled: boolean = true,
+  ): string {
     const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
@@ -1300,6 +1530,77 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     .hidden {
       display: none !important;
     }
+
+    /* Current Code tab bar */
+    .tab-bar {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+      border-radius: 6px;
+    }
+
+    .tab-btn {
+      flex: 1;
+      background: none;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+    }
+
+    .tab-btn:hover {
+      background: var(--vscode-toolbar-hoverBackground);
+      color: var(--vscode-foreground);
+    }
+
+    .tab-btn.active {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+
+    .tab-btn:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder) !important;
+      outline-offset: 1px;
+    }
+
+    .current-subbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 12px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+      background: var(--vscode-editor-background);
+      border: 1px dashed var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+      border-radius: 6px;
+    }
+
+    .empty-state-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
   </style>
 </head>
 <body>
@@ -1386,6 +1687,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
       </div>
 
+      ${
+        currentCodeEnabled
+          ? `<div id="tab-bar" class="tab-bar" role="tablist" aria-label="Code scope">
+        <button id="tab-overall" class="tab-btn active" role="tab" aria-selected="true">Overall Code</button>
+        <button id="tab-current" class="tab-btn" role="tab" aria-selected="false">Current Code (0)</button>
+      </div>`
+          : ''
+      }
+
+      <div id="overall-tab-panel" style="display: flex; flex-direction: column; gap: 10px;">
       <div class="section-title" style="margin-top: 4px; margin-bottom: 2px;">
         <span>Overall Code Measures</span>
       </div>
@@ -1558,6 +1869,40 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           </div>
         </div>
       </div>
+      </div>
+      ${
+        currentCodeEnabled
+          ? `<div id="current-tab-panel" class="hidden" style="display: flex; flex-direction: column; gap: 8px;">
+        <div class="current-subbar">
+          <span id="current-source-label">Source: SonarLint (Live)</span>
+          <button id="run-full-scan-btn" class="btn btn-secondary btn-sm">Run Full Scan</button>
+        </div>
+        <div id="current-loading" class="loading-overlay hidden">
+          <div class="spinner"></div>
+          <span>Scanning project...</span>
+        </div>
+        <div id="current-error" class="alert error hidden"></div>
+        <div id="current-empty-sonarlint" class="empty-state hidden">
+          <span>SonarLint is not installed. Install it for live Current Code feedback.</span>
+          <div class="empty-state-actions">
+            <button id="install-sonarlint-btn" class="btn btn-sm">Install SonarLint Extension</button>
+            <button id="run-full-scan-empty-btn" class="btn btn-secondary btn-sm">Run Full Scan via CLI</button>
+          </div>
+        </div>
+        <div id="current-empty-clean" class="empty-state hidden">
+          <span>✅ No Sonar issues detected. Clean &amp; ready!</span>
+        </div>
+        <div id="current-issues-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+        <div id="current-batch-bar" class="batch-bar hidden">
+          <span id="current-selected-count" style="font-weight: 600; font-size: 11px;">0 selected</span>
+          <div style="display: flex; gap: 6px;">
+            <button id="current-send-batch-btn" class="btn btn-agent btn-sm">Send to Agent</button>
+            <button id="current-clear-btn" class="btn btn-secondary btn-sm">Clear</button>
+          </div>
+        </div>
+      </div>`
+          : ''
+      }
     </div>
   </div>
 
@@ -2096,6 +2441,226 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       updateBatchBar();
     });
 
+    // ---- Current Code tab ----
+    const tabOverall = document.getElementById("tab-overall");
+    const tabCurrent = document.getElementById("tab-current");
+    const overallPanel = document.getElementById("overall-tab-panel");
+    const currentPanel = document.getElementById("current-tab-panel");
+    const currentIssuesContainer = document.getElementById("current-issues-container");
+    const currentBatchBar = document.getElementById("current-batch-bar");
+    const currentSelectedCount = document.getElementById("current-selected-count");
+    const currentSendBatchBtn = document.getElementById("current-send-batch-btn");
+    const currentClearBtn = document.getElementById("current-clear-btn");
+    const currentLoading = document.getElementById("current-loading");
+    const currentError = document.getElementById("current-error");
+    const currentEmptySonarlint = document.getElementById("current-empty-sonarlint");
+    const currentEmptyClean = document.getElementById("current-empty-clean");
+    const currentSourceLabel = document.getElementById("current-source-label");
+    const runFullScanBtn = document.getElementById("run-full-scan-btn");
+    const installSonarlintBtn = document.getElementById("install-sonarlint-btn");
+    const runFullScanEmptyBtn = document.getElementById("run-full-scan-empty-btn");
+
+    let currentCodeItems = [];
+    const selectedCurrentIds = new Set();
+
+    function setActiveTab(tab) {
+      const isCurrent = tab === "currentCode";
+      if (tabOverall) {
+        tabOverall.classList.toggle("active", !isCurrent);
+        tabOverall.setAttribute("aria-selected", String(!isCurrent));
+      }
+      if (tabCurrent) {
+        tabCurrent.classList.toggle("active", isCurrent);
+        tabCurrent.setAttribute("aria-selected", String(isCurrent));
+      }
+      if (overallPanel) {
+        overallPanel.classList.toggle("hidden", isCurrent);
+      }
+      if (currentPanel) {
+        currentPanel.classList.toggle("hidden", !isCurrent);
+      }
+    }
+
+    function updateCurrentBatchBar() {
+      if (!currentBatchBar) return;
+      const count = selectedCurrentIds.size;
+      if (count > 0) {
+        currentBatchBar.classList.remove("hidden");
+        currentSelectedCount.textContent = count + " issue" + (count > 1 ? "s" : "") + " selected";
+        currentSendBatchBtn.textContent =
+          "Send " + count + " Issue" + (count > 1 ? "s" : "") + " to Agent";
+      } else {
+        currentBatchBar.classList.add("hidden");
+      }
+    }
+
+    function renderCurrentIssueCard(item) {
+      const card = document.createElement("div");
+      card.className = "issue-card";
+
+      const pathDiv = document.createElement("div");
+      pathDiv.className = "issue-path";
+      pathDiv.textContent = item.filePath;
+      pathDiv.title = "Click to jump to file";
+      pathDiv.addEventListener("click", () => {
+        vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
+      });
+
+      const bodyDiv = document.createElement("div");
+      bodyDiv.className = "issue-body";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "issue-checkbox current-issue-checkbox";
+      checkbox.checked = selectedCurrentIds.has(item.id);
+      checkbox.setAttribute("aria-label", "Select issue: " + item.message);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selectedCurrentIds.add(item.id);
+        } else {
+          selectedCurrentIds.delete(item.id);
+        }
+        updateCurrentBatchBar();
+      });
+
+      const msgDiv = document.createElement("div");
+      msgDiv.className = "issue-message";
+      msgDiv.textContent = item.message;
+
+      bodyDiv.appendChild(checkbox);
+      bodyDiv.appendChild(msgDiv);
+
+      const badgesDiv = document.createElement("div");
+      badgesDiv.className = "issue-badges";
+
+      const severityBadge = document.createElement("span");
+      severityBadge.className = "badge-tag badge-severity-" + String(item.severity || "major").toLowerCase();
+      severityBadge.textContent = (item.type || "CODE_SMELL") + " (" + (item.severity || "MAJOR") + ")";
+      badgesDiv.appendChild(severityBadge);
+
+      if (item.ruleKey) {
+        const ruleBadge = document.createElement("span");
+        ruleBadge.className = "badge-tag";
+        ruleBadge.textContent = item.ruleKey;
+        badgesDiv.appendChild(ruleBadge);
+      }
+
+      const footerDiv = document.createElement("div");
+      footerDiv.className = "issue-footer";
+
+      const footerMeta = document.createElement("div");
+      footerMeta.className = "issue-footer-meta";
+      footerMeta.textContent = (item.line ? "L" + item.line : "File level");
+
+      const actionsDiv = document.createElement("div");
+      actionsDiv.className = "issue-actions";
+
+      const jumpBtn = document.createElement("button");
+      jumpBtn.className = "btn btn-secondary btn-sm";
+      jumpBtn.textContent = "Jump";
+      jumpBtn.setAttribute("aria-label", "Jump to " + item.filePath + (item.line ? ":" + item.line : ""));
+      jumpBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
+      });
+
+      const agentBtn = document.createElement("button");
+      agentBtn.className = "btn btn-agent btn-sm";
+      agentBtn.textContent = "Send to Agent";
+      agentBtn.setAttribute("aria-label", "Send to Agent for " + item.message);
+      agentBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const targetAgentId = targetAgentDropdown.value;
+        vscode.postMessage({ command: "sendToAgent", item, targetAgentId });
+      });
+
+      actionsDiv.appendChild(jumpBtn);
+      actionsDiv.appendChild(agentBtn);
+
+      footerDiv.appendChild(footerMeta);
+      footerDiv.appendChild(actionsDiv);
+
+      card.appendChild(pathDiv);
+      card.appendChild(bodyDiv);
+      card.appendChild(badgesDiv);
+      card.appendChild(footerDiv);
+
+      currentIssuesContainer.appendChild(card);
+    }
+
+    function renderCurrentCodeItems(items, sonarLintInstalled, sourceLabel) {
+      currentCodeItems = items || [];
+      selectedCurrentIds.clear();
+      updateCurrentBatchBar();
+      if (currentSourceLabel && sourceLabel) {
+        currentSourceLabel.textContent = sourceLabel;
+      }
+      if (currentError) {
+        currentError.textContent = "";
+        currentError.className = "alert error hidden";
+      }
+      if (!currentIssuesContainer) return;
+      currentIssuesContainer.innerHTML = "";
+      const hasItems = currentCodeItems.length > 0;
+      if (currentEmptySonarlint) {
+        currentEmptySonarlint.classList.toggle("hidden", sonarLintInstalled !== false || hasItems);
+      }
+      if (currentEmptyClean) {
+        currentEmptyClean.classList.toggle("hidden", !(sonarLintInstalled !== false && !hasItems));
+      }
+      currentCodeItems.forEach(renderCurrentIssueCard);
+    }
+
+    function updateCurrentTabCount(count) {
+      if (tabCurrent) {
+        tabCurrent.textContent = "Current Code (" + count + ")";
+      }
+    }
+
+    if (tabOverall) {
+      tabOverall.addEventListener("click", () => {
+        vscode.postMessage({ command: "switchTab", tab: "overallCode" });
+      });
+    }
+    if (tabCurrent) {
+      tabCurrent.addEventListener("click", () => {
+        vscode.postMessage({ command: "switchTab", tab: "currentCode" });
+      });
+    }
+    if (runFullScanBtn) {
+      runFullScanBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "runCliScan" });
+      });
+    }
+    if (runFullScanEmptyBtn) {
+      runFullScanEmptyBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "runCliScan" });
+      });
+    }
+    if (installSonarlintBtn) {
+      installSonarlintBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "installSonarLint" });
+      });
+    }
+    if (currentSendBatchBtn) {
+      currentSendBatchBtn.addEventListener("click", () => {
+        const selected = currentCodeItems.filter((i) => selectedCurrentIds.has(i.id));
+        if (selected.length > 0) {
+          const targetAgentId = targetAgentDropdown.value;
+          vscode.postMessage({ command: "sendBatchToAgent", items: selected, targetAgentId });
+        }
+      });
+    }
+    if (currentClearBtn) {
+      currentClearBtn.addEventListener("click", () => {
+        selectedCurrentIds.clear();
+        document.querySelectorAll(".current-issue-checkbox").forEach((cb) => {
+          cb.checked = false;
+        });
+        updateCurrentBatchBar();
+      });
+    }
+
     targetAgentDropdown.addEventListener("change", () => {
       vscode.postMessage({ command: "setTargetAgent", agentId: targetAgentDropdown.value });
     });
@@ -2310,6 +2875,37 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           connectBtn.disabled = false;
           connectBtn.textContent = "Connect & Verify";
           showAlert(message.message);
+          if (
+            currentError &&
+            message.message &&
+            currentPanel &&
+            !currentPanel.classList.contains("hidden")
+          ) {
+            currentError.textContent = message.message;
+            currentError.className = "alert error";
+          }
+          break;
+        }
+        case "tabState": {
+          setActiveTab(message.activeTab === "currentCode" ? "currentCode" : "overallCode");
+          break;
+        }
+        case "currentCodeItems": {
+          renderCurrentCodeItems(message.items || [], message.sonarLintInstalled, message.sourceLabel);
+          break;
+        }
+        case "currentCodeCount": {
+          updateCurrentTabCount(message.count || 0);
+          break;
+        }
+        case "scanStatus": {
+          if (currentLoading) {
+            currentLoading.classList.toggle("hidden", !message.scanning);
+          }
+          if (runFullScanBtn) {
+            runFullScanBtn.disabled = !!message.scanning;
+            runFullScanBtn.textContent = message.scanning ? "Scanning…" : "Run Full Scan";
+          }
           break;
         }
       }

@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Add `sonarAgent.currentCode.enabled` (boolean, default `true`) to `package.json` `contributes.configuration`.
-- [ ] Add `sonarAgent.currentCode.source` (enum `'sonarlint' | 'cli'`, default `'sonarlint'`) to `package.json` `contributes.configuration`.
-- [ ] `SonarOverviewViewProvider` reads `sonarAgent.currentCode.enabled` at `resolveWebviewView` time and passes it as a flag to the HTML template.
-- [ ] When `enabled = false`, the tab bar HTML is not rendered and no `onDidChangeDiagnostics` listener is registered.
-- [ ] Build, typecheck, lint, and tests all pass.
+- [x] Add `sonarAgent.currentCode.enabled` (boolean, default `true`) to `package.json` `contributes.configuration`.
+- [x] Add `sonarAgent.currentCode.source` (enum `'sonarlint' | 'cli'`, default `'sonarlint'`) to `package.json` `contributes.configuration`.
+- [x] `SonarOverviewViewProvider` reads `sonarAgent.currentCode.enabled` at `resolveWebviewView` time and passes it as a flag to the HTML template.
+- [x] When `enabled = false`, the tab bar HTML is not rendered and no `onDidChangeDiagnostics` listener is registered.
+- [x] Build, typecheck, lint, and tests all pass.

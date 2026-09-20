@@ -155,6 +155,24 @@
             "System Clipboard (Manual paste)"
           ],
           "description": "Default target AI coding agent"
+        },
+        "sonarAgent.currentCode.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Current Code tab with live local issues in the sidebar"
+        },
+        "sonarAgent.currentCode.source": {
+          "type": "string",
+          "default": "sonarlint",
+          "enum": [
+            "sonarlint",
+            "cli"
+          ],
+          "enumDescriptions": [
+            "Live diagnostics from the SonarLint extension",
+            "Results from a sonar-scanner CLI run"
+          ],
+          "description": "Source of Current Code issues"
         }
       }
     }

@@ -42,6 +42,7 @@ export interface SonarDetailItem {
   tags: string[];
   creationDate: string;
   author?: string;
+  source?: string;
 }
 
 export class SonarClient {
