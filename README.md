@@ -134,7 +134,7 @@ npx @vscode/vsce package --no-git-tag-version --allow-missing-repository
 - [`src/modules/FileNavigator.ts`](file:///Users/kholid/Documents/Project/JS/sonar-agent/src/modules/FileNavigator.ts): Workspace file resolution (with monorepo fallback) and editor line jumping.
 - [`src/modules/AgentDispatcher.ts`](file:///Users/kholid/Documents/Project/JS/sonar-agent/src/modules/AgentDispatcher.ts): Assembles enriched prompts and dispatches to Copilot, Antigravity, Claude Code, Roo Code, Continue, Cline, Codex, or Clipboard.
 - [`src/modules/SonarCodeActionProvider.ts`](file:///Users/kholid/Documents/Project/JS/sonar-agent/src/modules/SonarCodeActionProvider.ts): Editor Quick Fix code action provider integrating Sonar diagnostics with AI agent fix prompts.
-- [`src/modules/ItemFilter.ts`](file:///Users/kholid/Documents/Project/JS/sonar-agent/src/modules/ItemFilter.ts): Filtering and test file exclusion logic for issue lists.
+- [`src/modules/ConnectionProfileWizard.ts`](file:///Users/kholid/Documents/Project/JS/sonar-agent/src/modules/ConnectionProfileWizard.ts): Connection profile management and project selection prompt wizard.
 - [`src/modules/SonarOverviewViewProvider.ts`](file:///Users/kholid/Documents/Project/JS/sonar-agent/src/modules/SonarOverviewViewProvider.ts): Sidebar Webview view provider with CSS container queries and message passing.
 
 ---
