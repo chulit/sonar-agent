@@ -180,8 +180,6 @@
     "@semantic-release/git": "^11.0.1",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^8.70.0",
-    "@typescript-eslint/parser": "^8.70.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.20.0",
     "eslint": "^10.11.0",
