@@ -333,7 +333,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     this.showScanStatus();
     await this._view.webview.postMessage({ type: 'scanStatus', scanning: true });
     try {
-      const result = await this.localScanner.runCliScan(this.workspaceRoot);
+      const result = await this.localScanner.runCliScan(
+        this.workspaceRoot,
+        await this.resolveScanBinding(),
+      );
       if (result.ok) {
         const refreshed = await this.refreshCurrentCodeFromServer();
         await this.pushCurrentCodeItems(refreshed ?? undefined);
@@ -348,6 +351,25 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       this._scanInProgress = false;
       this.hideScanStatus();
       await this._view?.webview.postMessage({ type: 'scanStatus', scanning: false });
+    }
+  }
+
+  private async resolveScanBinding(): Promise<
+    { serverUrl?: string; projectKey?: string; token?: string } | undefined
+  > {
+    try {
+      const config = await this.projectDetector.getConfig();
+      const token = await this.projectDetector.getToken().catch(() => undefined);
+      if (!config.serverUrl && !config.projectKey && !token) {
+        return undefined;
+      }
+      return {
+        serverUrl: config.serverUrl || undefined,
+        projectKey: config.projectKey || undefined,
+        token: token ?? undefined,
+      };
+    } catch {
+      return undefined;
     }
   }
 

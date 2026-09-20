@@ -14,6 +14,17 @@ export interface SpawnedProcess {
   stderr?: { on(event: string, listener: (chunk: any) => void): unknown };
 }
 
+export interface ScanBinding {
+  serverUrl?: string;
+  projectKey?: string;
+  token?: string;
+}
+
+export interface SpawnOptions {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
 export interface SonarLocalScannerOptions {
   workspaceRoot?: string;
   getExtensionFn?: (extensionId: string) => { isActive?: boolean } | undefined;
@@ -22,7 +33,7 @@ export interface SonarLocalScannerOptions {
     listener: (e: vscode.DiagnosticChangeEvent) => void,
   ) => vscode.Disposable;
   asRelativePathFn?: (uri: unknown) => string;
-  spawnFn?: (command: string, args: string[], options: { cwd?: string }) => SpawnedProcess;
+  spawnFn?: (command: string, args: string[], options: SpawnOptions) => SpawnedProcess;
 }
 
 export const SONARLINT_EXTENSION_ID = 'sonarsource.sonarlint-vscode';
@@ -65,7 +76,7 @@ export class SonarLocalScanner {
   private readonly spawnFn: (
     command: string,
     args: string[],
-    options: { cwd?: string },
+    options: SpawnOptions,
   ) => SpawnedProcess;
 
   constructor(options?: SonarLocalScannerOptions) {
@@ -101,8 +112,12 @@ export class SonarLocalScanner {
       });
     this.spawnFn =
       options?.spawnFn ??
-      ((command: string, args: string[], opts: { cwd?: string }) =>
-        spawn(command, args, { cwd: opts.cwd, shell: false }) as unknown as SpawnedProcess);
+      ((command: string, args: string[], opts: SpawnOptions) =>
+        spawn(command, args, {
+          cwd: opts.cwd,
+          env: opts.env,
+          shell: false,
+        }) as unknown as SpawnedProcess);
   }
 
   isSonarLintInstalled(): boolean {
@@ -161,12 +176,14 @@ export class SonarLocalScanner {
     });
   }
 
-  async runCliScan(workspaceRoot?: string): Promise<ScanResult> {
+  async runCliScan(workspaceRoot?: string, binding?: ScanBinding): Promise<ScanResult> {
     const cwd = workspaceRoot ?? this.workspaceRoot;
     if (!cwd) {
       return { ok: false, errorMessage: 'No workspace folder open.' };
     }
-    const direct = await this.runCommand('sonar-scanner', [], cwd);
+    const args = this.buildScanArgs(binding);
+    const env = this.buildScanEnv(binding);
+    const direct = await this.runCommand('sonar-scanner', args, cwd, env);
     if (direct.spawned) {
       return direct.succeeded
         ? { ok: true }
@@ -175,7 +192,7 @@ export class SonarLocalScanner {
     if (!direct.notFound) {
       return { ok: false, errorMessage: direct.errorMessage ?? 'Sonar scanner failed.' };
     }
-    const fallback = await this.runCommand('npx', ['sonar-scanner'], cwd);
+    const fallback = await this.runCommand('npx', ['sonar-scanner', ...args], cwd, env);
     if (!fallback.spawned) {
       return { ok: false, errorMessage: SCANNER_NOT_FOUND_MESSAGE };
     }
@@ -184,15 +201,34 @@ export class SonarLocalScanner {
       : { ok: false, errorMessage: fallback.errorMessage ?? 'Sonar scanner failed.' };
   }
 
+  private buildScanArgs(binding?: ScanBinding): string[] {
+    const args: string[] = [];
+    if (binding?.projectKey) {
+      args.push(`-Dsonar.projectKey=${binding.projectKey}`);
+    }
+    if (binding?.serverUrl) {
+      args.push(`-Dsonar.host.url=${binding.serverUrl}`);
+    }
+    return args;
+  }
+
+  private buildScanEnv(binding?: ScanBinding): NodeJS.ProcessEnv | undefined {
+    if (!binding?.token) {
+      return undefined;
+    }
+    return { ...process.env, SONAR_TOKEN: binding.token };
+  }
+
   private runCommand(
     command: string,
     args: string[],
     cwd: string,
+    env?: NodeJS.ProcessEnv,
   ): Promise<{ spawned: boolean; succeeded: boolean; notFound: boolean; errorMessage?: string }> {
     return new Promise((resolve) => {
       let proc: SpawnedProcess;
       try {
-        proc = this.spawnFn(command, args, { cwd });
+        proc = this.spawnFn(command, args, { cwd, env });
       } catch (err: any) {
         const notFound = isNotFoundError(err);
         resolve({

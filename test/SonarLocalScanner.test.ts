@@ -198,6 +198,47 @@ describe('SonarLocalScanner', () => {
     expect(result.errorMessage).toBe(SCANNER_NOT_FOUND_MESSAGE);
   });
 
+  it('runCliScan passes projectKey and serverUrl as -D args', async () => {
+    const spawnFn = fakeSpawn(() => ({ exitCode: 0 }));
+    const scanner = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnFn as never,
+    });
+    await scanner.runCliScan('/workspace', {
+      serverUrl: 'http://sonar:9000',
+      projectKey: 'org:proj',
+    });
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    const [command, args] = spawnFn.mock.calls[0];
+    expect(command).toBe('sonar-scanner');
+    expect(args).toEqual(['-Dsonar.projectKey=org:proj', '-Dsonar.host.url=http://sonar:9000']);
+  });
+
+  it('runCliScan sends the token via SONAR_TOKEN env, never in args', async () => {
+    const spawnFn = fakeSpawn(() => ({ exitCode: 0 }));
+    const scanner = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnFn as never,
+    });
+    await scanner.runCliScan('/workspace', { projectKey: 'org:proj', token: 'sqp_secret' });
+    const [command, args, opts] = spawnFn.mock.calls[0];
+    expect(command).toBe('sonar-scanner');
+    expect(args.join(' ')).not.toContain('sqp_secret');
+    expect(opts.env.SONAR_TOKEN).toBe('sqp_secret');
+  });
+
+  it('runCliScan without a binding spawns with empty args', async () => {
+    const spawnFn = fakeSpawn(() => ({ exitCode: 0 }));
+    const scanner = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnFn as never,
+    });
+    await scanner.runCliScan('/workspace');
+    const [, args, opts] = spawnFn.mock.calls[0];
+    expect(args).toEqual([]);
+    expect(opts.env).toBeUndefined();
+  });
+
   it('runCliScan requires a workspace folder', async () => {
     const scanner = new SonarLocalScanner({
       workspaceRoot: undefined,

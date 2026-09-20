@@ -191,7 +191,14 @@ describe('Current Code settings & tab switcher', () => {
     const cb = getMessageCallback();
     posted.length = 0;
     await cb!({ command: 'runCliScan' });
-    expect(localScanner.runCliScan).toHaveBeenCalled();
+    expect(localScanner.runCliScan).toHaveBeenCalledWith(
+      '/workspace',
+      expect.objectContaining({
+        serverUrl: 'http://localhost:9000',
+        projectKey: 'p:k',
+        token: 'tok',
+      }),
+    );
     expect(posted.some((m) => m.type === 'scanStatus' && m.scanning === true)).toBe(true);
     expect(posted.some((m) => m.type === 'scanStatus' && m.scanning === false)).toBe(true);
     expect(posted.some((m) => m.type === 'currentCodeItems')).toBe(true);
