@@ -41,6 +41,8 @@ describe('SonarOverviewViewProvider - Webview Lifecycle & CSP', () => {
       setProjectKey: vi.fn(async (key: string) => {
         mockConfig.projectKey = key;
       }),
+      listProfiles: vi.fn(async () => []),
+      getActiveProfile: vi.fn(async () => null),
     };
 
     mockWebviewView = {

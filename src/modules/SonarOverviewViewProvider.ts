@@ -825,16 +825,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         effectiveDefaultAgent = availableAgents[0]?.id || 'clipboard';
       }
 
-      const profiles = this.profilesCapable() ? await this.projectDetector.listProfiles() : [];
-      const activeProfile = this.profilesCapable()
-        ? await this.projectDetector.getActiveProfile()
-        : null;
+      const profiles = (await this.projectDetector.listProfiles?.()) ?? [];
+      const activeProfile = (await this.projectDetector.getActiveProfile?.()) ?? null;
 
       Logger.info(
         `[Host] _syncState: serverUrl=${config.serverUrl}, hasToken=${config.hasToken}, tokenPresent=${Boolean(token)}`,
       );
 
-      if (this.profilesCapable() && profiles.length === 0 && !config.serverUrl && !token) {
+      if (profiles.length === 0 && !config.serverUrl && !token) {
         const noProfilesState = {
           type: 'state',
           state: 'no-profiles',
@@ -855,8 +853,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           state: 'connected',
           serverUrl: config.serverUrl,
           projectKey: config.projectKey,
-          detectedFromProperties: config.detectedFromProperties ?? false,
-          hasPlaintextWarning: config.hasPlaintextCredentialsWarning ?? false,
           projects: [],
           profiles,
           activeProfileId: activeProfile?.id,
@@ -928,8 +924,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           state: 'connected',
           serverUrl: config.serverUrl,
           projectKey: resolvedProjectKey,
-          detectedFromProperties: config.detectedFromProperties ?? false,
-          hasPlaintextWarning: config.hasPlaintextCredentialsWarning ?? false,
           projects,
           overview,
           overviewError,
@@ -1069,13 +1063,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   <title>Sonar Agent</title>
   <style>
     :root {
-      --sonar-blue: #4b9fd5;
-      --sonar-green: #00aa5e;
+      --sonar-blue: var(--vscode-charts-blue, #4b9fd5);
+      --sonar-green: var(--vscode-charts-green, #00aa5e);
       --sonar-lime: #81b300;
-      --sonar-yellow: #eabe06;
-      --sonar-orange: #ed7d20;
-      --sonar-red: #d4333f;
+      --sonar-yellow: var(--vscode-charts-yellow, #eabe06);
+      --sonar-orange: var(--vscode-charts-orange, #ed7d20);
+      --sonar-red: var(--vscode-charts-red, #d4333f);
       --sonar-border: var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+    }
+
+    body.vscode-light {
+      --sonar-lime: #5a7800;
     }
 
     * {
@@ -1091,6 +1089,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       font-size: var(--vscode-font-size);
       background-color: var(--vscode-sideBar-background);
       overflow-x: hidden;
+    }
+
+    button:focus-visible,
+    .btn:focus-visible,
+    .icon-btn:focus-visible,
+    .metric-card:focus-visible,
+    .project-item:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder) !important;
+      outline-offset: 1px;
     }
 
     .container {
@@ -1794,23 +1803,22 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         <div>
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
             <div style="display: flex; align-items: center; gap: 6px;">
-              <label style="font-size: 10px;">PROJECT BINDING</label>
-              <button id="manual-project-btn" class="icon-btn" title="Enter Project Key manually" style="padding: 2px 4px; height: 18px;">
+              <label for="project-search-input" style="font-size: 10px;">PROJECT BINDING</label>
+              <button id="manual-project-btn" class="icon-btn" title="Enter Project Key manually" aria-label="Enter Project Key manually" style="padding: 2px 4px; height: 18px;">
                 <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/></svg>
               </button>
             </div>
-            <span id="detected-badge" class="source-badge hidden">sonar-project.properties</span>
           </div>
           <div class="project-selector-wrapper">
             <div class="search-input-group">
-              <input id="project-search-input" type="text" placeholder="Type to search or click to pick project..." autocomplete="off" />
-              <button id="project-search-toggle-btn" type="button" title="Toggle project list">
+              <input id="project-search-input" type="text" placeholder="Type to search or click to pick project..." autocomplete="off" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="project-items-container" />
+              <button id="project-search-toggle-btn" type="button" title="Toggle project list" aria-label="Toggle project list">
                 <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/></svg>
               </button>
             </div>
-            <div id="project-dropdown-popup" class="project-dropdown-popup hidden">
+            <div id="project-dropdown-popup" class="project-dropdown-popup hidden" role="listbox" aria-label="Projects">
               <div id="project-items-container" class="project-items-container"></div>
-              <div id="manual-project-item" class="project-item manual-item">
+              <div id="manual-project-item" class="project-item manual-item" role="button" tabindex="0" aria-label="Enter Project Key manually">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink: 0;"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/></svg>
                 <span>Enter Project Key manually...</span>
               </div>
@@ -1819,16 +1827,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <div>
-          <label style="font-size: 10px;">TARGET AGENT</label>
-          <select id="target-agent-dropdown" style="margin-top: 3px;">
+          <label for="target-agent-dropdown" style="font-size: 10px;">TARGET AGENT</label>
+          <select id="target-agent-dropdown" style="margin-top: 3px;" aria-label="Target AI Agent">
             <option value="clipboard">Clipboard Only</option>
           </select>
         </div>
-      </div>
-
-      <div id="plaintext-warning" class="alert warning hidden" style="display: flex; align-items: center; gap: 6px;">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0;"><path d="M7.938 2.016A.13.13 0 0 1 8.002 2a.13.13 0 0 1 .063.016.146.146 0 0 1 .054.057l6.857 11.667c.036.06.035.124.002.183a.163.163 0 0 1-.054.06.116.116 0 0 1-.066.017H1.146a.115.115 0 0 1-.066-.017.163.163 0 0 1-.054-.06.176.176 0 0 1 .002-.183L7.884 2.073a.147.147 0 0 1 .054-.057zm1.044-.45a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566z"/><path d="M7.002 12a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 5.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995z"/></svg>
-        <span>Warning: Plaintext credentials found in sonar-project.properties. Please remove them to avoid leaking secrets.</span>
       </div>
 
       <div class="section-title" style="margin-top: 4px; margin-bottom: 2px;">
@@ -1846,7 +1849,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       <!-- Metric Cards Grid (Container Query Controlled) -->
       <div id="metrics-grid" class="metrics-grid">
         <!-- Security -->
-        <div class="metric-card" data-category="security">
+        <div class="metric-card" data-category="security" role="button" tabindex="0" aria-label="Security: open issues and rating">
           <div class="metric-info">
             <span class="metric-title">Security</span>
             <div class="metric-value-row">
@@ -1858,7 +1861,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <!-- Reliability -->
-        <div class="metric-card" data-category="reliability">
+        <div class="metric-card" data-category="reliability" role="button" tabindex="0" aria-label="Reliability: open issues and rating">
           <div class="metric-info">
             <span class="metric-title">Reliability</span>
             <div class="metric-value-row">
@@ -1870,7 +1873,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <!-- Maintainability -->
-        <div class="metric-card" data-category="maintainability">
+        <div class="metric-card" data-category="maintainability" role="button" tabindex="0" aria-label="Maintainability: open issues and rating">
           <div class="metric-info">
             <span class="metric-title">Maintainability</span>
             <div class="metric-value-row">
@@ -1882,7 +1885,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <!-- Security Hotspots -->
-        <div class="metric-card" data-category="hotspots">
+        <div class="metric-card" data-category="hotspots" role="button" tabindex="0" aria-label="Security Hotspots: review count and rating">
           <div class="metric-info">
             <span class="metric-title">Security Hotspots</span>
             <div class="metric-value-row">
@@ -1894,7 +1897,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <!-- Coverage -->
-        <div class="metric-card" data-category="coverage">
+        <div class="metric-card" data-category="coverage" role="button" tabindex="0" aria-label="Coverage: code coverage percentage and lines to cover">
           <div class="metric-info">
             <span class="metric-title">Coverage</span>
             <div class="metric-value-row">
@@ -1908,7 +1911,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <!-- Duplications -->
-        <div class="metric-card" data-category="duplications">
+        <div class="metric-card" data-category="duplications" role="button" tabindex="0" aria-label="Duplications: duplicated lines percentage">
           <div class="metric-info">
             <span class="metric-title">Duplications</span>
             <div class="metric-value-row">
@@ -1922,7 +1925,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <!-- Accepted Issues (Wide Row) -->
-        <div class="metric-card metric-card-wide" data-category="accepted">
+        <div class="metric-card metric-card-wide" data-category="accepted" role="button" tabindex="0" aria-label="Accepted issues: valid issues not fixed">
           <div class="metric-info">
             <span class="metric-title">Accepted issues</span>
             <div class="metric-value-row">
@@ -2045,7 +2048,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    const plaintextWarning = document.getElementById("plaintext-warning");
     const loadingIndicator = document.getElementById("loading-indicator");
     const metricsGrid = document.getElementById("metrics-grid");
 
@@ -2074,7 +2076,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const projectItemsContainer = document.getElementById("project-items-container");
     const manualProjectItem = document.getElementById("manual-project-item");
     const targetAgentDropdown = document.getElementById("target-agent-dropdown");
-    const detectedBadge = document.getElementById("detected-badge");
     const profileSwitcher = document.getElementById("profile-switcher");
     const noProfilesView = document.getElementById("no-profiles-view");
     const createProfileBtn = document.getElementById("create-profile-btn");
@@ -2104,6 +2105,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         filtered.forEach((p) => {
           const itemDiv = document.createElement("div");
           itemDiv.className = "project-item" + (p.key === currentSelectedProjectKey ? " active" : "");
+          itemDiv.setAttribute("role", "option");
+          itemDiv.setAttribute("tabindex", "0");
+          itemDiv.setAttribute("aria-selected", p.key === currentSelectedProjectKey ? "true" : "false");
 
           const nameRow = document.createElement("div");
           nameRow.style.display = "flex";
@@ -2130,11 +2134,20 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           itemDiv.appendChild(nameRow);
           itemDiv.appendChild(keySpan);
 
-          itemDiv.addEventListener("click", () => {
+          const selectProject = () => {
             currentSelectedProjectKey = p.key;
             projectSearchInput.value = p.name + " (" + p.key + ")";
             projectDropdownPopup.classList.add("hidden");
+            projectSearchInput.setAttribute("aria-expanded", "false");
             vscode.postMessage({ command: "selectProject", projectKey: p.key });
+          };
+
+          itemDiv.addEventListener("click", selectProject);
+          itemDiv.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              selectProject();
+            }
           });
 
           projectItemsContainer.appendChild(itemDiv);
@@ -2144,11 +2157,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     projectSearchInput.addEventListener("focus", () => {
       projectDropdownPopup.classList.remove("hidden");
+      projectSearchInput.setAttribute("aria-expanded", "true");
       renderProjectList(projectSearchInput.value);
     });
 
     projectSearchInput.addEventListener("input", () => {
       projectDropdownPopup.classList.remove("hidden");
+      projectSearchInput.setAttribute("aria-expanded", "true");
       renderProjectList(projectSearchInput.value);
     });
 
@@ -2156,16 +2171,26 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       e.stopPropagation();
       if (projectDropdownPopup.classList.contains("hidden")) {
         projectDropdownPopup.classList.remove("hidden");
+        projectSearchInput.setAttribute("aria-expanded", "true");
         renderProjectList("");
       } else {
         projectDropdownPopup.classList.add("hidden");
+        projectSearchInput.setAttribute("aria-expanded", "false");
       }
     });
 
     if (manualProjectItem) {
-      manualProjectItem.addEventListener("click", () => {
+      const openPicker = () => {
         projectDropdownPopup.classList.add("hidden");
+        projectSearchInput.setAttribute("aria-expanded", "false");
         vscode.postMessage({ command: "openProjectPicker" });
+      };
+      manualProjectItem.addEventListener("click", openPicker);
+      manualProjectItem.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openPicker();
+        }
       });
     }
 
@@ -2173,6 +2198,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       const wrapper = document.querySelector(".project-selector-wrapper");
       if (wrapper && !wrapper.contains(e.target)) {
         projectDropdownPopup.classList.add("hidden");
+        projectSearchInput.setAttribute("aria-expanded", "false");
       }
     });
 
@@ -2259,26 +2285,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     function isTestFile(filePath) {
       if (!filePath) return false;
       const normalized = filePath.split(String.fromCharCode(92)).join("/");
-      const segments = normalized.toLowerCase().split("/");
-      const rawFilename = normalized.split("/").pop() || "";
-      const lowerFilename = rawFilename.toLowerCase();
-
-      if (segments.some((seg) => seg === "test" || seg === "tests" || seg === "__tests__" || seg === "__test__" || seg === "testing" || seg === "spec" || seg === "specs")) {
+      if (/(?:^|[/])(?:__tests__|__test__|tests?|testing|specs?)(?:[/]|$)/i.test(normalized)) {
         return true;
       }
-      if (lowerFilename.includes(".test.") || lowerFilename.includes(".spec.") || lowerFilename.includes("_test.") || lowerFilename.includes("-test.") || lowerFilename.includes("_spec.") || lowerFilename.includes("-spec.")) {
-        return true;
-      }
-      if (/^(?:test|tests|spec|specs)[.][a-z0-9]+$/i.test(rawFilename)) {
-        return true;
-      }
-      if (/[._-](?:test|tests|spec|specs)[.][a-z0-9]+$/i.test(rawFilename)) {
-        return true;
-      }
-      if (/[a-zA-Z0-9](?:Test|Tests|Spec|Specs)[.][a-z0-9]+$/.test(rawFilename)) {
-        return true;
-      }
-      return false;
+      const filename = normalized.split("/").pop() || "";
+      return /(?:[._-](?:tests?|specs?)[.][a-z0-9]+$)|(?:(?:^|[a-z0-9])(?:Tests?|Specs?)[.][a-z0-9]+$)/i.test(filename);
     }
 
     function populateFilterDropdowns(items) {
@@ -2286,7 +2297,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       const prevFile = filterFile.value;
       const prevRule = filterRule.value;
 
-      // Populate Authors
       const authors = Array.from(new Set(items.map((i) => i.author).filter(Boolean))).sort();
       filterAuthor.innerHTML = '<option value="ALL">All</option>';
       authors.forEach((a) => {
@@ -2299,7 +2309,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         filterAuthor.value = prevAuthor;
       }
 
-      // Populate Files
       const files = Array.from(new Set(items.map((i) => i.filePath).filter(Boolean))).sort();
       filterFile.innerHTML = '<option value="ALL">All</option>';
       files.forEach((f) => {
@@ -2314,7 +2323,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         filterFile.value = prevFile;
       }
 
-      // Populate Rules
       const rules = Array.from(new Set(items.map((i) => i.ruleKey).filter(Boolean))).sort();
       filterRule.innerHTML = '<option value="ALL">All</option>';
       rules.forEach((r) => {
@@ -2374,6 +2382,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       checkbox.type = "checkbox";
       checkbox.className = "issue-checkbox";
       checkbox.checked = selectedItemIds.has(item.id);
+      checkbox.setAttribute("aria-label", "Select issue: " + item.message);
       checkbox.addEventListener("change", () => {
         if (checkbox.checked) {
           selectedItemIds.add(item.id);
@@ -2425,6 +2434,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       const jumpBtn = document.createElement("button");
       jumpBtn.className = "btn btn-secondary btn-sm";
       jumpBtn.style.gap = "4px";
+      jumpBtn.setAttribute("aria-label", "Jump to " + item.filePath + (item.line ? ":" + item.line : ""));
       jumpBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg><span>Jump</span>';
       jumpBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -2441,6 +2451,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       } else if (item.type === "HOTSPOT") {
         agentBtnLabel = "Review";
       }
+      agentBtn.setAttribute("aria-label", agentBtnLabel + " for " + item.message);
       agentBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>' + agentBtnLabel;
       agentBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -2538,7 +2549,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     });
 
     document.querySelectorAll(".metric-card").forEach((card) => {
-      card.addEventListener("click", () => {
+      const activateCard = () => {
         const cat = card.dataset.category;
         if (!cat) return;
 
@@ -2561,6 +2572,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         issuesListTitle.textContent = categoryTitles[cat] || (cat.toUpperCase() + " ISSUES");
 
         vscode.postMessage({ command: "fetchDetails", category: cat });
+      };
+
+      card.addEventListener("click", activateCard);
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activateCard();
+        }
       });
     });
 
@@ -2678,18 +2697,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
             if (message.defaultAgent) {
               targetAgentDropdown.value = message.defaultAgent;
-            }
-
-            if (message.hasPlaintextWarning) {
-              plaintextWarning.classList.remove("hidden");
-            } else {
-              plaintextWarning.classList.add("hidden");
-            }
-
-            if (message.detectedFromProperties) {
-              detectedBadge.classList.remove("hidden");
-            } else {
-              detectedBadge.classList.add("hidden");
             }
 
             cachedProjects = message.projects || [];

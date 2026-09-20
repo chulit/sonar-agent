@@ -16,52 +16,18 @@ export function isTestFile(filePath?: string): boolean {
     return false;
   }
   const normalized = filePath.replace(/\\/g, '/');
-  const segments = normalized.toLowerCase().split('/');
-  const rawFilename = normalized.split('/').pop() || '';
-  const lowerFilename = rawFilename.toLowerCase();
 
-  // Check directory segments
-  if (
-    segments.some(
-      (seg) =>
-        seg === 'test' ||
-        seg === 'tests' ||
-        seg === '__tests__' ||
-        seg === '__test__' ||
-        seg === 'testing' ||
-        seg === 'spec' ||
-        seg === 'specs',
-    )
-  ) {
+  // Check test directory segments (e.g. tests/, __tests__/, spec/)
+  if (/(?:^|\/)(?:__tests?__|tests?|testing|specs?)(?:\/|$)/i.test(normalized)) {
     return true;
   }
 
-  // Check filename patterns like foo.test.ts, foo.spec.js, foo_test.go
-  if (
-    lowerFilename.includes('.test.') ||
-    lowerFilename.includes('.spec.') ||
-    lowerFilename.includes('_test.') ||
-    lowerFilename.includes('-test.') ||
-    lowerFilename.includes('_spec.') ||
-    lowerFilename.includes('-spec.')
-  ) {
-    return true;
-  }
-
-  // Exact name or separator suffix: test.ts, auth.test.ts, auth_test.go
-  if (/^(?:test|tests|spec|specs)\.[a-z0-9]+$/i.test(rawFilename)) {
-    return true;
-  }
-  if (/[._-](?:test|tests|spec|specs)\.[a-z0-9]+$/i.test(rawFilename)) {
-    return true;
-  }
-
-  // CamelCase suffix: UserServiceTest.java, AuthSpec.groovy, but NOT contest.ts
-  if (/[a-zA-Z0-9](?:Test|Tests|Spec|Specs)\.[a-z0-9]+$/.test(rawFilename)) {
-    return true;
-  }
-
-  return false;
+  const filename = normalized.split('/').pop() || '';
+  // Check test filenames (e.g. app.test.tsx, service_test.go, UserServiceTest.java; not contest.ts)
+  return (
+    /(?:^|[._-])(?:test|spec)s?(?:[._-]|\.[a-z0-9]+$)/i.test(filename) ||
+    /[a-zA-Z0-9](?:Test|Spec)s?\.[a-z0-9]+$/.test(filename)
+  );
 }
 
 /**
