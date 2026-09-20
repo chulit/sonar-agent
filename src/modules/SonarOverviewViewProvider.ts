@@ -8,6 +8,8 @@ import { Logger } from './Logger.js';
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'sonarAgent.overviewView';
   private _view?: vscode.WebviewView;
+  private _webviewReady = false;
+  private _lastStateMessage?: any;
   private readonly fileNavigator: FileNavigator;
   private readonly agentDispatcher: AgentDispatcher;
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
@@ -32,18 +34,35 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): void {
     this._view = webviewView;
+    this._webviewReady = false;
+    const isConfigured = this.projectDetector.isConfiguredSync?.() ?? false;
+    Logger.info(
+      `[Host] resolveWebviewView called. visible=${webviewView.visible}, isConfigured=${isConfigured}`,
+    );
 
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.extensionUri],
     };
 
-    webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+    webviewView.webview.html = this._getHtmlForWebview(webviewView.webview, isConfigured);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       try {
+        Logger.info(
+          `[Host] onDidReceiveMessage: command=${message.command}${message.text ? ` text="${message.text}"` : ''}`,
+        );
         switch (message.command) {
+          case 'log': {
+            Logger.info(`[Webview] ${message.text}`);
+            break;
+          }
+          case 'ready':
           case 'init': {
+            this._webviewReady = true;
+            if (this._lastStateMessage && this._view) {
+              await this._view.webview.postMessage(this._lastStateMessage);
+            }
             await this._syncState();
             break;
           }
@@ -200,7 +219,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         action: 'selectProject',
       },
       {
-        label: '$(gear) Open Extension Settings',
+        label: '$(settings-gear) Open Extension Settings',
         detail: 'Configure default AI agent and advanced preferences',
         action: 'openSettings',
       },
@@ -496,9 +515,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         effectiveDefaultAgent = availableAgents[0]?.id || 'clipboard';
       }
 
+      Logger.info(
+        `[Host] _syncState: serverUrl=${config.serverUrl}, hasToken=${config.hasToken}, tokenPresent=${Boolean(token)}`,
+      );
+
       if (config.serverUrl && config.hasToken && token) {
-        // Immediately post connected state so webview switches from onboarding view to connected view in 0ms
-        this._view.webview.postMessage({
+        const immediateState = {
           type: 'state',
           state: 'connected',
           serverUrl: config.serverUrl,
@@ -508,9 +530,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           projects: [],
           defaultAgent: effectiveDefaultAgent,
           availableAgents,
-        });
+        };
+        this._lastStateMessage = immediateState;
+        const deliveredImmediate = await this._view.webview.postMessage(immediateState);
+        Logger.info(`[Host] Immediate postMessage(connected) delivered=${deliveredImmediate}`);
 
-        this._view.webview.postMessage({ type: 'loading', loading: true });
+        await this._view.webview.postMessage({ type: 'loading', loading: true });
 
         const client = new SonarClient({ serverUrl: config.serverUrl, token });
         const effectiveProjectKey = config.projectKey;
@@ -566,7 +591,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           }
         }
 
-        this._view.webview.postMessage({
+        const fullState = {
           type: 'state',
           state: 'connected',
           serverUrl: config.serverUrl,
@@ -578,17 +603,31 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           overviewError,
           defaultAgent: effectiveDefaultAgent,
           availableAgents,
-        });
+        };
+        this._lastStateMessage = fullState;
+        const deliveredFull = await this._view.webview.postMessage(fullState);
+        Logger.info(`[Host] Full postMessage(connected) delivered=${deliveredFull}`);
 
-        this._view.webview.postMessage({ type: 'loading', loading: false });
+        await this._view.webview.postMessage({ type: 'loading', loading: false });
+
+        if (!this._webviewReady && this._view) {
+          setTimeout(async () => {
+            if (!this._webviewReady && this._view && this._lastStateMessage) {
+              await this._view.webview.postMessage(this._lastStateMessage);
+            }
+          }, 350);
+        }
       } else {
-        this._view.webview.postMessage({
+        const onboardingState = {
           type: 'state',
           state: 'onboarding',
           serverUrl: config.serverUrl || 'http://localhost:9000',
           defaultAgent: effectiveDefaultAgent,
           availableAgents,
-        });
+        };
+        this._lastStateMessage = onboardingState;
+        const deliveredOnboarding = await this._view.webview.postMessage(onboardingState);
+        Logger.info(`[Host] postMessage(onboarding) delivered=${deliveredOnboarding}`);
       }
     } catch (err: any) {
       console.error('[SonarAgent] _syncState error:', err);
@@ -683,13 +722,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview): string {
+  private _getHtmlForWebview(webview: vscode.Webview, isConfigured: boolean = false): string {
     const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; connect-src ${webview.cspSource} https:;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sonar Agent</title>
   <style>
@@ -1382,14 +1421,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         <button id="header-refresh-btn" class="icon-btn" title="Refresh measures">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A7.958 7.958 0 0 0 8 0a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.76-4.24l-2.24 2.24h6V0l-2.35 2.35z"/></svg>
         </button>
-        <button id="header-disconnect-btn" class="icon-btn hidden" title="Disconnect server">
+        <button id="header-disconnect-btn" class="icon-btn ${isConfigured ? '' : 'hidden'}" title="Disconnect server">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M7.5 1v7h1V1h-1z"/><path d="M3.05 3.05a7 7 0 1 0 9.9 0l-.7.7a6 6 0 1 1-8.5 0l-.7-.7z"/></svg>
         </button>
       </div>
     </div>
 
     <!-- Onboarding Form -->
-    <div id="onboarding-view" class="card">
+    <div id="onboarding-view" class="card ${isConfigured ? 'hidden' : ''}">
       <p style="font-size: 12px; line-height: 1.4; color: var(--vscode-descriptionForeground);">
         Connect to your SonarQube server to monitor Overall Code quality and delegate fixes to AI Agents.
       </p>
@@ -1410,7 +1449,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     </div>
 
     <!-- Connected Dashboard View -->
-    <div id="connected-view" class="hidden" style="display: flex; flex-direction: column; gap: 10px;">
+    <div id="connected-view" class="${isConfigured ? '' : 'hidden'}" style="display: flex; flex-direction: column; gap: 10px;">
       <!-- Project & Target Agent Selector Bar -->
       <div class="card" style="padding: 8px 10px; gap: 8px;">
         <div>
@@ -1458,7 +1497,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       </div>
 
       <!-- Loading State -->
-      <div id="loading-indicator" class="loading-overlay hidden">
+      <div id="loading-indicator" class="loading-overlay ${isConfigured ? '' : 'hidden'}">
         <div class="spinner"></div>
         <span>Fetching Overall Code measures...</span>
       </div>
@@ -1629,7 +1668,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   </div>
 
   <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
+    let vscode;
+    try {
+      vscode = acquireVsCodeApi();
+    } catch (e) {
+      console.warn("[SonarAgent Webview] acquireVsCodeApi error:", e);
+    }
+    try {
+      vscode?.postMessage({ command: "ready" });
+      vscode?.postMessage({ command: "log", text: "Webview script started execution" });
+    } catch (e) {}
 
     const onboardingView = document.getElementById("onboarding-view");
     const connectedView = document.getElementById("connected-view");
@@ -1638,6 +1686,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     window.addEventListener("error", (e) => {
       console.error("[SonarAgent Webview Error]", e);
+      try {
+        vscode.postMessage({ command: "log", text: "Webview error event: " + (e.message || String(e)) });
+      } catch (_) {}
       if (alertBox) {
         alertBox.textContent = "Webview script error: " + (e.message || String(e));
         alertBox.className = "alert error";
@@ -1646,6 +1697,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     window.addEventListener("unhandledrejection", (e) => {
       console.error("[SonarAgent Webview Unhandled Rejection]", e);
+      try {
+        vscode.postMessage({ command: "log", text: "Webview unhandledrejection event: " + (e.reason?.message || String(e.reason)) });
+      } catch (_) {}
       if (alertBox) {
         alertBox.textContent = "Webview promise error: " + (e.reason?.message || String(e.reason));
         alertBox.className = "alert error";
@@ -1864,7 +1918,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     function isTestFile(filePath) {
       if (!filePath) return false;
-      const normalized = filePath.replace(/\\/g, "/");
+      const normalized = filePath.split(String.fromCharCode(92)).join("/");
       const segments = normalized.toLowerCase().split("/");
       const rawFilename = normalized.split("/").pop() || "";
       const lowerFilename = rawFilename.toLowerCase();
@@ -2227,6 +2281,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     window.addEventListener("message", (event) => {
       const message = event.data;
+      try {
+        vscode.postMessage({ command: "log", text: "Webview received postMessage: " + JSON.stringify({ type: message?.type, state: message?.state }) });
+      } catch (_) {}
       switch (message.type) {
         case "loading": {
           if (message.loading) {
@@ -2341,7 +2398,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    vscode.postMessage({ command: "init" });
+    try {
+      vscode?.postMessage({ command: "ready" });
+      vscode?.postMessage({ command: "init" });
+      vscode?.postMessage({ command: "log", text: "Webview script completed setup, posting ready & init" });
+    } catch (_) {}
   </script>
 </body>
 </html>`;

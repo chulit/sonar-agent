@@ -64,7 +64,7 @@ describe('SonarOverviewViewProvider - promptConfigureConnection', () => {
     expect(capturedItems[1].description).toBe('Active');
     expect(capturedItems[1].detail).toContain('org.sample:project');
 
-    expect(capturedItems[2].label).toContain('Open Extension Settings');
+    expect(capturedItems[2].label).toBe('$(settings-gear) Open Extension Settings');
     expect(capturedItems[3].label).toContain('Show Extension Logs');
     expect(capturedItems[4].label).toContain('Disconnect & Reset Credentials');
   });

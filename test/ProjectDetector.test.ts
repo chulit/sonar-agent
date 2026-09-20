@@ -105,4 +105,18 @@ describe('ProjectDetector - Configuration and Secrets', () => {
     expect(secretStorage.delete).toHaveBeenCalledWith('sonarAgent.token');
     expect(await detector.getToken()).toBeUndefined();
   });
+
+  it('should synchronously check configuration state via isConfiguredSync', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    expect(detector.isConfiguredSync()).toBe(false);
+
+    mockConfig['serverUrl'] = 'http://sonar.example.com';
+    expect(detector.isConfiguredSync()).toBe(true);
+
+    await detector.setToken('my-token');
+    expect(detector.isConfiguredSync()).toBe(true);
+
+    await detector.deleteToken();
+    expect(detector.isConfiguredSync()).toBe(false);
+  });
 });

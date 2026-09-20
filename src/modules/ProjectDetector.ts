@@ -124,6 +124,14 @@ export class ProjectDetector {
     await this.config.update('projectKey', this.activeProjectKey, true);
   }
 
+  isConfiguredSync(): boolean {
+    const serverUrl = this.activeServerUrl ?? this.config.get<string>('serverUrl', '');
+    if (this.activeToken !== undefined) {
+      return Boolean(serverUrl && this.activeToken);
+    }
+    return Boolean(serverUrl);
+  }
+
   async detectWorkspaceProperties(): Promise<ParsedSonarProperties | null> {
     if (!this.workspaceRoot) {
       return null;
