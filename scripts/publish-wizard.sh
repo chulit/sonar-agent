@@ -223,6 +223,8 @@ note "Note: Ensure you have claimed or created namespace 'chulit' on Open VSX (m
 ask_secret OVSX_PAT "Paste your Open VSX Access Token (OVSX_PAT):"
 if [[ -n "$OVSX_PAT" ]]; then
   write_env OVSX_PAT "$OVSX_PAT"
+  step "Ensuring namespace 'chulit' exists on Open VSX..."
+  npx ovsx create-namespace chulit -p "$OVSX_PAT" || true
 fi
 
 # ── Stage 4: Local Packaging & Build Verification ────────────────────────
