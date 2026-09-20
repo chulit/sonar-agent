@@ -9,8 +9,8 @@ export class Logger {
   public static initialize(channel?: vscode.LogOutputChannel): vscode.LogOutputChannel {
     if (channel) {
       this.channel = channel;
-    } else if (!this.channel) {
-      this.channel = vscode.window.createOutputChannel('Sonar Agent', { log: true });
+    } else {
+      this.channel ??= vscode.window.createOutputChannel('Sonar Agent', { log: true });
     }
     return this.channel;
   }
@@ -55,6 +55,12 @@ export class Logger {
     if (error) {
       if (error instanceof Error) {
         errorDetail = ` - ${error.message}`;
+      } else if (typeof error === 'object') {
+        try {
+          errorDetail = ` - ${JSON.stringify(error)}`;
+        } catch {
+          errorDetail = ' - [Object]';
+        }
       } else {
         errorDetail = ` - ${String(error)}`;
       }

@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import * as vscode from 'vscode';
 import { ProjectDetector } from './ProjectDetector.js';
 import { SonarClient, SonarDetailItem, SonarOverview } from './SonarClient.js';
@@ -63,9 +64,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       try {
-        Logger.info(
-          `[Host] onDidReceiveMessage: command=${message.command}${message.text ? ` text="${message.text}"` : ''}`,
-        );
+        const textSuffix = message.text ? ` text="${message.text}"` : '';
+        Logger.info(`[Host] onDidReceiveMessage: command=${message.command}${textSuffix}`);
         switch (message.command) {
           case 'log': {
             Logger.info(`[Webview] ${message.text}`);
@@ -458,9 +458,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     }
 
     if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
-      normalizedUrl = 'http://' + normalizedUrl;
+      normalizedUrl = 'https://' + normalizedUrl;
     }
-    normalizedUrl = normalizedUrl.replace(/\/+$/, '');
+    while (normalizedUrl.endsWith('/')) {
+      normalizedUrl = normalizedUrl.slice(0, -1);
+    }
 
     this._view?.webview.postMessage({ type: 'connecting' });
     Logger.info('Verifying SonarQube credentials...');
@@ -2250,10 +2252,5 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 }
 
 function getNonce(): string {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
+  return crypto.randomBytes(16).toString('hex');
 }

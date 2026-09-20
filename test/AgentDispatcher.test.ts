@@ -163,10 +163,14 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     id: 'ISSUE-1',
     ruleKey: 'vue:S123',
     message: 'Fix this',
+    component: 'my-project:src/App.vue',
     filePath: 'src/App.vue',
     line: 42,
     type: 'BUG',
     severity: 'MAJOR',
+    status: 'OPEN',
+    tags: ['bug'],
+    creationDate: '2026-09-13T10:00:00+0000',
   };
 
   it('should trigger focus command when dispatching to Claude Code', async () => {
@@ -336,6 +340,7 @@ describe('AgentDispatcher - Deep Dispatch Seam', () => {
     type: 'CODE_SMELL',
     severity: 'MAJOR',
     status: 'OPEN',
+    tags: ['clean-code'],
     creationDate: '2026-09-13T10:00:00+0000',
   };
 

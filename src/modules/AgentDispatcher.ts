@@ -448,7 +448,7 @@ export class AgentDispatcher {
       // ignore clipboard error in headless test environments
     }
 
-    if (item && item.line) {
+    if (item?.line) {
       await this.fileNavigator.openFileAtLine(item.filePath, item.line);
     }
 
@@ -529,19 +529,14 @@ export class AgentDispatcher {
     }
 
     const matchedAgent = this.getAvailableAgents().find((a) => a.id === targetAgentId);
-    const agentName =
-      matchedAgent?.name ||
-      (targetAgentId === 'claude-code'
-        ? 'Claude Code'
-        : targetAgentId === 'cline'
-          ? 'Cline'
-          : targetAgentId === 'roo-code'
-            ? 'Roo Code'
-            : targetAgentId === 'continue'
-              ? 'Continue'
-              : targetAgentId === 'codex'
-                ? 'Codex Agent'
-                : 'Clipboard');
+    const fallbackNames: Record<string, string> = {
+      'claude-code': 'Claude Code',
+      cline: 'Cline',
+      'roo-code': 'Roo Code',
+      continue: 'Continue',
+      codex: 'Codex Agent',
+    };
+    const agentName = matchedAgent?.name ?? fallbackNames[targetAgentId] ?? 'Clipboard';
 
     if (targetAgentId === 'claude-code') {
       const claudeCommands = [
@@ -653,9 +648,16 @@ export class AgentDispatcher {
       ? vscode.workspace.asRelativePath(document.uri)
       : document.fileName;
 
+    let codeVal = '';
+    if (typeof diagnostic.code === 'object' && diagnostic.code !== null) {
+      codeVal = String(diagnostic.code.value);
+    } else if (diagnostic.code !== undefined && diagnostic.code !== null) {
+      codeVal = String(diagnostic.code);
+    }
+
     const item: SonarDetailItem = {
-      id: String(diagnostic.code || 'sonar-issue'),
-      ruleKey: String(diagnostic.code || ''),
+      id: codeVal || 'sonar-issue',
+      ruleKey: codeVal,
       message: diagnostic.message,
       component: relativePath,
       filePath: relativePath,

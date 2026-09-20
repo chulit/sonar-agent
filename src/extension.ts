@@ -24,35 +24,24 @@ export function activate(context: vscode.ExtensionContext) {
 
   const overviewProvider = new SonarOverviewViewProvider(context.extensionUri, projectDetector);
 
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(SonarOverviewViewProvider.viewType, overviewProvider),
-  );
+  const codeActionProvider = new SonarCodeActionProvider({
+    projectDetector,
+  });
 
   context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(SonarOverviewViewProvider.viewType, overviewProvider),
     vscode.commands.registerCommand('sonarAgent.refresh', async () => {
       await overviewProvider.refresh();
     }),
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('sonarAgent.configure', async () => {
       await overviewProvider.promptConfigureConnection();
     }),
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('sonarAgent.selectProject', async () => {
       await overviewProvider.promptProjectSelection();
     }),
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('sonarAgent.profile.manage', async () => {
       await overviewProvider.promptManageProfiles();
     }),
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('sonarAgent.resetConnection', async () => {
       const confirm = await vscode.window.showWarningMessage(
         'Are you sure you want to disconnect and remove stored SonarQube credentials?',
@@ -65,12 +54,19 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('SonarQube credentials have been removed.');
       }
     }),
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('sonarAgent.showLogs', () => {
       Logger.show();
     }),
+    vscode.languages.registerCodeActionsProvider({ scheme: 'file' }, codeActionProvider, {
+      providedCodeActionKinds: SonarCodeActionProvider.providedCodeActionKinds,
+    }),
+    vscode.commands.registerCommand(
+      'sonarAgent.fixWithAgent',
+      async (diagnostic: vscode.Diagnostic, document: vscode.TextDocument) => {
+        if (!diagnostic || !document) return;
+        await codeActionProvider.executeFixWithAgent(diagnostic, document);
+      },
+    ),
   );
 
   void projectDetector.migrateResetIfLegacy().then((migrated) => {
@@ -89,25 +85,6 @@ export function activate(context: vscode.ExtensionContext) {
         }
       });
   });
-
-  const codeActionProvider = new SonarCodeActionProvider({
-    projectDetector,
-  });
-  context.subscriptions.push(
-    vscode.languages.registerCodeActionsProvider({ scheme: 'file' }, codeActionProvider, {
-      providedCodeActionKinds: SonarCodeActionProvider.providedCodeActionKinds,
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'sonarAgent.fixWithAgent',
-      async (diagnostic: vscode.Diagnostic, document: vscode.TextDocument) => {
-        if (!diagnostic || !document) return;
-        await codeActionProvider.executeFixWithAgent(diagnostic, document);
-      },
-    ),
-  );
 }
 
 export function deactivate() {

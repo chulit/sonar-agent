@@ -32,9 +32,13 @@ export class SonarCodeActionProvider implements vscode.CodeActionProvider {
     const actions: vscode.CodeAction[] = [];
 
     for (const diagnostic of context.diagnostics) {
-      if (diagnostic.source && diagnostic.source.toLowerCase().includes('sonar')) {
-        const title = diagnostic.code
-          ? `⚡ Send to AI Agent (${diagnostic.code})`
+      if (diagnostic.source?.toLowerCase().includes('sonar')) {
+        const codeVal =
+          typeof diagnostic.code === 'object' && diagnostic.code !== null
+            ? diagnostic.code.value
+            : diagnostic.code;
+        const title = codeVal
+          ? `⚡ Send to AI Agent (${codeVal})`
           : '⚡ Send to AI Agent (SonarQube)';
 
         const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);

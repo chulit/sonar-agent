@@ -50,7 +50,11 @@ export class SonarClient {
   private readonly fetchFn: typeof fetch;
 
   constructor(config: SonarClientConfig) {
-    this.serverUrl = config.serverUrl.replace(/\/+$/, '');
+    let url = config.serverUrl;
+    while (url.endsWith('/')) {
+      url = url.slice(0, -1);
+    }
+    this.serverUrl = url;
     this.token = config.token ? config.token.trim() : undefined;
     this.fetchFn = config.fetchFn ?? globalThis.fetch;
   }
@@ -66,7 +70,7 @@ export class SonarClient {
   }
 
   private parseRating(val?: string | number): SonarRating {
-    const num = typeof val === 'number' ? val : parseFloat(String(val || '1.0'));
+    const num = typeof val === 'number' ? val : Number.parseFloat(String(val || '1.0'));
     if (num <= 1.0) return 'A';
     if (num <= 2.0) return 'B';
     if (num <= 3.0) return 'C';
@@ -151,7 +155,7 @@ export class SonarClient {
       }
 
       const data = (await response.json()) as { valid?: boolean };
-      if (data && data.valid === true) {
+      if (data?.valid === true) {
         return { ok: true };
       }
 
@@ -234,11 +238,11 @@ export class SonarClient {
         const errorData = (await response.clone().json()) as any;
         const msg = errorData?.errors?.[0]?.msg || '';
         const match = msg.match(/The following metric keys are not found:\s*([^.]+)/i);
-        if (match && match[1]) {
-          const notFoundKeys = match[1].split(',').map((k: string) => k.trim());
+        if (match?.[1]) {
+          const notFoundKeys = new Set(match[1].split(',').map((k: string) => k.trim()));
           const validKeys = metricKeys
             .split(',')
-            .filter((k) => !notFoundKeys.includes(k))
+            .filter((k) => !notFoundKeys.has(k))
             .join(',');
           const fallbackUrl = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${validKeys}`;
           const fallbackResponse = await this.authenticatedFetch(fallbackUrl);
@@ -270,30 +274,30 @@ export class SonarClient {
 
     return {
       security: {
-        count: parseInt(measureMap.vulnerabilities || '0', 10),
+        count: Number.parseInt(measureMap.vulnerabilities || '0', 10),
         rating: this.parseRating(measureMap.security_rating),
       },
       reliability: {
-        count: parseInt(measureMap.bugs || '0', 10),
+        count: Number.parseInt(measureMap.bugs || '0', 10),
         rating: this.parseRating(measureMap.reliability_rating),
       },
       maintainability: {
-        count: parseInt(measureMap.code_smells || '0', 10),
+        count: Number.parseInt(measureMap.code_smells || '0', 10),
         rating: this.parseRating(measureMap.sqale_rating),
       },
       acceptedIssues: {
-        count: parseInt(measureMap.accepted_issues || measureMap.wont_fix_issues || '0', 10),
+        count: Number.parseInt(measureMap.accepted_issues || measureMap.wont_fix_issues || '0', 10),
       },
       coverage: {
-        percentage: parseFloat(measureMap.coverage || '0'),
-        linesToCover: parseInt(measureMap.lines_to_cover || '0', 10),
+        percentage: Number.parseFloat(measureMap.coverage || '0'),
+        linesToCover: Number.parseInt(measureMap.lines_to_cover || '0', 10),
       },
       duplications: {
-        percentage: parseFloat(measureMap.duplicated_lines_density || '0'),
-        duplicatedLines: parseInt(measureMap.duplicated_lines || '0', 10),
+        percentage: Number.parseFloat(measureMap.duplicated_lines_density || '0'),
+        duplicatedLines: Number.parseInt(measureMap.duplicated_lines || '0', 10),
       },
       securityHotspots: {
-        count: parseInt(measureMap.security_hotspots || '0', 10),
+        count: Number.parseInt(measureMap.security_hotspots || '0', 10),
         rating: this.parseRating(measureMap.security_review_rating || '1.0'),
       },
     };
@@ -446,8 +450,8 @@ export class SonarClient {
         measureMap[m.metric] = m.value;
       }
 
-      const uncovered = parseInt(measureMap.uncovered_lines || '0', 10);
-      const coverage = parseFloat(measureMap.coverage || '0');
+      const uncovered = Number.parseInt(measureMap.uncovered_lines || '0', 10);
+      const coverage = Number.parseFloat(measureMap.coverage || '0');
 
       if (uncovered > 0 || coverage < 80) {
         items.push({
@@ -491,8 +495,8 @@ export class SonarClient {
         measureMap[m.metric] = m.value;
       }
 
-      const density = parseFloat(measureMap.duplicated_lines_density || '0');
-      const blocks = parseInt(measureMap.duplicated_blocks || '0', 10);
+      const density = Number.parseFloat(measureMap.duplicated_lines_density || '0');
+      const blocks = Number.parseInt(measureMap.duplicated_blocks || '0', 10);
 
       if (density > 0 || blocks > 0) {
         items.push({

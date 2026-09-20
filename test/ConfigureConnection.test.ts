@@ -140,7 +140,6 @@ describe('SonarOverviewViewProvider - promptConfigureConnection', () => {
 
     vi.spyOn(SonarClient.prototype, 'verifyConnection').mockResolvedValue({
       ok: true,
-      serverVersion: '10.3',
     });
 
     const refreshSpy = vi.spyOn(provider, 'refresh').mockResolvedValue();

@@ -126,7 +126,7 @@ export class ConnectionProfileWizard {
         validateInput: (val) => (!val.trim() ? 'Project Key cannot be empty' : null),
       });
 
-      if (manualKey && manualKey.trim()) {
+      if (manualKey?.trim()) {
         const trimmed = manualKey.trim();
         await this.projectDetector.setProjectKey(trimmed);
         await this.notifyConfigChanged();
@@ -135,7 +135,7 @@ export class ConnectionProfileWizard {
       return;
     }
 
-    if (selected && selected.description) {
+    if (selected?.description) {
       const chosenKey = selected.description;
       await this.projectDetector.setProjectKey(chosenKey);
       await this.notifyConfigChanged();
@@ -412,7 +412,7 @@ export class ConnectionProfileWizard {
           ignoreFocusOut: true,
           validateInput: (value) => (!value.trim() ? 'Profile name is required' : null),
         });
-        if (name === undefined || !name.trim()) {
+        if (!name?.trim()) {
           return;
         }
         await this.projectDetector.renameProfile(picked.id, name.trim());

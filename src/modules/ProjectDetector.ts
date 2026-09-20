@@ -74,7 +74,8 @@ function slugify(name: string): string {
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
   return slug || 'profile';
 }
 
@@ -187,8 +188,8 @@ export class ProjectDetector {
   }
 
   async activateProfile(id: string): Promise<void> {
-    const found = this.readProfiles().find((p) => p.id === id);
-    if (!found) {
+    const exists = this.readProfiles().some((p) => p.id === id);
+    if (!exists) {
       throw new Error(`Unknown connection profile: ${id}`);
     }
     await this.config.update(ACTIVE_PROFILE_CONFIG_KEY, id, true);
@@ -366,7 +367,7 @@ export class ProjectDetector {
     const legacyToken = await this.secrets.get(TOKEN_SECRET_KEY);
     const serverUrl = this.activeServerUrl ?? this.config.get<string>('serverUrl', '');
     const projectKey = this.activeProjectKey ?? this.config.get<string>('projectKey', '');
-    if (!((legacyToken && legacyToken.trim()) || serverUrl || projectKey)) {
+    if (!(legacyToken?.trim() || serverUrl || projectKey)) {
       return false;
     }
     this.activeToken = null;

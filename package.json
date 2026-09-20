@@ -54,7 +54,8 @@
         {
           "type": "webview",
           "id": "sonarAgent.overviewView",
-          "name": "Sonar Overview"
+          "name": "Sonar Overview",
+          "icon": "media/icon.svg"
         }
       ]
     },
