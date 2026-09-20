@@ -141,6 +141,7 @@ export class AgentDispatcher {
     // 2. Antigravity Agent
     if (
       this.isAntigravityEnvFn() ||
+      this.isExtensionInstalledFn('google.google-antigravity') ||
       this.isExtensionInstalledFn('google.antigravity') ||
       this.isExtensionInstalledFn('google.gemini')
     ) {
@@ -516,18 +517,27 @@ export class AgentDispatcher {
       return { ok: true, message: 'Dispatched to Antigravity Chat.' };
     }
 
-    try {
-      await this.executeCommandFn('antigravity.openChatView');
-      vscode.window.showInformationMessage(
-        'Antigravity Chat opened & prompt copied to clipboard! Press Cmd+V / Ctrl+V to paste.',
-      );
-      return { ok: true, message: 'Chat opened and prompt ready in clipboard.' };
-    } catch {
-      vscode.window.showInformationMessage(
-        'Fix Prompt copied to clipboard for Antigravity Agent! Paste it into your agent chat.',
-      );
-      return { ok: true, message: 'Prompt ready in clipboard for Antigravity Agent.' };
+    const antigravityViewCommands = [
+      'antigravity.openChatView',
+      'google-antigravity.openChatView',
+      'antigravity.focus',
+    ];
+    for (const cmd of antigravityViewCommands) {
+      try {
+        await this.executeCommandFn(cmd);
+        vscode.window.showInformationMessage(
+          'Antigravity Chat opened & prompt copied to clipboard! Press Cmd+V / Ctrl+V to paste.',
+        );
+        return { ok: true, message: 'Chat opened and prompt ready in clipboard.' };
+      } catch {
+        // continue trying next command
+      }
     }
+
+    vscode.window.showInformationMessage(
+      'Fix Prompt copied to clipboard for Antigravity Agent! Paste it into your agent chat.',
+    );
+    return { ok: true, message: 'Prompt ready in clipboard for Antigravity Agent.' };
   }
 
   private async focusTargetAgent(targetAgentId: string, matchedAgent?: TargetAgent): Promise<void> {

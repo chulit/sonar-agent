@@ -107,6 +107,34 @@ describe('AgentDispatcher - Dynamic Target Agent Discovery', () => {
     expect(agents[0].name).toBe('Antigravity Agent');
   });
 
+  it('should detect Antigravity when google.google-antigravity extension is installed in regular VS Code environment', () => {
+    const installed = new Set(['google.google-antigravity']);
+    const dispatcher = new AgentDispatcher({
+      isExtensionInstalledFn: (id) => installed.has(id),
+      isAntigravityEnvFn: () => false,
+    });
+
+    const agents = dispatcher.getAvailableAgents();
+    expect(agents.map((a) => a.id)).toEqual(['antigravity', 'clipboard']);
+    expect(agents[0].name).toBe('Antigravity Agent');
+    expect(agents[0].focusCommand).toBe('antigravity.openChatView');
+  });
+
+  it('should prioritize google.google-antigravity directly after copilot in regular VS Code', () => {
+    const installed = new Set([
+      'google.google-antigravity',
+      'github.copilot',
+      'saoudrizwan.claude-dev',
+    ]);
+    const dispatcher = new AgentDispatcher({
+      isExtensionInstalledFn: (id) => installed.has(id),
+      isAntigravityEnvFn: () => false,
+    });
+
+    const agents = dispatcher.getAvailableAgents();
+    expect(agents.map((a) => a.id)).toEqual(['copilot', 'antigravity', 'cline', 'clipboard']);
+  });
+
   it('should discover Claude Code when anthropic.claude-code is installed', () => {
     const installed = new Set(['anthropic.claude-code']);
     const dispatcher = new AgentDispatcher({
@@ -303,6 +331,31 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     expect(res.message).toBe('Chat opened and prompt ready in clipboard.');
     expect(executedCommands).toContain('antigravity.openChatView');
     expect(openFileAtLine).toHaveBeenCalledWith('src/App.vue', 42);
+  });
+
+  it('should try alternative Antigravity view commands when primary view command throws', async () => {
+    const executedCommands: string[] = [];
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      isExtensionInstalledFn: (id) => id === 'google.google-antigravity',
+      isAntigravityEnvFn: () => false,
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
+        if (cmd === 'google-antigravity.openChatView') {
+          return undefined;
+        }
+        throw new Error('Command not found');
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'antigravity', sampleItem);
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Chat opened and prompt ready in clipboard.');
+    expect(executedCommands).toContain('antigravity.openChatView');
+    expect(executedCommands).toContain('google-antigravity.openChatView');
   });
 
   it('should call sendToAgentPanelFn directly with file mentions and prompt when available', async () => {
