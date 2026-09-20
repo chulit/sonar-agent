@@ -120,3 +120,100 @@ describe('ProjectDetector - Configuration and Secrets', () => {
     expect(detector.isConfiguredSync()).toBe(false);
   });
 });
+
+describe('ProjectDetector - Connection Profiles', () => {
+  let mockSecrets: Record<string, string>;
+  let secretStorage: SecretStorageLike;
+  let mockConfig: Record<string, any>;
+  let workspaceConfig: WorkspaceConfigLike;
+
+  beforeEach(() => {
+    mockSecrets = {};
+    secretStorage = {
+      get: vi.fn(async (key: string) => mockSecrets[key]),
+      store: vi.fn(async (key: string, value: string) => {
+        mockSecrets[key] = value;
+      }),
+      delete: vi.fn(async (key: string) => {
+        delete mockSecrets[key];
+      }),
+    };
+    mockConfig = {};
+    workspaceConfig = {
+      get: vi.fn((key: string, defaultValue?: any) => mockConfig[key] ?? defaultValue),
+      update: vi.fn(async (key: string, value: any) => {
+        mockConfig[key] = value;
+      }),
+    };
+  });
+
+  it('should create profiles with slugified ids and round-trip list/activate/rename/delete', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    const created = await detector.createProfile({
+      name: 'Kantor Prod',
+      serverUrl: 'http://sonar:9000',
+      projectKey: 'org:api',
+      token: 'tok-1',
+    });
+    expect(created.id).toBe('kantor-prod');
+    expect(await detector.listProfiles()).toHaveLength(1);
+    expect((await detector.getActiveProfile())?.id).toBe('kantor-prod');
+
+    await detector.createProfile({ name: 'Second', serverUrl: 'http://x', projectKey: 'k2' });
+    expect(await detector.listProfiles()).toHaveLength(2);
+
+    await detector.activateProfile(created.id);
+    await detector.renameProfile(created.id, 'Kantor Production');
+    expect((await detector.getActiveProfile())?.name).toBe('Kantor Production');
+
+    await detector.deleteProfile(created.id);
+    expect(await detector.listProfiles()).toHaveLength(1);
+  });
+
+  it('should resolve getConfig/getToken from the active profile only with per-profile secret isolation', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    const alpha = await detector.createProfile({
+      name: 'Alpha',
+      serverUrl: 'http://a:9000',
+      projectKey: 'a:key',
+      token: 'tok-alpha',
+    });
+    await detector.createProfile({
+      name: 'Beta',
+      serverUrl: 'http://b:9000',
+      projectKey: 'b:key',
+      token: 'tok-beta',
+    });
+
+    await detector.activateProfile(alpha.id);
+    expect((await detector.getConfig()).serverUrl).toBe('http://a:9000');
+    expect(await detector.getToken()).toBe('tok-alpha');
+
+    await detector.activateProfile('beta');
+    expect((await detector.getConfig()).projectKey).toBe('b:key');
+    expect(await detector.getToken()).toBe('tok-beta');
+
+    expect(mockSecrets['sonarAgent.token.beta']).toBe('tok-beta');
+    expect(mockSecrets['sonarAgent.token']).toBeUndefined();
+  });
+
+  it('should update token and target on a profile without exposing tokens in listings', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    const created = await detector.createProfile({
+      name: 'Gamma',
+      serverUrl: 'http://g:9000',
+      projectKey: 'g:key',
+    });
+    await detector.updateProfileToken(created.id, 'tok-g');
+    await detector.updateProfileTarget(created.id, {
+      serverUrl: 'http://g2:9000',
+      projectKey: 'g:key2',
+    });
+
+    await detector.activateProfile(created.id);
+    expect(await detector.getToken()).toBe('tok-g');
+    expect((await detector.getConfig()).serverUrl).toBe('http://g2:9000');
+    const listed = await detector.listProfiles();
+    expect((listed[0] as any).token).toBeUndefined();
+  });
+});
