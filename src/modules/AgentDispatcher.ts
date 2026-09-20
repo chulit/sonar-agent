@@ -682,10 +682,13 @@ export class AgentDispatcher {
       : document.fileName;
 
     let codeVal = '';
-    if (typeof diagnostic.code === 'object' && diagnostic.code !== null) {
-      codeVal = String(diagnostic.code.value);
-    } else if (diagnostic.code !== undefined && diagnostic.code !== null) {
-      codeVal = String(diagnostic.code);
+    const code = diagnostic.code;
+    if (typeof code === 'string') {
+      codeVal = code;
+    } else if (typeof code === 'number') {
+      codeVal = String(code);
+    } else if (typeof code === 'object' && code !== null) {
+      codeVal = code.value !== undefined && code.value !== null ? String(code.value) : '';
     }
 
     const item: SonarDetailItem = {

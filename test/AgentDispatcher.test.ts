@@ -567,5 +567,41 @@ describe('AgentDispatcher - Deep Dispatch Seam', () => {
       expect(items[0].severity).toBe('MINOR');
       expect(items[1].severity).toBe('INFO');
     });
+
+    it('should extract ruleKey correctly when diagnostic.code is an object, number, or undefined', async () => {
+      const items: SonarDetailItem[] = [];
+      const dispatcher = new AgentDispatcher();
+      vi.spyOn(dispatcher, 'dispatchIssue').mockImplementation(async (item) => {
+        items.push(item);
+        return { ok: true, message: 'ok' };
+      });
+
+      const doc = {
+        fileName: '/Users/dev/my-project/src/app.ts',
+        uri: vscode.Uri.file('/Users/dev/my-project/src/app.ts'),
+      } as vscode.TextDocument;
+
+      const objDiag = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 5), 'Object code issue');
+      objDiag.code = {
+        value: 'typescript:S1234',
+        target: vscode.Uri.file('/rules/typescript/S1234'),
+      };
+
+      const numDiag = new vscode.Diagnostic(new vscode.Range(1, 0, 1, 5), 'Number code issue');
+      numDiag.code = 404;
+
+      const undefDiag = new vscode.Diagnostic(new vscode.Range(2, 0, 2, 5), 'No code issue');
+
+      await dispatcher.dispatchDiagnostic(objDiag, doc);
+      await dispatcher.dispatchDiagnostic(numDiag, doc);
+      await dispatcher.dispatchDiagnostic(undefDiag, doc);
+
+      expect(items[0].ruleKey).toBe('typescript:S1234');
+      expect(items[0].id).toBe('typescript:S1234');
+      expect(items[1].ruleKey).toBe('404');
+      expect(items[1].id).toBe('404');
+      expect(items[2].ruleKey).toBe('');
+      expect(items[2].id).toBe('sonar-issue');
+    });
   });
 });
