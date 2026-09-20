@@ -170,6 +170,20 @@ export class AgentDispatcher {
       });
     }
 
+    // 6. Codex
+    if (
+      this.isExtensionInstalledFn('openai.chatgpt') ||
+      this.isExtensionInstalledFn('openai.openai-chatgpt') ||
+      this.isExtensionInstalledFn('codex.codex')
+    ) {
+      agents.push({
+        id: 'codex',
+        name: 'Codex Agent',
+        description: 'OpenAI Codex AI Assistant',
+        focusCommand: 'chatgpt.focus',
+      });
+    }
+
     // Universal Fallback: Clipboard Only
     agents.push({
       id: 'clipboard',
@@ -490,7 +504,9 @@ export class AgentDispatcher {
             ? 'Roo Code'
             : targetAgentId === 'continue'
               ? 'Continue'
-              : 'Clipboard');
+              : targetAgentId === 'codex'
+                ? 'Codex Agent'
+                : 'Clipboard');
 
     if (targetAgentId === 'claude-code') {
       const claudeCommands = [
@@ -499,6 +515,16 @@ export class AgentDispatcher {
         'claude.focus',
       ];
       for (const cmd of claudeCommands) {
+        try {
+          await this.executeCommandFn(cmd);
+          break;
+        } catch {
+          // continue trying next command
+        }
+      }
+    } else if (targetAgentId === 'codex') {
+      const codexCommands = ['chatgpt.focus', 'openai.chatgpt.focus', 'codex.focus'];
+      for (const cmd of codexCommands) {
         try {
           await this.executeCommandFn(cmd);
           break;

@@ -209,6 +209,40 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     expect(res.message).toContain('Cline');
   });
 
+  it('should discover Codex Agent when openai.chatgpt is installed', () => {
+    const installed = new Set(['openai.chatgpt']);
+    const dispatcher = new AgentDispatcher({
+      isExtensionInstalledFn: (id) => installed.has(id),
+      isAntigravityEnvFn: () => false,
+    });
+
+    const agents = dispatcher.getAvailableAgents();
+    expect(agents.map((a) => a.id)).toEqual(['codex', 'clipboard']);
+    expect(agents[0].name).toBe('Codex Agent');
+    expect(agents[0].focusCommand).toBe('chatgpt.focus');
+  });
+
+  it('should trigger focus command when dispatching to Codex Agent', async () => {
+    const executedCommands: string[] = [];
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      isExtensionInstalledFn: (id) => id === 'openai.chatgpt',
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'codex', sampleItem);
+    expect(res.ok).toBe(true);
+    expect(executedCommands).toContain('chatgpt.focus');
+    expect(openFileAtLine).toHaveBeenCalledWith('src/App.vue', 42);
+    expect(res.message).toContain('Codex Agent');
+  });
+
   it('should dispatch directly to Antigravity chat when chat open command succeeds', async () => {
     const executedCommands: { cmd: string; args?: unknown }[] = [];
     const openFileAtLine = vi.fn().mockResolvedValue(true);
