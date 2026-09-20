@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { SonarLocalScanner, SCANNER_NOT_FOUND_MESSAGE } from '../src/modules/SonarLocalScanner.js';
-import { Range, Position, Diagnostic, DiagnosticSeverity } from 'vscode';
+import {
+  SonarLocalScanner,
+  SCANNER_NOT_FOUND_MESSAGE,
+  SpawnOptions,
+} from '../src/modules/SonarLocalScanner.js';
+import { Range, Position, Diagnostic, DiagnosticSeverity, DiagnosticChangeEvent } from 'vscode';
 
 function makeDiagnostic(
   message: string,
@@ -24,13 +28,13 @@ function makeDiagnostic(
 function fakeSpawn(
   behaviour: (cmd: string) => { error?: Error; exitCode?: number; stderr?: string },
 ) {
-  return vi.fn((command: string, _args: string[], _opts: { cwd?: string }) => {
+  return vi.fn((command: string, _args: string[], _opts: SpawnOptions) => {
     const b = behaviour(command);
-    const handlers: Record<string, Array<(...a: never[]) => void>> = {};
+    const handlers: Record<string, Array<(...a: unknown[]) => void>> = {};
     const stdoutHandlers: Array<(c: string) => void> = [];
     const stderrHandlers: Array<(c: string) => void> = [];
     const proc: any = {
-      on: (event: string, cb: (...a: never[]) => void) => {
+      on: (event: string, cb: (...a: unknown[]) => void) => {
         (handlers[event] ??= []).push(cb);
         return proc;
       },
@@ -137,20 +141,20 @@ describe('SonarLocalScanner', () => {
   });
 
   it('subscribes to diagnostics changes and pushes filtered items', () => {
-    let captured: ((e: unknown) => void) | undefined;
+    let captured: ((e: DiagnosticChangeEvent) => void) | undefined;
     const d = makeDiagnostic('m', 'sonarlint', 0, DiagnosticSeverity.Warning, 'x:S1');
     const scanner = new SonarLocalScanner({
       getDiagnosticsFn: () => [[{ fsPath: 'f' }, [d]]],
       asRelativePathFn: () => 'f',
-      onDidChangeDiagnosticsFn: (cb: (e: unknown) => void) => {
+      onDidChangeDiagnosticsFn: (cb: (e: DiagnosticChangeEvent) => void) => {
         captured = cb;
-        return { dispose: () => {} } as never;
+        return { dispose: () => {} };
       },
     });
     const cb = vi.fn();
     const disposable = scanner.onDiagnosticsChanged(cb);
     expect(disposable).toBeDefined();
-    captured!({});
+    captured!({ uris: [] });
     expect(cb).toHaveBeenCalledTimes(1);
     expect(cb.mock.calls[0][0]).toHaveLength(1);
   });
@@ -224,7 +228,7 @@ describe('SonarLocalScanner', () => {
     const [command, args, opts] = spawnFn.mock.calls[0];
     expect(command).toBe('sonar-scanner');
     expect(args.join(' ')).not.toContain('sqp_secret');
-    expect(opts.env.SONAR_TOKEN).toBe('sqp_secret');
+    expect(opts.env?.SONAR_TOKEN).toBe('sqp_secret');
   });
 
   it('runCliScan without a binding spawns with empty args', async () => {
@@ -248,5 +252,37 @@ describe('SonarLocalScanner', () => {
     const result = await scanner.runCliScan(undefined);
     // workspaceRoot falls back to vscode mock (/workspace) or reports missing; accept either
     expect(typeof result.ok).toBe('boolean');
+  });
+
+  it('runCliScan extracts the last non-empty line of stderr on failure', async () => {
+    const spawnFn = fakeSpawn(() => ({
+      exitCode: 1,
+      stderr: 'INFO: starting scan\nERROR: compile error in src/index.ts\n   \n',
+    }));
+    const scanner = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnFn as never,
+    });
+    const result = await scanner.runCliScan('/workspace');
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toBe('ERROR: compile error in src/index.ts');
+  });
+
+  it('safely handles uri objects and strings in asRelativePathFn fallback without stringifying [object Object]', () => {
+    const scanner = new SonarLocalScanner();
+    const d = makeDiagnostic('issue', 'sonarlint', 1, DiagnosticSeverity.Warning, 'ts:S1');
+
+    const itemFromString = scanner.mapDiagnostic('src/app.ts', d);
+    expect(itemFromString.filePath).toBe('src/app.ts');
+
+    const itemFromObjWithFsPath = scanner.mapDiagnostic({ fsPath: '/path/to/file.ts' }, d);
+    expect(itemFromObjWithFsPath.filePath).toBe('/path/to/file.ts');
+
+    const itemFromObjWithPath = scanner.mapDiagnostic({ path: '/path/to/another.ts' }, d);
+    expect(itemFromObjWithPath.filePath).toBe('/path/to/another.ts');
+
+    const itemFromPlainObj = scanner.mapDiagnostic({}, d);
+    expect(itemFromPlainObj.filePath).toBe('');
+    expect(itemFromPlainObj.filePath).not.toBe('[object Object]');
   });
 });

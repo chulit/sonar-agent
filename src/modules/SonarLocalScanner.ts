@@ -106,8 +106,11 @@ export class SonarLocalScanner {
         try {
           return vscode.workspace.asRelativePath(uri as any);
         } catch {
-          const maybe = uri as { fsPath?: string };
-          return maybe?.fsPath ?? String(uri);
+          if (typeof uri === 'string') {
+            return uri;
+          }
+          const maybe = uri as { fsPath?: string; path?: string } | null | undefined;
+          return maybe?.fsPath ?? maybe?.path ?? '';
         }
       });
     this.spawnFn =
@@ -141,7 +144,7 @@ export class SonarLocalScanner {
     const items: SonarDetailItem[] = [];
     for (const [uri, diagnostics] of entries) {
       for (const diagnostic of diagnostics ?? []) {
-        if (!diagnostic.source || !diagnostic.source.toLowerCase().includes('sonar')) {
+        if (!diagnostic.source?.toLowerCase().includes('sonar')) {
           continue;
         }
         items.push(this.mapDiagnostic(uri, diagnostic));
@@ -248,7 +251,6 @@ export class SonarLocalScanner {
         });
         return;
       }
-      let stdout = '';
       let stderr = '';
       let settled = false;
       const settle = (result: {
@@ -265,7 +267,6 @@ export class SonarLocalScanner {
       try {
         proc.stdout?.on('data', (chunk: any) => {
           const text = String(chunk);
-          stdout += text;
           Logger.info(`[sonar-scanner] ${text.trim()}`);
         });
         proc.stderr?.on('data', (chunk: any) => {
@@ -287,7 +288,6 @@ export class SonarLocalScanner {
         });
       });
       proc.on('close', (code: number) => {
-        void stdout;
         if (code === 0) {
           Logger.info(`[sonar-scanner] ${command} completed successfully.`);
           settle({ spawned: true, succeeded: true, notFound: false });
@@ -295,8 +295,7 @@ export class SonarLocalScanner {
           const lastLine = stderr
             .split(/\r?\n/)
             .map((l) => l.trim())
-            .filter(Boolean)
-            .pop();
+            .findLast(Boolean);
           settle({
             spawned: true,
             succeeded: false,

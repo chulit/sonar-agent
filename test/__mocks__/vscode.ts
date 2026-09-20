@@ -2,7 +2,7 @@ export const workspace = {
   workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
   findFiles: async () => [],
   openTextDocument: async () => ({}),
-  asRelativePath: (uri: any) => (typeof uri === 'string' ? uri : (uri?.fsPath ?? String(uri))),
+  asRelativePath: (uri: any) => (typeof uri === 'string' ? uri : (uri?.fsPath ?? uri?.path ?? '')),
   getConfiguration: () => ({
     get: (key: string, def?: any) => def,
     update: async () => {},

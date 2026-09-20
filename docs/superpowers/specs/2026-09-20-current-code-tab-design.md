@@ -7,7 +7,7 @@
 
 ## Problem Statement
 
-Developers using Sonar Agent can inspect Overall Code metrics pulled from a remote SonarQube server, but have no way to see whether their current local edits or uncommitted code introduce Sonar issues *before* pushing to CI or running a full server scan. The result is a slow feedback loop: issues are discovered only after a full sonar-scanner run lands on the server, not at the moment code is written.
+Developers using Sonar Agent can inspect Overall Code metrics pulled from a remote SonarQube server, but have no way to see whether their current local edits or uncommitted code introduce Sonar issues _before_ pushing to CI or running a full server scan. The result is a slow feedback loop: issues are discovered only after a full sonar-scanner run lands on the server, not at the moment code is written.
 
 ---
 
@@ -90,6 +90,7 @@ vscode.languages.onDidChangeDiagnostics
 ```
 
 Mapping from `vscode.Diagnostic` to `SonarDetailItem`:
+
 - `id` — URI + diagnostic range hash
 - `ruleKey` — `diagnostic.code` (when object, use `.value`; raw string otherwise)
 - `message` — `diagnostic.message`
@@ -117,19 +118,19 @@ Mapping from `vscode.Diagnostic` to `SonarDetailItem`:
 
 Two new settings in `package.json` `contributes.configuration`:
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `sonarAgent.currentCode.enabled` | boolean | `true` | Show the Current Code tab and enable local issue detection. |
-| `sonarAgent.currentCode.source` | enum `'sonarlint' \| 'cli'` | `'sonarlint'` | Default source for Current Code issue detection. |
+| Key                              | Type                        | Default       | Description                                                 |
+| -------------------------------- | --------------------------- | ------------- | ----------------------------------------------------------- |
+| `sonarAgent.currentCode.enabled` | boolean                     | `true`        | Show the Current Code tab and enable local issue detection. |
+| `sonarAgent.currentCode.source`  | enum `'sonarlint' \| 'cli'` | `'sonarlint'` | Default source for Current Code issue detection.            |
 
 ### 8. Empty States
 
-| Condition | UI |
-|---|---|
+| Condition                          | UI                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------ |
 | SonarLint selected + not installed | Friendly banner: "Install SonarLint Extension" link + "Run Full Scan via CLI" button |
-| SonarLint selected + no issues | Green checkmark: *"No Sonar issues detected. Clean & ready!"* |
-| CLI selected + no scan run yet | Prompt card: *"Run a full scan to see issues."* + "Run Full Scan" button |
-| CLI selected + scanning | Status bar spinner + loading overlay within tab |
+| SonarLint selected + no issues     | Green checkmark: _"No Sonar issues detected. Clean & ready!"_                        |
+| CLI selected + no scan run yet     | Prompt card: _"Run a full scan to see issues."_ + "Run Full Scan" button             |
+| CLI selected + scanning            | Status bar spinner + loading overlay within tab                                      |
 
 ---
 
@@ -142,6 +143,7 @@ Tests verify the public behavior of `SonarLocalScanner` through its module inter
 ### Modules to Test
 
 **`SonarLocalScanner`**:
+
 - `isSonarLintInstalled()` returns `true` when the extensions mock includes `sonarsource.sonarlint-vscode`.
 - `getLocalDiagnostics()` returns only diagnostics whose `source` contains `'sonar'` and omits diagnostics from other sources (e.g., `'eslint'`, `'typescript'`).
 - `onDiagnosticsChanged()` invokes the callback when the diagnostics change event fires with a URI covered by the workspace.
@@ -149,6 +151,7 @@ Tests verify the public behavior of `SonarLocalScanner` through its module inter
 - `runCliScan()` resolves the binary via PATH mock, spawns the process, and emits `onScanEnd(true)` when the process exits with code 0.
 
 **`SonarOverviewViewProvider`** (existing test file):
+
 - Posting `switchTab` with `tab: 'currentCode'` causes `currentCodeItems` sync to be requested.
 - When `sonarAgent.currentCode.enabled` is `false`, no diagnostics listener is registered.
 
@@ -171,5 +174,5 @@ Existing test seams in `test/WebviewProvider.test.ts` mock `postMessage` and ass
 ## Further Notes
 
 - `SonarCodeActionProvider` already integrates with SonarLint diagnostics via the VS Code code-actions lightbulb. `SonarLocalScanner` and `SonarCodeActionProvider` are independent consumers of the same VS Code Diagnostics stream — no deduplication needed.
-- If `sonar-scanner` is not found on PATH and `npx` is also unavailable, the CLI scan button shows a contextual error: *"sonar-scanner not found. Install SonarQube Scanner CLI or ensure npx is available."*
+- If `sonar-scanner` is not found on PATH and `npx` is also unavailable, the CLI scan button shows a contextual error: _"sonar-scanner not found. Install SonarQube Scanner CLI or ensure npx is available."_
 - `SonarDetailItem` type reuse means existing `AgentDispatcher.dispatchIssue()` and batch dispatch paths work unchanged for Current Code items.
