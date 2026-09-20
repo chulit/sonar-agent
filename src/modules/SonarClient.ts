@@ -177,7 +177,6 @@ export class SonarClient {
       `${this.serverUrl}/api/projects/search?ps=100`,
       `${this.serverUrl}/api/components/search_projects?ps=100`,
       `${this.serverUrl}/api/projects/search?ps=100&qualifiers=TRK`,
-      `${this.serverUrl}/api/components/search?qualifiers=TRK`,
     ];
 
     for (const url of endpoints) {
@@ -224,6 +223,7 @@ export class SonarClient {
       'duplicated_lines_density',
       'duplicated_lines',
       'security_hotspots',
+      'security_review_rating',
     ].join(',');
 
     const url = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
@@ -294,7 +294,7 @@ export class SonarClient {
       },
       securityHotspots: {
         count: parseInt(measureMap.security_hotspots || '0', 10),
-        rating: 'A',
+        rating: this.parseRating(measureMap.security_review_rating || '1.0'),
       },
     };
   }

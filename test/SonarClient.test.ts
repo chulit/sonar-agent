@@ -141,6 +141,33 @@ describe('SonarClient - Connection Verification', () => {
     expect(overview.securityHotspots).toEqual({ count: 0, rating: 'A' });
   });
 
+  it('should parse security_review_rating for security hotspots when provided', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'security_hotspots', value: '4' },
+          { metric: 'security_review_rating', value: '3.0' },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project');
+    expect(overview.securityHotspots).toEqual({ count: 4, rating: 'C' });
+  });
+
   it('should fetch issues and extract clean relative file paths', async () => {
     const mockIssuesResponse = {
       issues: [
