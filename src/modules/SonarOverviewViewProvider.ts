@@ -1755,12 +1755,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div class="header-actions">
         <select id="profile-switcher" class="hidden" title="Connection profile" style="max-width: 140px; font-size: 11px; padding: 2px 4px;"></select>
-        <button id="header-refresh-btn" class="icon-btn" title="Refresh measures">
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A7.958 7.958 0 0 0 8 0a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.76-4.24l-2.24 2.24h6V0l-2.35 2.35z"/></svg>
-        </button>
-        <button id="header-disconnect-btn" class="icon-btn ${isConfigured ? '' : 'hidden'}" title="Disconnect server">
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M7.5 1v7h1V1h-1z"/><path d="M3.05 3.05a7 7 0 1 0 9.9 0l-.7.7a6 6 0 1 1-8.5 0l-.7-.7z"/></svg>
-        </button>
       </div>
     </div>
 
@@ -2074,8 +2068,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const serverUrlInput = document.getElementById("server-url");
     const userTokenInput = document.getElementById("user-token");
     const connectBtn = document.getElementById("connect-btn");
-    const headerRefreshBtn = document.getElementById("header-refresh-btn");
-    const headerDisconnectBtn = document.getElementById("header-disconnect-btn");
     const projectSearchInput = document.getElementById("project-search-input");
     const projectSearchToggleBtn = document.getElementById("project-search-toggle-btn");
     const projectDropdownPopup = document.getElementById("project-dropdown-popup");
@@ -2612,21 +2604,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       });
     }
 
-    headerRefreshBtn.addEventListener("click", () => {
-      vscode.postMessage({ command: "refresh" });
-      if (activeCategory) {
-        vscode.postMessage({ command: "fetchDetails", category: activeCategory });
-      }
-    });
-
-    headerDisconnectBtn.addEventListener("click", () => {
-      try {
-        vscode.postMessage({ command: "disconnect" });
-      } catch (err) {
-        showAlert("Error disconnecting: " + (err?.message || String(err)));
-      }
-    });
-
     profileSwitcher.addEventListener("change", () => {
       vscode.postMessage({ command: "switchProfile", profileId: profileSwitcher.value });
     });
@@ -2684,7 +2661,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           connectBtn.disabled = false;
           connectBtn.textContent = "Connect & Verify";
           if (message.state === "connected") {
-            headerDisconnectBtn.classList.remove("hidden");
             onboardingView.classList.add("hidden");
             noProfilesView.classList.add("hidden");
             connectedView.classList.remove("hidden");
@@ -2741,13 +2717,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
               }
             }
           } else if (message.state === "no-profiles") {
-            headerDisconnectBtn.classList.add("hidden");
             connectedView.classList.add("hidden");
             onboardingView.classList.add("hidden");
             noProfilesView.classList.remove("hidden");
             renderProfileSwitcher(message.profiles, message.activeProfileId);
           } else {
-            headerDisconnectBtn.classList.add("hidden");
             connectedView.classList.add("hidden");
             noProfilesView.classList.add("hidden");
             onboardingView.classList.remove("hidden");
@@ -2768,7 +2742,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           userTokenInput.value = "";
           connectBtn.disabled = false;
           connectBtn.textContent = "Connect & Verify";
-          headerDisconnectBtn.classList.add("hidden");
           if (message.message) {
             showAlert(message.message, "info");
           }
