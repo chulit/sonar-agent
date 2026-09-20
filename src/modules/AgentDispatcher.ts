@@ -1,8 +1,9 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
-import { SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
+import { SonarClient, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
+import { ProjectDetector } from './ProjectDetector.js';
 
 export interface CodeSnippetContext {
   snippet: string;
@@ -11,14 +12,21 @@ export interface CodeSnippetContext {
   language: string;
 }
 
+export interface DispatchOptions {
+  targetAgentId?: string;
+}
+
 export interface AgentDispatcherOptions {
   fileNavigator?: FileNavigator;
+  projectDetector?: ProjectDetector;
+  sonarClientFactory?: (config: { serverUrl: string; token: string }) => SonarClient;
   fetchRuleFn?: (ruleKey: string) => Promise<SonarRuleDoc>;
   readCodeSnippetFn?: (filePath: string, line?: number) => Promise<CodeSnippetContext | null>;
   isExtensionInstalledFn?: (extensionId: string) => boolean;
   isAntigravityEnvFn?: () => boolean;
   executeCommandFn?: (command: string, ...args: unknown[]) => Thenable<unknown> | Promise<unknown>;
   sendToAgentPanelFn?: (options: SendToAgentPanelOptions) => Thenable<void> | Promise<void>;
+  getDefaultAgentFn?: () => string;
 }
 
 export interface SendToAgentPanelOptions {
@@ -37,6 +45,12 @@ export interface TargetAgent {
 export class AgentDispatcher {
   private readonly ruleCache = new Map<string, SonarRuleDoc>();
   private readonly fileNavigator: FileNavigator;
+  private readonly projectDetector?: ProjectDetector;
+  private readonly sonarClientFactory: (config: {
+    serverUrl: string;
+    token: string;
+  }) => SonarClient;
+  private readonly getDefaultAgentFn: () => string;
   private readonly fetchRuleFn?: (ruleKey: string) => Promise<SonarRuleDoc>;
   private readonly readCodeSnippetFn?: (
     filePath: string,
@@ -54,6 +68,14 @@ export class AgentDispatcher {
 
   constructor(options?: AgentDispatcherOptions) {
     this.fileNavigator = options?.fileNavigator ?? new FileNavigator();
+    this.projectDetector = options?.projectDetector;
+    this.sonarClientFactory =
+      options?.sonarClientFactory ??
+      ((cfg) => new SonarClient({ serverUrl: cfg.serverUrl, token: cfg.token }));
+    this.getDefaultAgentFn =
+      options?.getDefaultAgentFn ??
+      (() =>
+        vscode.workspace.getConfiguration('sonarAgent').get<string>('defaultAgent', 'copilot'));
     this.fetchRuleFn = options?.fetchRuleFn;
     this.readCodeSnippetFn = options?.readCodeSnippetFn;
     this.executeCommandFn =
@@ -199,10 +221,23 @@ export class AgentDispatcher {
       return this.ruleCache.get(ruleKey)!;
     }
 
-    let doc: SonarRuleDoc;
+    let doc: SonarRuleDoc | undefined;
     if (this.fetchRuleFn) {
       doc = await this.fetchRuleFn(ruleKey);
-    } else {
+    } else if (this.projectDetector) {
+      try {
+        const config = await this.projectDetector.getConfig();
+        const token = await this.projectDetector.getToken();
+        if (config.serverUrl && token) {
+          const client = this.sonarClientFactory({ serverUrl: config.serverUrl, token });
+          doc = await client.getEnrichedRule(ruleKey);
+        }
+      } catch {
+        // Fall back to basic placeholder if rule enrichment fails
+      }
+    }
+
+    if (!doc) {
       doc = {
         key: ruleKey,
         name: ruleKey,
@@ -550,5 +585,88 @@ export class AgentDispatcher {
     );
 
     return { ok: true, message: `Prompt ready in clipboard for ${agentName}.` };
+  }
+
+  /**
+   * Resolves target agent using requested ID or active configuration fallback.
+   */
+  async resolveTargetAgent(requestedAgentId?: string): Promise<string> {
+    const available = await this.getAvailableAgents();
+    if (requestedAgentId && available.some((a) => a.id === requestedAgentId)) {
+      return requestedAgentId;
+    }
+    if (requestedAgentId === 'clipboard') {
+      return 'clipboard';
+    }
+    const defaultAgent = this.getDefaultAgentFn();
+    if (defaultAgent && available.some((a) => a.id === defaultAgent)) {
+      return defaultAgent;
+    }
+    return available[0]?.id || 'clipboard';
+  }
+
+  /**
+   * Dispatches a single SonarQube issue to the resolved or specified Target Agent.
+   */
+  async dispatchIssue(
+    item: SonarDetailItem,
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    const targetAgentId = await this.resolveTargetAgent(options?.targetAgentId);
+    const prompt = await this.assemblePrompt(item);
+    return this.dispatch(prompt, targetAgentId, item);
+  }
+
+  /**
+   * Dispatches a batch of SonarQube issues to the resolved or specified Target Agent.
+   */
+  async dispatchBatch(
+    items: SonarDetailItem[],
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    if (!items || items.length === 0) {
+      return { ok: false, message: 'No items to dispatch.' };
+    }
+    const targetAgentId = await this.resolveTargetAgent(options?.targetAgentId);
+    const prompt = await this.assembleBatchPrompt(items);
+    return this.dispatch(prompt, targetAgentId, items[0], items);
+  }
+
+  /**
+   * Dispatches an editor diagnostic (e.g. from SonarLint / CodeAction) to the Target Agent.
+   */
+  async dispatchDiagnostic(
+    diagnostic: vscode.Diagnostic,
+    document: vscode.TextDocument,
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    let severity: SonarDetailItem['severity'] = 'MAJOR';
+    if (diagnostic.severity === vscode.DiagnosticSeverity.Error) {
+      severity = 'CRITICAL';
+    } else if (diagnostic.severity === vscode.DiagnosticSeverity.Information) {
+      severity = 'MINOR';
+    } else if (diagnostic.severity === vscode.DiagnosticSeverity.Hint) {
+      severity = 'INFO';
+    }
+
+    const relativePath = vscode.workspace.asRelativePath
+      ? vscode.workspace.asRelativePath(document.uri)
+      : document.fileName;
+
+    const item: SonarDetailItem = {
+      id: String(diagnostic.code || 'sonar-issue'),
+      ruleKey: String(diagnostic.code || ''),
+      message: diagnostic.message,
+      component: relativePath,
+      filePath: relativePath,
+      line: diagnostic.range.start.line + 1,
+      severity,
+      type: 'CODE_SMELL',
+      status: 'OPEN',
+      tags: [],
+      creationDate: new Date().toISOString(),
+    };
+
+    return this.dispatchIssue(item, options);
   }
 }

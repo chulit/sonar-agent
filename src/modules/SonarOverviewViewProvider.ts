@@ -26,7 +26,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   ) {
     this.fileNavigator = fileNavigator ?? new FileNavigator();
     this.agentDispatcher =
-      agentDispatcher ?? new AgentDispatcher({ fileNavigator: this.fileNavigator });
+      agentDispatcher ??
+      new AgentDispatcher({
+        fileNavigator: this.fileNavigator,
+        projectDetector: this.projectDetector,
+      });
     this.diagnosticCollection =
       diagnosticCollection ?? vscode.languages.createDiagnosticCollection('SonarQube');
   }
@@ -661,50 +665,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async _handleSendToAgent(item: SonarDetailItem, targetAgentId?: string): Promise<void> {
-    const config = await this.projectDetector.getConfig();
-    const token = await this.projectDetector.getToken();
-    const agentId =
-      targetAgentId ||
-      vscode.workspace.getConfiguration('sonarAgent').get<string>('defaultAgent', 'copilot');
-
-    let client: SonarClient | undefined;
-    if (config.serverUrl && token) {
-      client = new SonarClient({ serverUrl: config.serverUrl, token });
-    }
-
-    const dispatcher = new AgentDispatcher({
-      fileNavigator: this.fileNavigator,
-      fetchRuleFn: client ? (ruleKey) => client!.getEnrichedRule(ruleKey) : undefined,
-    });
-
-    const prompt = await dispatcher.assemblePrompt(item);
-    await dispatcher.dispatch(prompt, agentId, item);
+    await this.agentDispatcher.dispatchIssue(item, { targetAgentId });
   }
 
   private async _handleSendBatchToAgent(
     items: SonarDetailItem[],
     targetAgentId?: string,
   ): Promise<void> {
-    if (!items || items.length === 0) return;
-
-    const config = await this.projectDetector.getConfig();
-    const token = await this.projectDetector.getToken();
-    const agentId =
-      targetAgentId ||
-      vscode.workspace.getConfiguration('sonarAgent').get<string>('defaultAgent', 'copilot');
-
-    let client: SonarClient | undefined;
-    if (config.serverUrl && token) {
-      client = new SonarClient({ serverUrl: config.serverUrl, token });
-    }
-
-    const dispatcher = new AgentDispatcher({
-      fileNavigator: this.fileNavigator,
-      fetchRuleFn: client ? (ruleKey) => client!.getEnrichedRule(ruleKey) : undefined,
-    });
-
-    const prompt = await dispatcher.assembleBatchPrompt(items);
-    await dispatcher.dispatch(prompt, agentId, items[0], items);
+    await this.agentDispatcher.dispatchBatch(items, { targetAgentId });
   }
 
   private async _handleFetchDetails(category: string): Promise<void> {

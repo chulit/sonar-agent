@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { SonarCodeActionProvider } from '../src/modules/SonarCodeActionProvider.js';
 import { ProjectDetector } from '../src/modules/ProjectDetector.js';
-import { AgentDispatcher, SonarDetailItem } from '../src/modules/AgentDispatcher.js';
+import { AgentDispatcher } from '../src/modules/AgentDispatcher.js';
 
 describe('SonarCodeActionProvider', () => {
   const mockProjectDetector = {
@@ -59,11 +59,9 @@ describe('SonarCodeActionProvider', () => {
 
   it('should execute fixWithAgent and delegate to AgentDispatcher', async () => {
     const mockDispatcher = {
-      getAvailableAgents: vi
+      dispatchDiagnostic: vi
         .fn()
-        .mockResolvedValue([{ id: 'antigravity', name: 'Antigravity Agent' }]),
-      assemblePrompt: vi.fn().mockResolvedValue('Assembled prompt for agent'),
-      dispatch: vi.fn().mockResolvedValue({ ok: true, message: 'Dispatched to Antigravity Chat.' }),
+        .mockResolvedValue({ ok: true, message: 'Dispatched to Antigravity Chat.' }),
     } as unknown as AgentDispatcher;
 
     const provider = new SonarCodeActionProvider({
@@ -82,21 +80,6 @@ describe('SonarCodeActionProvider', () => {
     const result = await provider.executeFixWithAgent(sonarDiag, sampleDoc);
 
     expect(result.ok).toBe(true);
-    expect(mockDispatcher.assemblePrompt).toHaveBeenCalledWith(
-      expect.objectContaining<Partial<SonarDetailItem>>({
-        ruleKey: 'typescript:S3358',
-        message: 'Extract this nested ternary',
-        line: 16,
-        severity: 'CRITICAL',
-      }),
-    );
-    expect(mockDispatcher.dispatch).toHaveBeenCalledWith(
-      'Assembled prompt for agent',
-      'antigravity',
-      expect.objectContaining({
-        ruleKey: 'typescript:S3358',
-        line: 16,
-      }),
-    );
+    expect(mockDispatcher.dispatchDiagnostic).toHaveBeenCalledWith(sonarDiag, sampleDoc);
   });
 });
