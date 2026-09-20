@@ -123,6 +123,16 @@
           "default": "",
           "description": "SonarQube Project Key"
         },
+        "sonarAgent.profiles": {
+          "type": "array",
+          "default": [],
+          "description": "Named SonarQube connection profiles (server URL + project key each; tokens live in the OS Keychain)"
+        },
+        "sonarAgent.activeProfileId": {
+          "type": "string",
+          "default": "",
+          "description": "Id of the active connection profile"
+        },
         "sonarAgent.defaultAgent": {
           "type": "string",
           "default": "copilot",
