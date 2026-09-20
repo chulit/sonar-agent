@@ -18,7 +18,8 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "npm run build && npx @vscode/vsce package ${nextRelease.version} --no-git-tag-version -o sonar-agent-${nextRelease.version}.vsix"
+        "prepareCmd": "npm run build && npx @vscode/vsce package ${nextRelease.version} --no-git-tag-version -o sonar-agent-${nextRelease.version}.vsix",
+        "publishCmd": "npx @vscode/vsce publish --packagePath sonar-agent-${nextRelease.version}.vsix && (test -z \"$OVSX_PAT\" || npx ovsx publish sonar-agent-${nextRelease.version}.vsix -p \"$OVSX_PAT\")"
       }
     ],
     [

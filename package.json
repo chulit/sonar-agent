@@ -201,6 +201,7 @@
     "esbuild": "^0.20.0",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
+    "ovsx": "^1.2.0",
     "prettier": "^3.9.8",
     "semantic-release": "^25.0.9",
     "typescript": "^5.3.3",
