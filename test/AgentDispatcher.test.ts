@@ -117,7 +117,7 @@ describe('AgentDispatcher - Dynamic Target Agent Discovery', () => {
     const agents = dispatcher.getAvailableAgents();
     expect(agents.map((a) => a.id)).toEqual(['claude-code', 'clipboard']);
     expect(agents[0].name).toBe('Claude Code');
-    expect(agents[0].focusCommand).toBe('workbench.view.extension.claude-sidebar');
+    expect(agents[0].focusCommand).toBe('claude-vscode.editor.openLast');
   });
 
   it('should preserve priority ordering: copilot > antigravity > others > clipboard', () => {
@@ -173,25 +173,32 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     creationDate: '2026-09-13T10:00:00+0000',
   };
 
-  it('should trigger focus command when dispatching to Claude Code', async () => {
-    const executedCommands: string[] = [];
+  it('should send the prompt to a new Claude Code session', async () => {
+    const executedCommands: { cmd: string; args: unknown[] }[] = [];
     const openFileAtLine = vi.fn().mockResolvedValue(true);
     const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
 
     const dispatcher = new AgentDispatcher({
       fileNavigator: mockNavigator,
       isExtensionInstalledFn: (id) => id === 'anthropic.claude-code',
-      executeCommandFn: async (cmd) => {
-        executedCommands.push(cmd);
+      executeCommandFn: async (cmd, ...args) => {
+        executedCommands.push({ cmd, args });
         return undefined;
       },
     });
 
     const res = await dispatcher.dispatch('prompt content', 'claude-code', sampleItem);
     expect(res.ok).toBe(true);
-    expect(executedCommands).toContain('workbench.view.extension.claude-sidebar');
+    expect(executedCommands).toContainEqual({
+      cmd: 'claude-vscode.editor.open',
+      args: [undefined, 'prompt content'],
+    });
+    expect(executedCommands).toContainEqual({
+      cmd: 'claude-vscode.insertAtMention',
+      args: [],
+    });
     expect(openFileAtLine).toHaveBeenCalledWith('src/App.vue', 42);
-    expect(res.message).toContain('Claude Code');
+    expect(res.message).toBe('Dispatched to Claude Code.');
   });
 
   it('should trigger focus command when dispatching to Cline', async () => {
@@ -225,10 +232,10 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     const agents = dispatcher.getAvailableAgents();
     expect(agents.map((a) => a.id)).toEqual(['codex', 'clipboard']);
     expect(agents[0].name).toBe('Codex Agent');
-    expect(agents[0].focusCommand).toBe('chatgpt.focus');
+    expect(agents[0].focusCommand).toBe('chatgpt.openSidebar');
   });
 
-  it('should trigger focus command when dispatching to Codex Agent', async () => {
+  it('should open Codex Agent when dispatching a prompt', async () => {
     const executedCommands: string[] = [];
     const openFileAtLine = vi.fn().mockResolvedValue(true);
     const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
@@ -244,7 +251,8 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
 
     const res = await dispatcher.dispatch('prompt content', 'codex', sampleItem);
     expect(res.ok).toBe(true);
-    expect(executedCommands).toContain('chatgpt.focus');
+    expect(executedCommands).toContain('chatgpt.openSidebar');
+    expect(executedCommands).toContain('chatgpt.addToThread');
     expect(openFileAtLine).toHaveBeenCalledWith('src/App.vue', 42);
     expect(res.message).toContain('Codex Agent');
   });

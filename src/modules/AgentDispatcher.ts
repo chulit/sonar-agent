@@ -158,7 +158,7 @@ export class AgentDispatcher {
         id: 'claude-code',
         name: 'Claude Code',
         description: 'Anthropic Claude Code for VS Code',
-        focusCommand: 'workbench.view.extension.claude-sidebar',
+        focusCommand: 'claude-vscode.editor.openLast',
       });
     }
 
@@ -202,7 +202,7 @@ export class AgentDispatcher {
         id: 'codex',
         name: 'Codex Agent',
         description: 'OpenAI Codex AI Assistant',
-        focusCommand: 'chatgpt.focus',
+        focusCommand: 'chatgpt.openSidebar',
       });
     }
 
@@ -533,9 +533,9 @@ export class AgentDispatcher {
   private async focusTargetAgent(targetAgentId: string, matchedAgent?: TargetAgent): Promise<void> {
     if (targetAgentId === 'claude-code') {
       const claudeCommands = [
-        'workbench.view.extension.claude-sidebar',
-        'claude-code.focus',
-        'claude.focus',
+        'claude-vscode.editor.openLast',
+        'claude-vscode.sidebar.open',
+        'claude-vscode.focus',
       ];
       for (const cmd of claudeCommands) {
         try {
@@ -546,10 +546,15 @@ export class AgentDispatcher {
         }
       }
     } else if (targetAgentId === 'codex') {
-      const codexCommands = ['chatgpt.focus', 'openai.chatgpt.focus', 'codex.focus'];
+      const codexCommands = ['chatgpt.openSidebar'];
       for (const cmd of codexCommands) {
         try {
           await this.executeCommandFn(cmd);
+          try {
+            await this.executeCommandFn('chatgpt.addToThread');
+          } catch {
+            // The Codex extension may not have an active editor selection.
+          }
           break;
         } catch {
           // continue trying next command
@@ -589,6 +594,21 @@ export class AgentDispatcher {
 
     if (targetAgentId === 'antigravity') {
       return this.dispatchAntigravity(prompt, item, allItems);
+    }
+
+    if (targetAgentId === 'claude-code') {
+      try {
+        await this.executeCommandFn('claude-vscode.editor.open', undefined, prompt);
+        try {
+          await this.executeCommandFn('claude-vscode.insertAtMention');
+        } catch {
+          // The Claude Code extension may not have an active editor selection.
+        }
+        vscode.window.showInformationMessage('Dispatched Fix Prompt to Claude Code.');
+        return { ok: true, message: 'Dispatched to Claude Code.' };
+      } catch {
+        // The Claude Code prompt command is unavailable in older extension versions.
+      }
     }
 
     const matchedAgent = this.getAvailableAgents().find((a) => a.id === targetAgentId);
