@@ -57,6 +57,12 @@ export interface UpdateProfileTargetInput {
   projectKey?: string;
 }
 
+export interface CreationSuggestion {
+  serverUrl?: string;
+  projectKey?: string;
+  hasPlaintextCredentials: boolean;
+}
+
 const TOKEN_SECRET_KEY = 'sonarAgent.token';
 const PROFILES_CONFIG_KEY = 'profiles';
 const ACTIVE_PROFILE_CONFIG_KEY = 'activeProfileId';
@@ -347,6 +353,31 @@ export class ProjectDetector {
     }
   }
 
+  async getCreationSuggestion(): Promise<CreationSuggestion> {
+    const detected = await this.detectWorkspaceProperties();
+    return {
+      serverUrl: detected?.serverUrl,
+      projectKey: detected?.projectKey,
+      hasPlaintextCredentials: detected?.hasPlaintextCredentials ?? false,
+    };
+  }
+
+  async migrateResetIfLegacy(): Promise<boolean> {
+    const legacyToken = await this.secrets.get(TOKEN_SECRET_KEY);
+    const serverUrl = this.activeServerUrl ?? this.config.get<string>('serverUrl', '');
+    const projectKey = this.activeProjectKey ?? this.config.get<string>('projectKey', '');
+    if (!((legacyToken && legacyToken.trim()) || serverUrl || projectKey)) {
+      return false;
+    }
+    this.activeToken = null;
+    this.activeServerUrl = undefined;
+    this.activeProjectKey = undefined;
+    await this.secrets.delete(TOKEN_SECRET_KEY);
+    await this.config.update('serverUrl', undefined, true);
+    await this.config.update('projectKey', undefined, true);
+    return true;
+  }
+
   async getConfig(): Promise<ResolvedProjectConfig> {
     if (this.hasProfiles()) {
       const active = await this.getActiveProfile();
@@ -366,24 +397,8 @@ export class ProjectDetector {
         detectedFromProperties: false,
       };
     }
-    let serverUrl = this.activeServerUrl ?? this.config.get<string>('serverUrl', '');
-    let projectKey = this.activeProjectKey ?? this.config.get<string>('projectKey', '');
-    let detectedFromProperties = false;
-    let hasPlaintextCredentialsWarning = false;
-
-    const detected = await this.detectWorkspaceProperties();
-    if (detected) {
-      if (detected.projectKey) {
-        projectKey = detected.projectKey;
-        detectedFromProperties = true;
-      }
-      if (!serverUrl && detected.serverUrl) {
-        serverUrl = detected.serverUrl;
-      }
-      if (detected.hasPlaintextCredentials) {
-        hasPlaintextCredentialsWarning = true;
-      }
-    }
+    const serverUrl = this.activeServerUrl ?? this.config.get<string>('serverUrl', '');
+    const projectKey = this.activeProjectKey ?? this.config.get<string>('projectKey', '');
 
     const token = await this.getToken();
 
@@ -391,8 +406,8 @@ export class ProjectDetector {
       serverUrl,
       projectKey,
       hasToken: Boolean(token && token.trim().length > 0),
-      detectedFromProperties,
-      hasPlaintextCredentialsWarning,
+      detectedFromProperties: false,
+      hasPlaintextCredentialsWarning: false,
     };
   }
 }

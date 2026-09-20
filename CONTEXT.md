@@ -33,8 +33,12 @@ _Avoid_: Clone, copy-paste block
 ### Extension & Agent Concepts
 
 **Project Binding**:
-The configuration associating the active workspace with a specific SonarQube server URL and project key.
+The active association between the workspace and a specific SonarQube server URL and project key. Only one binding is active at a time; switching bindings switches the active server, project, and token together.
 _Avoid_: Connection, link, config mapping
+
+**Connection Profile**:
+A user-named stored triple (server URL + project key + token reference) that can be activated as the current Project Binding. Example: `kantor-prod`. Tokens for each profile reside exclusively in `vscode.ExtensionContext.secrets` under per-profile keys.
+_Avoid_: Connection alone, account, server entry
 
 **Target Agent**:
 The specific AI coding assistant in the editor (e.g., GitHub Copilot, Antigravity, Codex) chosen to resolve a selected issue.

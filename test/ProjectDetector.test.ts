@@ -217,3 +217,87 @@ describe('ProjectDetector - Connection Profiles', () => {
     expect((listed[0] as any).token).toBeUndefined();
   });
 });
+
+describe('ProjectDetector - Reset Migration and Properties-as-Suggestion', () => {
+  let mockSecrets: Record<string, string>;
+  let secretStorage: SecretStorageLike;
+  let mockConfig: Record<string, any>;
+  let workspaceConfig: WorkspaceConfigLike;
+
+  beforeEach(() => {
+    mockSecrets = {};
+    secretStorage = {
+      get: vi.fn(async (key: string) => mockSecrets[key]),
+      store: vi.fn(async (key: string, value: string) => {
+        mockSecrets[key] = value;
+      }),
+      delete: vi.fn(async (key: string) => {
+        delete mockSecrets[key];
+      }),
+    };
+    mockConfig = {};
+    workspaceConfig = {
+      get: vi.fn((key: string, defaultValue?: any) => mockConfig[key] ?? defaultValue),
+      update: vi.fn(async (key: string, value: any) => {
+        mockConfig[key] = value;
+      }),
+    };
+  });
+
+  it('should delete the legacy token and clear legacy settings once, then report false', async () => {
+    mockSecrets['sonarAgent.token'] = 'legacy-token';
+    mockConfig['serverUrl'] = 'http://old:9000';
+    mockConfig['projectKey'] = 'old:key';
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+
+    expect(await detector.migrateResetIfLegacy()).toBe(true);
+    expect(mockSecrets['sonarAgent.token']).toBeUndefined();
+    expect(secretStorage.delete).toHaveBeenCalledWith('sonarAgent.token');
+    expect(await detector.getToken()).toBeUndefined();
+    expect((await detector.getConfig()).serverUrl).toBe('');
+    expect((await detector.getConfig()).projectKey).toBe('');
+
+    expect(await detector.migrateResetIfLegacy()).toBe(false);
+  });
+
+  it('should return false when no legacy connection exists', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    expect(await detector.migrateResetIfLegacy()).toBe(false);
+  });
+
+  it('should keep the active profile stable despite a properties file being present', async () => {
+    const detector = new ProjectDetector({
+      secretStorage,
+      workspaceConfig,
+      workspaceRoot: '/ws',
+      readFileFn: async () => 'sonar.projectKey=props:key\nsonar.host.url=http://props:9000\n',
+    });
+    await detector.createProfile({
+      name: 'A',
+      serverUrl: 'http://a:9000',
+      projectKey: 'a:key',
+      token: 't',
+    });
+
+    const config = await detector.getConfig();
+    expect(config.serverUrl).toBe('http://a:9000');
+    expect(config.projectKey).toBe('a:key');
+    expect(config.detectedFromProperties).toBe(false);
+  });
+
+  it('should return suggestion values from the properties file without applying them', async () => {
+    const detector = new ProjectDetector({
+      secretStorage,
+      workspaceConfig,
+      workspaceRoot: '/ws',
+      readFileFn: async () =>
+        'sonar.projectKey=sug:key\nsonar.host.url=http://sug:9000\nsonar.token=squ_secret\n',
+    });
+
+    const suggestion = await detector.getCreationSuggestion();
+    expect(suggestion.serverUrl).toBe('http://sug:9000');
+    expect(suggestion.projectKey).toBe('sug:key');
+    expect(suggestion.hasPlaintextCredentials).toBe(true);
+    expect((await detector.getConfig()).projectKey).toBe('');
+  });
+});

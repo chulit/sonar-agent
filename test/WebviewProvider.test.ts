@@ -323,9 +323,7 @@ describe('SonarOverviewViewProvider - Profile Switcher UI', () => {
     if (messageCallback) {
       await messageCallback({ command: 'init' });
     }
-    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(
-      true,
-    );
+    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(true);
   });
 
   it('should switch the active binding via switchProfile message', async () => {
@@ -399,7 +397,8 @@ describe('SonarOverviewViewProvider - Profile Switcher UI', () => {
     expect(await detector.getToken()).toBe('tok-alpha');
   });
 
-  it('should land in no-profiles empty state after deleting the active profile', async () => {    const created = await detector.createProfile({
+  it('should land in no-profiles empty state after deleting the active profile', async () => {
+    const created = await detector.createProfile({
       name: 'Solo',
       serverUrl: 'http://solo:9000',
       projectKey: 'solo:key',
@@ -414,9 +413,7 @@ describe('SonarOverviewViewProvider - Profile Switcher UI', () => {
       await messageCallback({ command: 'refresh' });
     }
 
-    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(
-      true,
-    );
+    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(true);
   });
 
   it('should delete the active profile through the manage menu and land in no-profiles', async () => {
@@ -438,9 +435,7 @@ describe('SonarOverviewViewProvider - Profile Switcher UI', () => {
 
     expect(await detector.listProfiles()).toHaveLength(0);
     expect(mockSecrets['sonarAgent.token.solo']).toBeUndefined();
-    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(
-      true,
-    );
+    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(true);
   });
 
   it('should include profile management entries in the configure menu', async () => {

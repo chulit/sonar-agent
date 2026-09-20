@@ -6,11 +6,7 @@ import { AgentDispatcher } from './AgentDispatcher.js';
 import { Logger } from './Logger.js';
 
 type ProfileAction =
-  | 'switchProfile'
-  | 'newProfile'
-  | 'renameProfile'
-  | 'deleteProfile'
-  | 'verifyConnection';
+  'switchProfile' | 'newProfile' | 'renameProfile' | 'deleteProfile' | 'verifyConnection';
 
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'sonarAgent.overviewView';
@@ -558,7 +554,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   }
 
   public async promptCreateProfile(): Promise<void> {
-    const suggested = await this.projectDetector.detectWorkspaceProperties();
+    const suggested = await this.projectDetector.getCreationSuggestion();
     let currentName = '';
     let currentUrl = suggested?.serverUrl ?? 'http://localhost:9000';
     let currentToken = '';
@@ -829,9 +825,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         effectiveDefaultAgent = availableAgents[0]?.id || 'clipboard';
       }
 
-      const profiles = this.profilesCapable()
-        ? await this.projectDetector.listProfiles()
-        : [];
+      const profiles = this.profilesCapable() ? await this.projectDetector.listProfiles() : [];
       const activeProfile = this.profilesCapable()
         ? await this.projectDetector.getActiveProfile()
         : null;
