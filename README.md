@@ -10,7 +10,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/VS_Code-^1.85.0-blue?logo=visualstudiocode" alt="VS Code" />
+  <a href="https://marketplace.visualstudio.com/items?itemName=chulit.sonar-agent"><img src="https://img.shields.io/visual-studio-marketplace/v/chulit.sonar-agent?label=VS%20Marketplace&logo=visualstudiocode" alt="Visual Studio Marketplace" /></a>
+  <a href="https://open-vsx.org/extension/chulit/sonar-agent"><img src="https://img.shields.io/open-vsx/v/chulit/sonar-agent?label=Open%20VSX" alt="Open VSX" /></a>
   <img src="https://img.shields.io/badge/SonarQube-Compatible-4B9FD5?logo=sonarqube" alt="SonarQube" />
   <img src="https://img.shields.io/badge/AI_Agents-Copilot%20%7C%20Antigravity%20%7C%20Claude%20%7C%20Roo%20%7C%20Codex-8A2BE2" alt="AI Agents" />
 </p>

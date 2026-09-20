@@ -1,19 +1,17 @@
 # [1.1.0](https://github.com/chulit/sonar-agent/compare/v1.0.0...v1.1.0) (2026-09-20)
 
-
 ### Bug Fixes
 
-* **dispatcher:** safely narrow diagnostic code when mapping issue ([8af9067](https://github.com/chulit/sonar-agent/commit/8af90671af115aa3ba716c5e0945e692b72d3625))
-* **quality:** resolve TypeScript test errors and clean code smells ([fd67901](https://github.com/chulit/sonar-agent/commit/fd679010d50e857409802cac131279112fbcab7f))
-* **scan:** pass active binding to sonar-scanner CLI ([88047b9](https://github.com/chulit/sonar-agent/commit/88047b941d0979a7092a291de1bbd1c480a24490))
-* **scan:** resolve static analysis and typing issues in local scanner ([98e0ce7](https://github.com/chulit/sonar-agent/commit/98e0ce79494b3a0b60bb721af0675489def395f2))
-
+- **dispatcher:** safely narrow diagnostic code when mapping issue ([8af9067](https://github.com/chulit/sonar-agent/commit/8af90671af115aa3ba716c5e0945e692b72d3625))
+- **quality:** resolve TypeScript test errors and clean code smells ([fd67901](https://github.com/chulit/sonar-agent/commit/fd679010d50e857409802cac131279112fbcab7f))
+- **scan:** pass active binding to sonar-scanner CLI ([88047b9](https://github.com/chulit/sonar-agent/commit/88047b941d0979a7092a291de1bbd1c480a24490))
+- **scan:** resolve static analysis and typing issues in local scanner ([98e0ce7](https://github.com/chulit/sonar-agent/commit/98e0ce79494b3a0b60bb721af0675489def395f2))
 
 ### Features
 
-* **client:** fetch security review rating for hotspots and remove redundant endpoint ([19bdd44](https://github.com/chulit/sonar-agent/commit/19bdd44e2ed675fe02ae9d4c7fbfdb998edbbfd0))
-* **current-code:** add Current Code tab with SonarLint feed and CLI scan ([a3fa40c](https://github.com/chulit/sonar-agent/commit/a3fa40c03c01b6c7029fa562b3af47c70b2de2d2))
-* **dispatcher:** add Codex Agent integration and focus command dispatch ([5987f81](https://github.com/chulit/sonar-agent/commit/5987f81319d3ef3068745a45139855e5936eddba))
+- **client:** fetch security review rating for hotspots and remove redundant endpoint ([19bdd44](https://github.com/chulit/sonar-agent/commit/19bdd44e2ed675fe02ae9d4c7fbfdb998edbbfd0))
+- **current-code:** add Current Code tab with SonarLint feed and CLI scan ([a3fa40c](https://github.com/chulit/sonar-agent/commit/a3fa40c03c01b6c7029fa562b3af47c70b2de2d2))
+- **dispatcher:** add Codex Agent integration and focus command dispatch ([5987f81](https://github.com/chulit/sonar-agent/commit/5987f81319d3ef3068745a45139855e5936eddba))
 
 # 1.0.0 (2026-09-20)
 
