@@ -248,3 +248,224 @@ describe('SonarOverviewViewProvider - Webview Lifecycle & CSP', () => {
     expect(postedMessages.some((m) => m.type === 'disconnected')).toBe(false);
   });
 });
+
+describe('SonarOverviewViewProvider - Profile Switcher UI', () => {
+  let mockSecrets: Record<string, string>;
+  let mockStore: Record<string, any>;
+  let detector: ProjectDetector;
+  let provider: SonarOverviewViewProvider;
+  let mockWebviewView: any;
+  let messageCallback: ((msg: any) => Promise<void>) | undefined;
+  let postedMessages: any[] = [];
+
+  const overviewStub = {
+    security: { count: 0, rating: 'A' },
+    reliability: { count: 0, rating: 'A' },
+    maintainability: { count: 0, rating: 'A' },
+    acceptedIssues: { count: 0 },
+    coverage: { percentage: 80, linesToCover: 100 },
+    duplications: { percentage: 1, duplicatedLines: 10 },
+    securityHotspots: { count: 0, rating: 'A' },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    postedMessages = [];
+    mockSecrets = {};
+    mockStore = {};
+    detector = new ProjectDetector({
+      secretStorage: {
+        get: async (key: string) => mockSecrets[key],
+        store: async (key: string, value: string) => {
+          mockSecrets[key] = value;
+        },
+        delete: async (key: string) => {
+          delete mockSecrets[key];
+        },
+      },
+      workspaceConfig: {
+        get: (key: string, defaultValue?: any) => mockStore[key] ?? defaultValue,
+        update: async (key: string, value: any) => {
+          mockStore[key] = value;
+        },
+      },
+    });
+    provider = new SonarOverviewViewProvider({ fsPath: '/extension' } as any, detector);
+    mockWebviewView = {
+      visible: true,
+      webview: {
+        options: {},
+        html: '',
+        postMessage: vi.fn(async (msg: any) => {
+          postedMessages.push(msg);
+          return true;
+        }),
+        onDidReceiveMessage: vi.fn((cb: any) => {
+          messageCallback = cb;
+          return { dispose: vi.fn() };
+        }),
+      },
+      onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+    };
+    vi.spyOn(SonarClient.prototype, 'fetchProjects').mockResolvedValue([]);
+    vi.spyOn(SonarClient.prototype, 'getOverview').mockResolvedValue(overviewStub as any);
+  });
+
+  it('should render profile switcher select and no-profiles empty state in webview html', () => {
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    expect(mockWebviewView.webview.html).toContain('id="profile-switcher"');
+    expect(mockWebviewView.webview.html).toContain('id="no-profiles-view"');
+  });
+
+  it('should post no-profiles state when no profiles and no legacy config exist', async () => {
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    postedMessages = [];
+    if (messageCallback) {
+      await messageCallback({ command: 'init' });
+    }
+    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(
+      true,
+    );
+  });
+
+  it('should switch the active binding via switchProfile message', async () => {
+    await detector.createProfile({
+      name: 'Alpha',
+      serverUrl: 'http://a:9000',
+      projectKey: 'a:key',
+      token: 'tok-alpha',
+    });
+    await detector.createProfile({
+      name: 'Beta',
+      serverUrl: 'http://b:9000',
+      projectKey: 'b:key',
+      token: 'tok-beta',
+    });
+    await detector.activateProfile('alpha');
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    postedMessages = [];
+
+    if (messageCallback) {
+      await messageCallback({ command: 'switchProfile', profileId: 'beta' });
+    }
+
+    expect((await detector.getConfig()).projectKey).toBe('b:key');
+    expect(await detector.getToken()).toBe('tok-beta');
+    expect(
+      postedMessages.some(
+        (m) => m.type === 'state' && m.state === 'connected' && m.projectKey === 'b:key',
+      ),
+    ).toBe(true);
+  });
+
+  it('should keep the previous active profile when switching to an unknown id', async () => {
+    await detector.createProfile({
+      name: 'Alpha',
+      serverUrl: 'http://a:9000',
+      projectKey: 'a:key',
+      token: 'tok-alpha',
+    });
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    postedMessages = [];
+
+    if (messageCallback) {
+      await messageCallback({ command: 'switchProfile', profileId: 'nope' });
+    }
+
+    expect((await detector.getConfig()).projectKey).toBe('a:key');
+    expect(postedMessages.some((m) => m.type === 'error')).toBe(true);
+  });
+
+  it('should preserve the active profile when credential verification fails', async () => {
+    await detector.createProfile({
+      name: 'Alpha',
+      serverUrl: 'http://a:9000',
+      projectKey: 'a:key',
+      token: 'tok-alpha',
+    });
+    const vscode = await import('vscode');
+    vi.spyOn(vscode.window, 'showInputBox')
+      .mockResolvedValueOnce('http://evil:9000')
+      .mockResolvedValueOnce('bad-token');
+    vi.spyOn(SonarClient.prototype, 'verifyConnection').mockResolvedValue({
+      ok: false,
+      message: 'HTTP 401 Unauthorized',
+    });
+    vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue('Cancel' as any);
+
+    await provider.promptUpdateCredentials();
+
+    expect((await detector.getConfig()).serverUrl).toBe('http://a:9000');
+    expect(await detector.getToken()).toBe('tok-alpha');
+  });
+
+  it('should land in no-profiles empty state after deleting the active profile', async () => {    const created = await detector.createProfile({
+      name: 'Solo',
+      serverUrl: 'http://solo:9000',
+      projectKey: 'solo:key',
+      token: 'tok-solo',
+    });
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    await detector.deleteProfile(created.id);
+    expect(mockSecrets['sonarAgent.token.solo']).toBeUndefined();
+    postedMessages = [];
+
+    if (messageCallback) {
+      await messageCallback({ command: 'refresh' });
+    }
+
+    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(
+      true,
+    );
+  });
+
+  it('should delete the active profile through the manage menu and land in no-profiles', async () => {
+    await detector.createProfile({
+      name: 'Solo',
+      serverUrl: 'http://solo:9000',
+      projectKey: 'solo:key',
+      token: 'tok-solo',
+    });
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    const vscode = await import('vscode');
+    vi.spyOn(vscode.window, 'showQuickPick')
+      .mockResolvedValueOnce({ label: 'Delete Profile...', action: 'deleteProfile' } as any)
+      .mockResolvedValueOnce({ label: 'Solo', description: 'solo' } as any);
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Delete' as any);
+    postedMessages = [];
+
+    await provider.promptManageProfiles();
+
+    expect(await detector.listProfiles()).toHaveLength(0);
+    expect(mockSecrets['sonarAgent.token.solo']).toBeUndefined();
+    expect(postedMessages.some((m) => m.type === 'state' && m.state === 'no-profiles')).toBe(
+      true,
+    );
+  });
+
+  it('should include profile management entries in the configure menu', async () => {
+    await detector.createProfile({
+      name: 'Alpha',
+      serverUrl: 'http://a:9000',
+      projectKey: 'a:key',
+      token: 'tok-alpha',
+    });
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    const vscode = await import('vscode');
+    let captured: any[] = [];
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(async (items: any) => {
+      captured = items;
+      return undefined;
+    });
+
+    await provider.promptConfigureConnection();
+
+    const actions = captured.map((i) => i.action);
+    expect(actions).toContain('switchProfile');
+    expect(actions).toContain('newProfile');
+    expect(actions).toContain('renameProfile');
+    expect(actions).toContain('deleteProfile');
+    expect(actions).toContain('verifyConnection');
+    expect(actions).toContain('updateCredentials');
+  });
+});

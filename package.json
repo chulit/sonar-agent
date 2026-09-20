@@ -75,6 +75,10 @@
         "icon": "$(gear)"
       },
       {
+        "command": "sonarAgent.profile.manage",
+        "title": "Manage Connection Profiles"
+      },
+      {
         "command": "sonarAgent.resetConnection",
         "title": "Disconnect & Reset Credentials"
       },

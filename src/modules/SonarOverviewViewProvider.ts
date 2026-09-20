@@ -5,6 +5,13 @@ import { FileNavigator } from './FileNavigator.js';
 import { AgentDispatcher } from './AgentDispatcher.js';
 import { Logger } from './Logger.js';
 
+type ProfileAction =
+  | 'switchProfile'
+  | 'newProfile'
+  | 'renameProfile'
+  | 'deleteProfile'
+  | 'verifyConnection';
+
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'sonarAgent.overviewView';
   private _view?: vscode.WebviewView;
@@ -79,6 +86,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
               await this.projectDetector.setProjectKey(message.projectKey);
               await this._syncState();
             }
+            break;
+          }
+          case 'switchProfile': {
+            await this._handleSwitchProfile(message.profileId);
+            break;
+          }
+          case 'createProfile': {
+            await this.promptCreateProfile();
             break;
           }
           case 'openProjectPicker': {
@@ -198,7 +213,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const isConnected = Boolean(config.serverUrl && token);
 
     interface ConfigQuickPickItem extends vscode.QuickPickItem {
-      action: 'updateCredentials' | 'selectProject' | 'openSettings' | 'showLogs' | 'disconnect';
+      action:
+        | 'updateCredentials'
+        | 'selectProject'
+        | 'openSettings'
+        | 'showLogs'
+        | 'disconnect'
+        | ProfileAction;
     }
 
     const items: ConfigQuickPickItem[] = [
@@ -238,6 +259,34 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       });
     }
 
+    if (this.profilesCapable()) {
+      items.splice(2, 0, {
+        label: '$(arrow-swap) Switch Connection Profile',
+        detail: 'Activate a different server + project + token binding',
+        action: 'switchProfile',
+      });
+      items.splice(3, 0, {
+        label: '$(add) New Connection Profile...',
+        detail: 'Create a named server + project binding with live verification',
+        action: 'newProfile',
+      });
+      items.splice(4, 0, {
+        label: '$(edit) Rename Connection Profile...',
+        detail: 'Rename a stored connection profile',
+        action: 'renameProfile',
+      });
+      items.splice(5, 0, {
+        label: '$(trash) Delete Connection Profile...',
+        detail: 'Remove a profile and delete its token from the OS Keychain',
+        action: 'deleteProfile',
+      });
+      items.splice(6, 0, {
+        label: '$(check) Verify Active Connection',
+        detail: 'Live-check the active profile against the SonarQube server',
+        action: 'verifyConnection',
+      });
+    }
+
     const selected = await vscode.window.showQuickPick(items, {
       placeHolder: 'Sonar Agent: Configure Connection & Settings',
       matchOnDescription: true,
@@ -254,6 +303,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'selectProject':
         await this.promptProjectSelection();
+        break;
+      case 'switchProfile':
+      case 'newProfile':
+      case 'renameProfile':
+      case 'deleteProfile':
+      case 'verifyConnection':
+        await this.runProfileAction(selected.action);
         break;
       case 'openSettings':
         await vscode.commands.executeCommand(
@@ -282,24 +338,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         placeHolder: 'http://localhost:9000 or https://sonar.example.com',
         value: currentUrl,
         ignoreFocusOut: true,
-        validateInput: (value) => {
-          const trimmed = value.trim();
-          if (!trimmed) {
-            return 'Server URL is required';
-          }
-          if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-            return 'Server URL must start with http:// or https://';
-          }
-          try {
-            const parsed = new URL(trimmed);
-            if (!parsed.hostname) {
-              return 'Please enter a valid URL with hostname';
-            }
-          } catch {
-            return 'Please enter a valid URL';
-          }
-          return null;
-        },
+        validateInput: (value) => this.validateServerUrlInput(value),
       });
 
       if (serverUrl === undefined) {
@@ -365,6 +404,261 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         await this.promptProjectSelection();
       }
 
+      await this.refresh();
+      return;
+    }
+  }
+
+  private validateServerUrlInput(value: string): string | null {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return 'Server URL is required';
+    }
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      return 'Server URL must start with http:// or https://';
+    }
+    try {
+      const parsed = new URL(trimmed);
+      if (!parsed.hostname) {
+        return 'Please enter a valid URL with hostname';
+      }
+    } catch {
+      return 'Please enter a valid URL';
+    }
+    return null;
+  }
+
+  public async promptManageProfiles(): Promise<void> {
+    const items: (vscode.QuickPickItem & { action: ProfileAction })[] = [
+      { label: '$(arrow-swap) Switch Profile', action: 'switchProfile' },
+      { label: '$(add) New Profile...', action: 'newProfile' },
+      { label: '$(edit) Rename Profile...', action: 'renameProfile' },
+      { label: '$(trash) Delete Profile...', action: 'deleteProfile' },
+      { label: '$(check) Verify Active Connection', action: 'verifyConnection' },
+    ];
+    const selected = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Sonar Agent: Manage Connection Profiles',
+    });
+    if (!selected) {
+      return;
+    }
+    await this.runProfileAction(selected.action);
+  }
+
+  private async runProfileAction(action: ProfileAction): Promise<void> {
+    switch (action) {
+      case 'switchProfile': {
+        const picked = await this.pickProfile('Select the connection profile to activate');
+        if (!picked) {
+          return;
+        }
+        try {
+          await this.projectDetector.activateProfile(picked.id);
+        } catch (err: any) {
+          vscode.window.showErrorMessage(
+            err?.message || `Unknown connection profile: ${picked.id}`,
+          );
+          return;
+        }
+        vscode.window.showInformationMessage(`Active connection profile: ${picked.name}`);
+        await this.refresh();
+        break;
+      }
+      case 'newProfile':
+        await this.promptCreateProfile();
+        break;
+      case 'renameProfile': {
+        const picked = await this.pickProfile('Select the connection profile to rename');
+        if (!picked) {
+          return;
+        }
+        const name = await vscode.window.showInputBox({
+          prompt: `New name for profile "${picked.name}"`,
+          value: picked.name,
+          ignoreFocusOut: true,
+          validateInput: (value) => (!value.trim() ? 'Profile name is required' : null),
+        });
+        if (name === undefined || !name.trim()) {
+          return;
+        }
+        await this.projectDetector.renameProfile(picked.id, name.trim());
+        await this.refresh();
+        break;
+      }
+      case 'deleteProfile': {
+        const picked = await this.pickProfile('Select the connection profile to delete');
+        if (!picked) {
+          return;
+        }
+        const confirm = await vscode.window.showWarningMessage(
+          `Delete connection profile "${picked.name}" and its stored token?`,
+          { modal: true },
+          'Delete',
+        );
+        if (confirm !== 'Delete') {
+          return;
+        }
+        await this.projectDetector.deleteProfile(picked.id);
+        vscode.window.showInformationMessage(
+          `Connection profile "${picked.name}" deleted. Create a profile to reconnect.`,
+        );
+        await this.refresh();
+        break;
+      }
+      case 'verifyConnection': {
+        const binding = await this.projectDetector.getConfig();
+        const bindingToken = await this.projectDetector.getToken();
+        if (!binding.serverUrl || !bindingToken) {
+          vscode.window.showWarningMessage('No active connection profile to verify.');
+          return;
+        }
+        let result: { ok: boolean; message?: string } = { ok: false };
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Verifying SonarQube connection...',
+            cancellable: false,
+          },
+          async () => {
+            result = await new SonarClient({
+              serverUrl: binding.serverUrl,
+              token: bindingToken,
+            }).verifyConnection();
+          },
+        );
+        if (result.ok) {
+          vscode.window.showInformationMessage('SonarQube connection verified.');
+        } else {
+          vscode.window.showErrorMessage(
+            `SonarQube connection verification failed: ${result.message || 'Unknown error'}`,
+          );
+        }
+        break;
+      }
+    }
+  }
+
+  private async pickProfile(
+    placeHolder: string,
+  ): Promise<{ id: string; name: string } | undefined> {
+    const profiles = await this.projectDetector.listProfiles();
+    if (profiles.length === 0) {
+      vscode.window.showInformationMessage('No connection profiles yet. Create one first.');
+      return undefined;
+    }
+    const picked = await vscode.window.showQuickPick(
+      profiles.map((p) => ({
+        label: p.name,
+        description: p.id,
+        detail: `${p.serverUrl} · ${p.projectKey}`,
+      })),
+      { placeHolder, matchOnDescription: true, matchOnDetail: true },
+    );
+    return picked ? profiles.find((p) => p.id === picked.description) : undefined;
+  }
+
+  public async promptCreateProfile(): Promise<void> {
+    const suggested = await this.projectDetector.detectWorkspaceProperties();
+    let currentName = '';
+    let currentUrl = suggested?.serverUrl ?? 'http://localhost:9000';
+    let currentToken = '';
+    let currentKey = suggested?.projectKey ?? '';
+
+    while (true) {
+      const name = await vscode.window.showInputBox({
+        title: 'New Connection Profile (1/4)',
+        prompt: 'Name this profile (e.g. kantor-prod)',
+        value: currentName,
+        ignoreFocusOut: true,
+        validateInput: (value) => (!value.trim() ? 'Profile name is required' : null),
+      });
+      if (name === undefined) {
+        return;
+      }
+      currentName = name.trim();
+
+      const serverUrl = await vscode.window.showInputBox({
+        title: 'New Connection Profile (2/4)',
+        prompt: 'Enter the SonarQube Server URL',
+        placeHolder: 'http://localhost:9000 or https://sonar.example.com',
+        value: currentUrl,
+        ignoreFocusOut: true,
+        validateInput: (value) => this.validateServerUrlInput(value),
+      });
+      if (serverUrl === undefined) {
+        return;
+      }
+      currentUrl = serverUrl.trim();
+
+      const token = await vscode.window.showInputBox({
+        title: 'New Connection Profile (3/4)',
+        prompt: 'Enter your SonarQube User Token',
+        placeHolder: 'sqp_...',
+        value: currentToken,
+        password: true,
+        ignoreFocusOut: true,
+        validateInput: (value) => (!value.trim() ? 'User Token is required' : null),
+      });
+      if (token === undefined) {
+        return;
+      }
+      currentToken = token.trim();
+
+      const projectKey = await vscode.window.showInputBox({
+        title: 'New Connection Profile (4/4)',
+        prompt: 'Enter the SonarQube Project Key (optional, pick later)',
+        value: currentKey,
+        ignoreFocusOut: true,
+      });
+      if (projectKey === undefined) {
+        return;
+      }
+      currentKey = projectKey.trim();
+
+      let verificationResult: { ok: boolean; message?: string } = { ok: false };
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Verifying SonarQube connection...',
+          cancellable: false,
+        },
+        async () => {
+          verificationResult = await new SonarClient({
+            serverUrl: currentUrl,
+            token: currentToken,
+          }).verifyConnection();
+        },
+      );
+
+      if (!verificationResult.ok) {
+        const action = await vscode.window.showErrorMessage(
+          `SonarQube connection verification failed: ${verificationResult.message || 'Unknown error'}`,
+          'Retry',
+          'Cancel',
+        );
+        if (action === 'Retry') {
+          continue;
+        }
+        return;
+      }
+
+      const created = await this.projectDetector.createProfile({
+        name: currentName,
+        serverUrl: currentUrl,
+        projectKey: currentKey,
+        token: currentToken,
+      });
+      if (suggested?.hasPlaintextCredentials) {
+        vscode.window.showWarningMessage(
+          'sonar-project.properties contains plaintext credentials. They were not imported; remove them to avoid leaking secrets.',
+        );
+      }
+      vscode.window.showInformationMessage(
+        `Connection profile "${created.name}" created and activated.`,
+      );
+      if (!created.projectKey) {
+        await this.promptProjectSelection();
+      }
       await this.refresh();
       return;
     }
@@ -497,6 +791,26 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async _handleSwitchProfile(profileId: string): Promise<void> {
+    try {
+      await this.projectDetector.activateProfile(profileId);
+    } catch (err: any) {
+      this._view?.webview.postMessage({
+        type: 'error',
+        message: err?.message || `Unknown connection profile: ${profileId}`,
+      });
+      return;
+    }
+    await this._syncState();
+  }
+
+  private profilesCapable(): boolean {
+    return (
+      typeof (this.projectDetector as unknown as { listProfiles?: unknown }).listProfiles ===
+      'function'
+    );
+  }
+
   private async _syncState(): Promise<void> {
     if (!this._view) {
       return;
@@ -515,9 +829,31 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         effectiveDefaultAgent = availableAgents[0]?.id || 'clipboard';
       }
 
+      const profiles = this.profilesCapable()
+        ? await this.projectDetector.listProfiles()
+        : [];
+      const activeProfile = this.profilesCapable()
+        ? await this.projectDetector.getActiveProfile()
+        : null;
+
       Logger.info(
         `[Host] _syncState: serverUrl=${config.serverUrl}, hasToken=${config.hasToken}, tokenPresent=${Boolean(token)}`,
       );
+
+      if (this.profilesCapable() && profiles.length === 0 && !config.serverUrl && !token) {
+        const noProfilesState = {
+          type: 'state',
+          state: 'no-profiles',
+          serverUrl: 'http://localhost:9000',
+          profiles,
+          activeProfileId: activeProfile?.id,
+          defaultAgent: effectiveDefaultAgent,
+          availableAgents,
+        };
+        this._lastStateMessage = noProfilesState;
+        await this._view.webview.postMessage(noProfilesState);
+        return;
+      }
 
       if (config.serverUrl && config.hasToken && token) {
         const immediateState = {
@@ -528,6 +864,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           detectedFromProperties: config.detectedFromProperties ?? false,
           hasPlaintextWarning: config.hasPlaintextCredentialsWarning ?? false,
           projects: [],
+          profiles,
+          activeProfileId: activeProfile?.id,
           defaultAgent: effectiveDefaultAgent,
           availableAgents,
         };
@@ -601,6 +939,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           projects,
           overview,
           overviewError,
+          profiles,
+          activeProfileId: activeProfile?.id,
           defaultAgent: effectiveDefaultAgent,
           availableAgents,
         };
@@ -622,6 +962,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           type: 'state',
           state: 'onboarding',
           serverUrl: config.serverUrl || 'http://localhost:9000',
+          profiles,
+          activeProfileId: activeProfile?.id,
           defaultAgent: effectiveDefaultAgent,
           availableAgents,
         };
@@ -1418,6 +1760,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         <h2>Sonar Agent</h2>
       </div>
       <div class="header-actions">
+        <select id="profile-switcher" class="hidden" title="Connection profile" style="max-width: 140px; font-size: 11px; padding: 2px 4px;"></select>
         <button id="header-refresh-btn" class="icon-btn" title="Refresh measures">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A7.958 7.958 0 0 0 8 0a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.76-4.24l-2.24 2.24h6V0l-2.35 2.35z"/></svg>
         </button>
@@ -1446,6 +1789,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       </div>
 
       <button id="connect-btn" class="btn">Connect & Verify</button>
+    </div>
+
+    <!-- No Profiles Empty State -->
+    <div id="no-profiles-view" class="card hidden">
+      <p style="font-size: 12px; line-height: 1.4; color: var(--vscode-descriptionForeground);">
+        No connection profiles yet. Create one to connect to SonarQube and monitor Overall Code quality.
+      </p>
+      <button id="create-profile-btn" class="btn">New Connection Profile</button>
     </div>
 
     <!-- Connected Dashboard View -->
@@ -1738,6 +2089,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const manualProjectItem = document.getElementById("manual-project-item");
     const targetAgentDropdown = document.getElementById("target-agent-dropdown");
     const detectedBadge = document.getElementById("detected-badge");
+    const profileSwitcher = document.getElementById("profile-switcher");
+    const noProfilesView = document.getElementById("no-profiles-view");
+    const createProfileBtn = document.getElementById("create-profile-btn");
 
     let cachedProjects = [];
     let currentSelectedProjectKey = "";
@@ -2279,6 +2633,33 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
+    profileSwitcher.addEventListener("change", () => {
+      vscode.postMessage({ command: "switchProfile", profileId: profileSwitcher.value });
+    });
+
+    createProfileBtn.addEventListener("click", () => {
+      vscode.postMessage({ command: "createProfile" });
+    });
+
+    function renderProfileSwitcher(profiles, activeProfileId) {
+      if (!profiles || !Array.isArray(profiles) || profiles.length === 0) {
+        profileSwitcher.classList.add("hidden");
+        return;
+      }
+      profileSwitcher.classList.remove("hidden");
+      profileSwitcher.innerHTML = "";
+      profiles.forEach((p) => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name + " · " + p.serverUrl + " · " + p.projectKey;
+        opt.title = p.name + " · " + p.serverUrl + " · " + p.projectKey;
+        profileSwitcher.appendChild(opt);
+      });
+      if (activeProfileId) {
+        profileSwitcher.value = activeProfileId;
+      }
+    }
+
     window.addEventListener("message", (event) => {
       const message = event.data;
       try {
@@ -2311,7 +2692,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           if (message.state === "connected") {
             headerDisconnectBtn.classList.remove("hidden");
             onboardingView.classList.add("hidden");
+            noProfilesView.classList.add("hidden");
             connectedView.classList.remove("hidden");
+            renderProfileSwitcher(message.profiles, message.activeProfileId);
 
             if (message.availableAgents && Array.isArray(message.availableAgents)) {
               targetAgentDropdown.innerHTML = "";
@@ -2363,10 +2746,18 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
                 renderOverview(message.overview);
               }
             }
+          } else if (message.state === "no-profiles") {
+            headerDisconnectBtn.classList.add("hidden");
+            connectedView.classList.add("hidden");
+            onboardingView.classList.add("hidden");
+            noProfilesView.classList.remove("hidden");
+            renderProfileSwitcher(message.profiles, message.activeProfileId);
           } else {
             headerDisconnectBtn.classList.add("hidden");
             connectedView.classList.add("hidden");
+            noProfilesView.classList.add("hidden");
             onboardingView.classList.remove("hidden");
+            renderProfileSwitcher(message.profiles, message.activeProfileId);
             if (message.serverUrl && !serverUrlInput.value) {
               serverUrlInput.value = message.serverUrl;
             }
