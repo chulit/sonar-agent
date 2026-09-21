@@ -1,3 +1,17 @@
+# [1.2.0](https://github.com/chulit/sonar-agent/compare/v1.1.0...v1.2.0) (2026-09-21)
+
+
+### Bug Fixes
+
+* **dispatcher:** direct Antigravity dispatch to extension panel and prevent Copilot hijacking ([6ea2bdb](https://github.com/chulit/sonar-agent/commit/6ea2bdba3b330eac0c88fed7b44f90dacdd39b5d))
+* **dispatcher:** support Codex extension API dispatch and avoid attaching open file ([c1f29cd](https://github.com/chulit/sonar-agent/commit/c1f29cdf666191370fe79a013bc78714c1039a33))
+
+
+### Features
+
+* **agent-dispatch:** kirim prompt dan konteks ke claude code ([8cf66ed](https://github.com/chulit/sonar-agent/commit/8cf66ede65d4a6862abef684acbeaac94225d2ac))
+* **dispatcher:** integrate google.google-antigravity extension discovery and dispatch ([30582db](https://github.com/chulit/sonar-agent/commit/30582dba3d51456d788d9d8d1492987f6063a398))
+
 # [1.1.0](https://github.com/chulit/sonar-agent/compare/v1.0.0...v1.1.0) (2026-09-20)
 
 ### Bug Fixes
