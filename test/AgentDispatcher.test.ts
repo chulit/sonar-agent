@@ -280,9 +280,96 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     const res = await dispatcher.dispatch('prompt content', 'codex', sampleItem);
     expect(res.ok).toBe(true);
     expect(executedCommands).toContain('chatgpt.openSidebar');
-    expect(executedCommands).toContain('chatgpt.addToThread');
+    expect(executedCommands).not.toContain('chatgpt.addToThread');
     expect(openFileAtLine).toHaveBeenCalledWith('src/App.vue', 42);
     expect(res.message).toContain('Codex Agent');
+  });
+
+  it('should dispatch to Codex via API when sendMessage is exported by extension', async () => {
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+    const sendMessageMock = vi.fn().mockResolvedValue(undefined);
+    const activateMock = vi.fn().mockResolvedValue(undefined);
+
+    const mockExtension = {
+      isActive: false,
+      activate: activateMock,
+      exports: {
+        sendMessage: sendMessageMock,
+      },
+    } as unknown as vscode.Extension<unknown>;
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      isExtensionInstalledFn: (id) => id === 'openai.chatgpt',
+      getExtensionFn: (id) => (id === 'openai.chatgpt' ? mockExtension : undefined),
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'codex', sampleItem);
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Dispatched to Codex via API.');
+    expect(activateMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'prompt content',
+      }),
+    );
+    expect(openFileAtLine).toHaveBeenCalledWith('src/App.vue', 42);
+  });
+
+  it('should dispatch to Codex via API when sendPrompt is exported by extension', async () => {
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+    const sendPromptMock = vi.fn().mockResolvedValue(undefined);
+
+    const mockExtension = {
+      isActive: true,
+      activate: vi.fn(),
+      exports: {
+        sendPrompt: sendPromptMock,
+      },
+    } as unknown as vscode.Extension<unknown>;
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      isExtensionInstalledFn: (id) => id === 'openai.chatgpt',
+      getExtensionFn: (id) => (id === 'openai.chatgpt' ? mockExtension : undefined),
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'codex', sampleItem);
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Dispatched to Codex via API.');
+    expect(sendPromptMock).toHaveBeenCalledWith('prompt content');
+  });
+
+  it('should fall back to sidebar commands if Codex API call fails', async () => {
+    const executedCommands: string[] = [];
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+
+    const mockExtension = {
+      isActive: true,
+      activate: vi.fn(),
+      exports: {
+        sendMessage: vi.fn().mockRejectedValue(new Error('API failed')),
+      },
+    } as unknown as vscode.Extension<unknown>;
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      isExtensionInstalledFn: (id) => id === 'openai.chatgpt',
+      getExtensionFn: (id) => (id === 'openai.chatgpt' ? mockExtension : undefined),
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'codex', sampleItem);
+    expect(res.ok).toBe(true);
+    expect(executedCommands).toContain('chatgpt.openSidebar');
+    expect(executedCommands).not.toContain('chatgpt.addToThread');
+    expect(res.message).toBe('Prompt ready in clipboard for Codex Agent.');
   });
 
   it('should dispatch directly to Antigravity chat when chat open command succeeds', async () => {

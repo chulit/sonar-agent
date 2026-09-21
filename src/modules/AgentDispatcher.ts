@@ -23,6 +23,7 @@ export interface AgentDispatcherOptions {
   fetchRuleFn?: (ruleKey: string) => Promise<SonarRuleDoc>;
   readCodeSnippetFn?: (filePath: string, line?: number) => Promise<CodeSnippetContext | null>;
   isExtensionInstalledFn?: (extensionId: string) => boolean;
+  getExtensionFn?: (extensionId: string) => vscode.Extension<unknown> | undefined;
   isAntigravityEnvFn?: () => boolean;
   executeCommandFn?: (command: string, ...args: unknown[]) => Thenable<unknown> | Promise<unknown>;
   sendToAgentPanelFn?: (options: SendToAgentPanelOptions) => Thenable<void> | Promise<void>;
@@ -57,6 +58,7 @@ export class AgentDispatcher {
     line?: number,
   ) => Promise<CodeSnippetContext | null>;
   private readonly isExtensionInstalledFn: (extensionId: string) => boolean;
+  private readonly getExtensionFn: (extensionId: string) => vscode.Extension<unknown> | undefined;
   private readonly isAntigravityEnvFn: () => boolean;
   private readonly executeCommandFn: (
     command: string,
@@ -98,6 +100,15 @@ export class AgentDispatcher {
           return !!vscode.extensions.getExtension(id);
         } catch {
           return false;
+        }
+      });
+    this.getExtensionFn =
+      options?.getExtensionFn ??
+      ((id: string) => {
+        try {
+          return vscode.extensions.getExtension(id);
+        } catch {
+          return undefined;
         }
       });
     this.isAntigravityEnvFn =
@@ -565,6 +576,75 @@ export class AgentDispatcher {
     return { ok: true, message: 'Prompt ready in clipboard for Antigravity Agent.' };
   }
 
+  private async dispatchCodex(prompt: string): Promise<{ ok: boolean; message: string }> {
+    const candidateExtensionIds = ['openai.chatgpt', 'openai.openai-chatgpt', 'codex.codex'];
+    let codexExt: vscode.Extension<unknown> | undefined;
+
+    for (const id of candidateExtensionIds) {
+      const ext = this.getExtensionFn(id);
+      if (ext) {
+        codexExt = ext;
+        break;
+      }
+    }
+
+    if (codexExt) {
+      if (!codexExt.isActive) {
+        try {
+          await codexExt.activate();
+        } catch {
+          // Continue if activation fails
+        }
+      }
+
+      // Tier 1: Check exported API (sendMessage or sendPrompt)
+      const api = codexExt.exports as
+        | {
+            sendMessage?: (options: { text: string; prompt?: string }) => unknown;
+            sendPrompt?: (prompt: string) => unknown;
+          }
+        | undefined;
+
+      if (api && typeof api.sendMessage === 'function') {
+        try {
+          await api.sendMessage({
+            text: prompt,
+            prompt,
+          });
+          vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
+          return { ok: true, message: 'Dispatched to Codex via API.' };
+        } catch {
+          // Fall back if API invocation fails
+        }
+      } else if (api && typeof api.sendPrompt === 'function') {
+        try {
+          await api.sendPrompt(prompt);
+          vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
+          return { ok: true, message: 'Dispatched to Codex via API.' };
+        } catch {
+          // Fall back if API invocation fails
+        }
+      }
+    }
+
+    // Tier 2: Open and focus Codex sidebar & input
+    const codexCommands = ['chatgpt.openSidebar', 'chatgpt.focus', 'codex.chat.focus'];
+    for (const cmd of codexCommands) {
+      try {
+        await this.executeCommandFn(cmd);
+        break;
+      } catch {
+        // continue trying next command
+      }
+    }
+
+    // Tier 3: Clipboard fallback
+    vscode.window.showInformationMessage(
+      'Fix Prompt copied to clipboard for Codex Agent! Press Cmd+V / Ctrl+V to paste.',
+    );
+    return { ok: true, message: 'Prompt ready in clipboard for Codex Agent.' };
+  }
+
   private async focusTargetAgent(targetAgentId: string, matchedAgent?: TargetAgent): Promise<void> {
     if (targetAgentId === 'claude-code') {
       const claudeCommands = [
@@ -581,15 +661,10 @@ export class AgentDispatcher {
         }
       }
     } else if (targetAgentId === 'codex') {
-      const codexCommands = ['chatgpt.openSidebar'];
+      const codexCommands = ['chatgpt.openSidebar', 'chatgpt.focus'];
       for (const cmd of codexCommands) {
         try {
           await this.executeCommandFn(cmd);
-          try {
-            await this.executeCommandFn('chatgpt.addToThread');
-          } catch {
-            // The Codex extension may not have an active editor selection.
-          }
           break;
         } catch {
           // continue trying next command
@@ -644,6 +719,10 @@ export class AgentDispatcher {
       } catch {
         // The Claude Code prompt command is unavailable in older extension versions.
       }
+    }
+
+    if (targetAgentId === 'codex') {
+      return this.dispatchCodex(prompt);
     }
 
     const matchedAgent = this.getAvailableAgents().find((a) => a.id === targetAgentId);
