@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/chulit/sonar-agent/compare/v1.2.0...v1.3.0) (2026-09-22)
+
+
+### Features
+
+* **ui:** add Select All master checkbox to issue lists ([9475713](https://github.com/chulit/sonar-agent/commit/947571321e5a18b377b3ebc3d02b8a189bb46a53))
+
 # [1.2.0](https://github.com/chulit/sonar-agent/compare/v1.1.0...v1.2.0) (2026-09-21)
 
 
