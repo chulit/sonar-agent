@@ -1335,6 +1335,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       align-items: center;
     }
 
+    .section-title-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     /* Filter Bar */
     .filter-bar {
       display: flex;
@@ -1828,7 +1834,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       <div id="issues-section" class="issues-section hidden">
         <div class="section-title">
           <span id="issues-list-title">Issues</span>
-          <span id="issues-list-count" class="source-badge">0 items</span>
+          <div class="section-title-actions">
+            <span id="issues-list-count" class="source-badge">0 items</span>
+            <label class="filter-checkbox-label" title="Select all visible issues">
+              <input type="checkbox" id="select-all-checkbox" />
+              <span>Select All</span>
+            </label>
+          </div>
         </div>
 
         <!-- Filter Bar -->
@@ -1897,7 +1909,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           ? `<div id="current-tab-panel" class="hidden" style="display: flex; flex-direction: column; gap: 8px;">
         <div class="current-subbar">
           <span id="current-source-label">Source: SonarLint (Live)</span>
-          <button id="run-full-scan-btn" class="btn btn-secondary btn-sm">Run Full Scan</button>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="filter-checkbox-label" title="Select all current issues">
+              <input type="checkbox" id="current-select-all-checkbox" />
+              <span>Select All</span>
+            </label>
+            <button id="run-full-scan-btn" class="btn btn-secondary btn-sm">Run Full Scan</button>
+          </div>
         </div>
         <div id="current-loading" class="loading-overlay hidden">
           <div class="spinner"></div>
@@ -1979,6 +1997,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const selectedCountLabel = document.getElementById("selected-count-label");
     const sendBatchBtn = document.getElementById("send-batch-btn");
     const deselectAllBtn = document.getElementById("deselect-all-btn");
+    const selectAllCheckbox = document.getElementById("select-all-checkbox");
 
     const filterSeverity = document.getElementById("filter-severity");
     const filterAuthor = document.getElementById("filter-author");
@@ -2173,6 +2192,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       } else {
         batchActionBar.classList.add("hidden");
       }
+      syncSelectAllState();
+    }
+
+    function syncSelectAllState() {
+      if (!selectAllCheckbox) return;
+      const visibleIds = currentItems.map((i) => i.id);
+      const selectedVisible = visibleIds.filter((id) => selectedItemIds.has(id)).length;
+      selectAllCheckbox.disabled = visibleIds.length === 0;
+      selectAllCheckbox.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+      selectAllCheckbox.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
     }
 
     function renderOverview(overview) {
@@ -2463,6 +2492,20 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       updateBatchBar();
     });
 
+    selectAllCheckbox.addEventListener("change", () => {
+      currentItems.forEach((item) => {
+        if (selectAllCheckbox.checked) {
+          selectedItemIds.add(item.id);
+        } else {
+          selectedItemIds.delete(item.id);
+        }
+      });
+      document.querySelectorAll(".issue-checkbox").forEach((cb) => {
+        cb.checked = selectAllCheckbox.checked;
+      });
+      updateBatchBar();
+    });
+
     // ---- Current Code tab ----
     const tabOverall = document.getElementById("tab-overall");
     const tabCurrent = document.getElementById("tab-current");
@@ -2473,6 +2516,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const currentSelectedCount = document.getElementById("current-selected-count");
     const currentSendBatchBtn = document.getElementById("current-send-batch-btn");
     const currentClearBtn = document.getElementById("current-clear-btn");
+    const currentSelectAllCheckbox = document.getElementById("current-select-all-checkbox");
     const currentLoading = document.getElementById("current-loading");
     const currentError = document.getElementById("current-error");
     const currentEmptySonarlint = document.getElementById("current-empty-sonarlint");
@@ -2514,6 +2558,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       } else {
         currentBatchBar.classList.add("hidden");
       }
+      syncCurrentSelectAllState();
+    }
+
+    function syncCurrentSelectAllState() {
+      if (!currentSelectAllCheckbox) return;
+      const visibleIds = currentCodeItems.map((i) => i.id);
+      const selectedVisible = visibleIds.filter((id) => selectedCurrentIds.has(id)).length;
+      currentSelectAllCheckbox.disabled = visibleIds.length === 0;
+      currentSelectAllCheckbox.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+      currentSelectAllCheckbox.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
     }
 
     function renderCurrentIssueCard(item) {
@@ -2678,6 +2732,21 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         selectedCurrentIds.clear();
         document.querySelectorAll(".current-issue-checkbox").forEach((cb) => {
           cb.checked = false;
+        });
+        updateCurrentBatchBar();
+      });
+    }
+    if (currentSelectAllCheckbox) {
+      currentSelectAllCheckbox.addEventListener("change", () => {
+        currentCodeItems.forEach((item) => {
+          if (currentSelectAllCheckbox.checked) {
+            selectedCurrentIds.add(item.id);
+          } else {
+            selectedCurrentIds.delete(item.id);
+          }
+        });
+        document.querySelectorAll(".current-issue-checkbox").forEach((cb) => {
+          cb.checked = currentSelectAllCheckbox.checked;
         });
         updateCurrentBatchBar();
       });

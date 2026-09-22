@@ -93,6 +93,14 @@ describe('SonarOverviewViewProvider - Webview Lifecycle & CSP', () => {
     expect(html).toContain(`<script nonce="${nonce}">`);
   });
 
+  it('should include master Select All controls for both the Overall Code and Current Code issue lists', () => {
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+
+    const html = mockWebviewView.webview.html;
+    expect(html).toContain('id="select-all-checkbox"');
+    expect(html).toContain('id="current-select-all-checkbox"');
+  });
+
   it('should proactively sync state on resolveWebviewView and when visibility changes', async () => {
     provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
 
