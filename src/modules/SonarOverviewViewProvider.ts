@@ -102,7 +102,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
             break;
           }
           case 'connect': {
-            await this._handleConnect(message.serverUrl, message.token);
+            await this._handleConnect(message.serverUrl, message.token, message.organization);
             break;
           }
           case 'disconnect': {
@@ -380,7 +380,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       if (!config.serverUrl || !config.projectKey || !token) {
         return null;
       }
-      const client = new SonarClient({ serverUrl: config.serverUrl, token });
+      const client = new SonarClient({
+        serverUrl: config.serverUrl,
+        token,
+        organization: config.organization,
+      });
       return await client.getIssues(config.projectKey);
     } catch {
       return null;
@@ -428,7 +432,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     this._view.webview.postMessage({ type: 'loadingDetails', loading: true });
 
     try {
-      const client = new SonarClient({ serverUrl: config.serverUrl, token });
+      const client = new SonarClient({
+        serverUrl: config.serverUrl,
+        token,
+        organization: config.organization,
+      });
       let items: SonarDetailItem[] = [];
 
       if (category === 'hotspots') {
@@ -613,7 +621,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async _syncConnectedState(params: {
-    config: { serverUrl: string; projectKey?: string; hasToken: boolean };
+    config: { serverUrl: string; projectKey?: string; organization?: string; hasToken: boolean };
     token: string;
     profiles: any[];
     activeProfileId?: string;
@@ -639,7 +647,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     await this._view?.webview.postMessage({ type: 'loading', loading: true });
 
-    const client = new SonarClient({ serverUrl: config.serverUrl, token });
+    const client = new SonarClient({
+      serverUrl: config.serverUrl,
+      token,
+      organization: config.organization,
+    });
     const effectiveProjectKey = config.projectKey;
 
     const [projectsResult, initialOverview, initialGate] = await Promise.allSettled([
@@ -792,9 +804,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async _handleConnect(serverUrl: string, token: string): Promise<void> {
+  private async _handleConnect(
+    serverUrl: string,
+    token: string,
+    organization?: string,
+  ): Promise<void> {
     const trimmedToken = (token || '').trim();
     let normalizedUrl = (serverUrl || '').trim();
+    const normalizedOrg = (organization || '').trim() || undefined;
 
     if (!normalizedUrl || !trimmedToken) {
       this._view?.webview.postMessage({
@@ -815,7 +832,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     Logger.info('Verifying SonarQube credentials...');
 
     try {
-      const client = new SonarClient({ serverUrl: normalizedUrl, token: trimmedToken });
+      const client = new SonarClient({
+        serverUrl: normalizedUrl,
+        token: trimmedToken,
+        organization: normalizedOrg,
+      });
       const result = await client.verifyConnection();
 
       if (!result.ok) {
@@ -829,6 +850,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
       await this.projectDetector.setServerUrl(normalizedUrl);
       await this.projectDetector.setToken(trimmedToken);
+      if (normalizedOrg) {
+        await this.projectDetector.setOrganization(normalizedOrg);
+      }
 
       Logger.info('SonarQube connection verified and saved.');
       vscode.window.showInformationMessage('SonarQube connection successfully verified!');
@@ -1790,6 +1814,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         <input type="password" id="user-token" placeholder="Enter SonarQube User Token" spellcheck="false" autocomplete="off" />
       </div>
 
+      <div class="form-group">
+        <label for="org-key">Organization Key <span style="font-weight: normal; opacity: 0.7;">(SonarQube Cloud only)</span></label>
+        <input type="text" id="org-key" placeholder="e.g. my-org (required for sonarcloud.io)" spellcheck="false" autocomplete="off" />
+      </div>
+
       <button id="connect-btn" class="btn">Connect & Verify</button>
     </div>
 
@@ -2146,6 +2175,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     const serverUrlInput = document.getElementById("server-url");
     const userTokenInput = document.getElementById("user-token");
+    const orgKeyInput = document.getElementById("org-key");
     const connectBtn = document.getElementById("connect-btn");
     const projectSearchInput = document.getElementById("project-search-input");
     const projectSearchToggleBtn = document.getElementById("project-search-toggle-btn");
@@ -3014,6 +3044,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         clearAlert();
         const serverUrl = serverUrlInput.value.trim();
         const token = userTokenInput.value.trim();
+        const organization = orgKeyInput.value.trim();
 
         if (!serverUrl || !token) {
           showAlert("Please enter both Server URL and User Token.");
@@ -3022,7 +3053,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
         connectBtn.disabled = true;
         connectBtn.textContent = "Verifying...";
-        vscode.postMessage({ command: "connect", serverUrl, token });
+        vscode.postMessage({ command: "connect", serverUrl, token, organization });
       } catch (err) {
         showAlert("Error initiating connection: " + (err?.message || String(err)));
       }
