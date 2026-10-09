@@ -45,6 +45,22 @@ export interface SonarDetailItem {
   source?: string;
 }
 
+export type QualityGateStatusValue = 'OK' | 'WARN' | 'ERROR' | 'NONE';
+
+export interface QualityGateCondition {
+  status: QualityGateStatusValue;
+  metricKey: string;
+  comparator: string;
+  errorThreshold?: string;
+  warnThreshold?: string;
+  actualValue?: string;
+}
+
+export interface QualityGateStatus {
+  status: 'OK' | 'WARN' | 'ERROR';
+  conditions: QualityGateCondition[];
+}
+
 export class SonarClient {
   private readonly serverUrl: string;
   private readonly token?: string;
@@ -301,6 +317,60 @@ export class SonarClient {
         count: Number.parseInt(measureMap.security_hotspots || '0', 10),
         rating: this.parseRating(measureMap.security_review_rating || '1.0'),
       },
+    };
+  }
+
+  /**
+   * Fetches the Quality Gate status for the given project key.
+   * Returns null when no quality gate is configured (NONE), the endpoint is
+   * unavailable on older servers (404), or the token lacks Browse permission
+   * (403) — the widget hides silently in all these cases and must never
+   * break the existing overview.
+   */
+  async getQualityGateStatus(projectKey: string): Promise<QualityGateStatus | null> {
+    const url = `${this.serverUrl}/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}`;
+    const response = await this.authenticatedFetch(url);
+
+    if (response.status === 404 || response.status === 403) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch quality gate status: HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const data = (await response.json()) as {
+      projectStatus?: {
+        status?: QualityGateStatusValue;
+        conditions?: {
+          status?: QualityGateStatusValue;
+          metricKey?: string;
+          comparator?: string;
+          errorThreshold?: string;
+          warnThreshold?: string;
+          actualValue?: string;
+        }[];
+      };
+    };
+
+    const projectStatus = data?.projectStatus;
+    const status = projectStatus?.status;
+    if (!status || status === 'NONE') {
+      return null;
+    }
+
+    return {
+      status,
+      conditions: (projectStatus.conditions || []).map((c) => ({
+        status: c.status || 'OK',
+        metricKey: c.metricKey || '',
+        comparator: c.comparator || '',
+        errorThreshold: c.errorThreshold,
+        warnThreshold: c.warnThreshold,
+        actualValue: c.actualValue,
+      })),
     };
   }
 

@@ -335,3 +335,119 @@ describe('SonarClient - Connection Verification', () => {
     expect(files[0].message).toContain('15.4% duplicated lines (3 duplicated blocks)');
   });
 });
+
+describe('SonarClient - Quality Gate Status', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function gateClient(payload: unknown, status = 200) {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? 'OK' : 'Error',
+      json: async () => payload,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    return { client, fetchMock };
+  }
+
+  it('should parse an OK quality gate payload', async () => {
+    const { client, fetchMock } = gateClient({
+      projectStatus: {
+        status: 'OK',
+        conditions: [
+          {
+            status: 'OK',
+            metricKey: 'coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '92.1',
+          },
+        ],
+      },
+    });
+
+    const gate = await client.getQualityGateStatus('my-project');
+
+    expect(gate).not.toBeNull();
+    expect(gate?.status).toBe('OK');
+    expect(gate?.conditions).toHaveLength(1);
+    expect(gate?.conditions[0]).toMatchObject({
+      status: 'OK',
+      metricKey: 'coverage',
+      comparator: 'LT',
+      errorThreshold: '80',
+      actualValue: '92.1',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/qualitygates/project_status?projectKey=my-project'),
+      expect.anything(),
+    );
+  });
+
+  it('should parse WARN and ERROR payloads with their conditions', async () => {
+    const { client } = gateClient({
+      projectStatus: {
+        status: 'ERROR',
+        conditions: [
+          {
+            status: 'ERROR',
+            metricKey: 'coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '62.4',
+          },
+          {
+            status: 'WARN',
+            metricKey: 'duplicated_lines_density',
+            comparator: 'GT',
+            warnThreshold: '3',
+            errorThreshold: '5',
+            actualValue: '4.1',
+          },
+        ],
+      },
+    });
+
+    const gate = await client.getQualityGateStatus('my-project');
+
+    expect(gate?.status).toBe('ERROR');
+    expect(gate?.conditions).toHaveLength(2);
+    expect(gate?.conditions[1]).toMatchObject({
+      status: 'WARN',
+      metricKey: 'duplicated_lines_density',
+      warnThreshold: '3',
+    });
+  });
+
+  it('should return null when no quality gate is configured (NONE)', async () => {
+    const { client } = gateClient({ projectStatus: { status: 'NONE', conditions: [] } });
+
+    await expect(client.getQualityGateStatus('my-project')).resolves.toBeNull();
+  });
+
+  it('should return null, not throw, on HTTP 404 (older server)', async () => {
+    const { client } = gateClient({ errors: [{ msg: 'Unknown url' }] }, 404);
+
+    await expect(client.getQualityGateStatus('my-project')).resolves.toBeNull();
+  });
+
+  it('should return null, not throw, on HTTP 403 (no Browse permission)', async () => {
+    const { client } = gateClient({ errors: [{ msg: 'Insufficient privileges' }] }, 403);
+
+    await expect(client.getQualityGateStatus('my-project')).resolves.toBeNull();
+  });
+
+  it('should throw on unexpected HTTP errors so callers can log them', async () => {
+    const { client } = gateClient({ errors: [{ msg: 'Server error' }] }, 500);
+
+    await expect(client.getQualityGateStatus('my-project')).rejects.toThrow('HTTP 500');
+  });
+});
