@@ -301,3 +301,98 @@ describe('ProjectDetector - Reset Migration and Properties-as-Suggestion', () =>
     expect((await detector.getConfig()).projectKey).toBe('');
   });
 });
+
+describe('ProjectDetector - SonarQube Cloud organization', () => {
+  let mockSecrets: Record<string, string>;
+  let secretStorage: SecretStorageLike;
+  let mockConfig: Record<string, any>;
+  let workspaceConfig: WorkspaceConfigLike;
+
+  beforeEach(() => {
+    mockSecrets = {};
+    secretStorage = {
+      get: vi.fn(async (key: string) => mockSecrets[key]),
+      store: vi.fn(async (key: string, value: string) => {
+        mockSecrets[key] = value;
+      }),
+      delete: vi.fn(async (key: string) => {
+        delete mockSecrets[key];
+      }),
+    };
+    mockConfig = {};
+    workspaceConfig = {
+      get: vi.fn((key: string, defaultValue?: any) => mockConfig[key] ?? defaultValue),
+      update: vi.fn(async (key: string, value: any) => {
+        mockConfig[key] = value;
+      }),
+    };
+  });
+
+  it('should parse sonar.organization from sonar-project.properties', () => {
+    const parsed = ProjectDetector.parseProperties(
+      'sonar.projectKey=my-org_my-app\nsonar.organization=my-org\nsonar.host.url=https://sonarcloud.io\n',
+    );
+    expect(parsed.organization).toBe('my-org');
+    expect(parsed.projectKey).toBe('my-org_my-app');
+  });
+
+  it('should leave organization undefined when the property is absent', () => {
+    const parsed = ProjectDetector.parseProperties(
+      'sonar.projectKey=plain-key\nsonar.host.url=http://localhost:9000\n',
+    );
+    expect(parsed.organization).toBeUndefined();
+  });
+
+  it('should persist organization on profile create and expose it via getConfig', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    const created = await detector.createProfile({
+      name: 'Cloud',
+      serverUrl: 'https://sonarcloud.io',
+      projectKey: 'my-org_my-app',
+      organization: 'my-org',
+    });
+
+    expect(created.organization).toBe('my-org');
+    const config = await detector.getConfig();
+    expect(config.organization).toBe('my-org');
+  });
+
+  it('should merge organization on profile target updates and allow clearing it', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    const created = await detector.createProfile({
+      name: 'Cloud',
+      serverUrl: 'https://sonarcloud.io',
+      projectKey: 'my-org_my-app',
+    });
+    expect((await detector.getConfig()).organization).toBeUndefined();
+
+    await detector.updateProfileTarget(created.id, { organization: 'my-org' });
+    expect((await detector.getConfig()).organization).toBe('my-org');
+
+    await detector.updateProfileTarget(created.id, { organization: '' });
+    expect((await detector.getConfig()).organization).toBeUndefined();
+  });
+
+  it('should store organization in settings on the legacy (no-profile) path', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    await detector.setOrganization('my-org');
+
+    expect(workspaceConfig.update).toHaveBeenCalledWith('organization', 'my-org', true);
+    const config = await detector.getConfig();
+    expect(config.organization).toBe('my-org');
+  });
+});
+
+describe('isSonarCloudUrl', () => {
+  it('should detect sonarcloud.io hosts', async () => {
+    const { isSonarCloudUrl } = await import('../src/modules/ProjectDetector.js');
+    expect(isSonarCloudUrl('https://sonarcloud.io')).toBe(true);
+    expect(isSonarCloudUrl('https://sonarcloud.io/')).toBe(true);
+    expect(isSonarCloudUrl('https://sonarcloud.io/api/foo')).toBe(true);
+    expect(isSonarCloudUrl('http://localhost:9000')).toBe(false);
+    expect(isSonarCloudUrl('https://sonar.example.com')).toBe(false);
+    expect(isSonarCloudUrl('https://sonarcloud.io.evil.com')).toBe(false);
+    expect(isSonarCloudUrl('not a url')).toBe(false);
+    expect(isSonarCloudUrl('')).toBe(false);
+  });
+});

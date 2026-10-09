@@ -451,3 +451,137 @@ describe('SonarClient - Quality Gate Status', () => {
     await expect(client.getQualityGateStatus('my-project')).rejects.toThrow('HTTP 500');
   });
 });
+
+describe('SonarClient - SonarQube Cloud organization', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const orgFetchMock = (payload: unknown) =>
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => payload,
+    });
+
+  it('should append organization to every fetchProjects endpoint when configured', async () => {
+    const fetchMock = orgFetchMock({
+      components: [{ key: 'my-org_my-project', name: 'My Project' }],
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'https://sonarcloud.io',
+      token: 'tok',
+      organization: 'my-org',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.fetchProjects();
+
+    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      expect(url).toContain('organization=my-org');
+    }
+    expect(urls[0]).toBe(
+      'https://sonarcloud.io/api/components/search?qualifiers=TRK&ps=100&organization=my-org',
+    );
+  });
+
+  it('should not append organization to fetchProjects endpoints when not configured', async () => {
+    const fetchMock = orgFetchMock({
+      components: [{ key: 'proj-1', name: 'Project One' }],
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.fetchProjects();
+
+    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+    for (const url of urls) {
+      expect(url).not.toContain('organization=');
+    }
+  });
+
+  it('should append organization to /api/rules/show when configured', async () => {
+    const fetchMock = orgFetchMock({
+      rule: { key: 'typescript:S1234', name: 'Some rule', mdDesc: 'Do the thing.' },
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'https://sonarcloud.io',
+      token: 'tok',
+      organization: 'my-org',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const doc = await client.getEnrichedRule('typescript:S1234');
+
+    expect(doc.name).toBe('Some rule');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://sonarcloud.io/api/rules/show?key=typescript%3AS1234&organization=my-org',
+      expect.anything(),
+    );
+  });
+
+  it('should trim whitespace and URL-encode the organization key', async () => {
+    const fetchMock = orgFetchMock({
+      rule: { key: 'r:1', name: 'R', mdDesc: 'd' },
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'https://sonarcloud.io',
+      token: 'tok',
+      organization: '  my org  ',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.getEnrichedRule('r:1');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://sonarcloud.io/api/rules/show?key=r%3A1&organization=my%20org',
+      expect.anything(),
+    );
+  });
+
+  it('should omit organization from /api/rules/show when not configured', async () => {
+    const fetchMock = orgFetchMock({
+      rule: { key: 'r:1', name: 'R', mdDesc: 'd' },
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.getEnrichedRule('r:1');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:9000/api/rules/show?key=r%3A1',
+      expect.anything(),
+    );
+  });
+
+  it('should not send organization on endpoints that work without it', async () => {
+    const fetchMock = orgFetchMock({ valid: true });
+
+    const client = new SonarClient({
+      serverUrl: 'https://sonarcloud.io',
+      token: 'tok',
+      organization: 'my-org',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.verifyConnection();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://sonarcloud.io/api/authentication/validate',
+      expect.anything(),
+    );
+  });
+});
