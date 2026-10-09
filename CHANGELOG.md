@@ -1,3 +1,11 @@
+# [1.4.0](https://github.com/chulit/sonar-agent/compare/v1.3.0...v1.4.0) (2026-10-09)
+
+
+### Features
+
+* **ui:** add Quality Gate status widget to sidebar ([81c3574](https://github.com/chulit/sonar-agent/commit/81c3574f610105a2fd47d469739b9b210e38b29c))
+* **ui:** quality gate banner in sidebar webview ([435aadb](https://github.com/chulit/sonar-agent/commit/435aadb7ce429d5bc8d45d55d4de58f484115071))
+
 # [1.3.0](https://github.com/chulit/sonar-agent/compare/v1.2.0...v1.3.0) (2026-09-22)
 
 
