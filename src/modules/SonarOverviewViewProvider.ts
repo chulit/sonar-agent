@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as vscode from 'vscode';
 import { ProjectDetector } from './ProjectDetector.js';
-import { SonarClient, SonarDetailItem, SonarOverview } from './SonarClient.js';
+import { SonarClient, SonarDetailItem, SonarOverview, QualityGateStatus } from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
 import { AgentDispatcher } from './AgentDispatcher.js';
 import { ConnectionProfileWizard } from './ConnectionProfileWizard.js';
@@ -642,9 +642,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const client = new SonarClient({ serverUrl: config.serverUrl, token });
     const effectiveProjectKey = config.projectKey;
 
-    const [projectsResult, initialOverview] = await Promise.allSettled([
+    const [projectsResult, initialOverview, initialGate] = await Promise.allSettled([
       client.fetchProjects(),
       effectiveProjectKey ? client.getOverview(effectiveProjectKey) : Promise.resolve(null),
+      effectiveProjectKey
+        ? client.getQualityGateStatus(effectiveProjectKey)
+        : Promise.resolve(null),
     ]);
 
     const projects = projectsResult.status === 'fulfilled' ? projectsResult.value : [];
@@ -665,6 +668,24 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       initialOverview,
     );
 
+    // Quality gate rides alongside the overview fetch but must never block it.
+    // If the project key was auto-resolved above (no key configured), the
+    // parallel fetch ran against an empty key and resolved null — fetch again
+    // for the actual key. Any failure hides the widget silently.
+    let qualityGate: QualityGateStatus | null =
+      initialGate.status === 'fulfilled' ? initialGate.value : null;
+    if (initialGate.status === 'rejected') {
+      console.error('[SonarAgent] getQualityGateStatus error:', initialGate.reason);
+    }
+    if (resolvedProjectKey && resolvedProjectKey !== effectiveProjectKey) {
+      try {
+        qualityGate = await client.getQualityGateStatus(resolvedProjectKey);
+      } catch (err) {
+        console.error('[SonarAgent] getQualityGateStatus (resolved key) error:', err);
+        qualityGate = null;
+      }
+    }
+
     const fullState = {
       type: 'state',
       state: 'connected',
@@ -673,6 +694,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       projects,
       overview,
       overviewError,
+      qualityGate,
       profiles,
       activeProfileId,
       defaultAgent: effectiveDefaultAgent,
@@ -681,6 +703,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     this._lastStateMessage = fullState;
     const deliveredFull = await this._view?.webview.postMessage(fullState);
     Logger.info(`[Host] Full postMessage(connected) delivered=${deliveredFull}`);
+
+    await this._view?.webview.postMessage({ type: 'qualityGate', status: qualityGate });
 
     await this._view?.webview.postMessage({ type: 'loading', loading: false });
 
@@ -1074,6 +1098,106 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       border: 1px solid var(--sonar-blue);
       color: var(--vscode-foreground);
     }
+
+    /* Quality Gate status banner (pinned above metric cards) */
+    .quality-gate {
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1.4;
+      border: 1px solid;
+      overflow: hidden;
+    }
+
+    .quality-gate-pass {
+      display: block;
+      background: rgba(0, 170, 94, 0.15);
+      border-color: var(--sonar-green);
+    }
+
+    .quality-gate-warn {
+      display: block;
+      background: rgba(234, 190, 6, 0.15);
+      border-color: var(--sonar-yellow);
+    }
+
+    .quality-gate-fail {
+      display: block;
+      background: rgba(212, 51, 63, 0.15);
+      border-color: var(--sonar-red);
+    }
+
+    .quality-gate-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background: transparent;
+      border: none;
+      color: var(--vscode-foreground);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .quality-gate-toggle:disabled {
+      cursor: default;
+    }
+
+    .quality-gate-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .quality-gate-pass .quality-gate-dot { background: var(--sonar-green); }
+    .quality-gate-warn .quality-gate-dot { background: var(--sonar-yellow); }
+    .quality-gate-fail .quality-gate-dot { background: var(--sonar-red); }
+
+    .quality-gate-label { flex: 1; }
+
+    .quality-gate-pass .quality-gate-label { color: var(--sonar-green); }
+    .quality-gate-warn .quality-gate-label { color: var(--sonar-yellow); }
+    .quality-gate-fail .quality-gate-label { color: var(--sonar-red); }
+
+    .quality-gate-chevron {
+      color: var(--vscode-descriptionForeground);
+      font-size: 10px;
+      transition: transform 0.15s ease;
+    }
+
+    .quality-gate-toggle[aria-expanded="true"] .quality-gate-chevron {
+      transform: rotate(90deg);
+    }
+
+    .quality-gate-conditions {
+      list-style: none;
+      margin: 0;
+      padding: 2px 10px 8px 27px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .quality-gate-condition {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      color: var(--vscode-foreground);
+    }
+
+    .quality-gate-condition .condition-metric {
+      font-weight: 600;
+    }
+
+    .quality-gate-condition .condition-actual {
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .quality-gate-condition.condition-error .condition-metric { color: var(--sonar-red); }
+    .quality-gate-condition.condition-warn .condition-metric { color: var(--sonar-yellow); }
 
     /* Searchable Project Selector */
     .project-selector-wrapper {
@@ -1737,6 +1861,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
       <div id="overview-error" class="alert error hidden"></div>
 
+      <!-- Quality Gate Status Banner (pinned above metric cards) -->
+      <div id="quality-gate-banner" class="quality-gate hidden" role="status" aria-label="Quality Gate status">
+        <button id="quality-gate-toggle" class="quality-gate-toggle" aria-expanded="false" aria-controls="quality-gate-conditions">
+          <span id="quality-gate-dot" class="quality-gate-dot"></span>
+          <span id="quality-gate-label" class="quality-gate-label">Quality Gate</span>
+          <span id="quality-gate-chevron" class="quality-gate-chevron">▸</span>
+        </button>
+        <ul id="quality-gate-conditions" class="quality-gate-conditions hidden"></ul>
+      </div>
+
       <!-- Metric Cards Grid (Container Query Controlled) -->
       <div id="metrics-grid" class="metrics-grid">
         <!-- Security -->
@@ -1987,6 +2121,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     const loadingIndicator = document.getElementById("loading-indicator");
     const metricsGrid = document.getElementById("metrics-grid");
+    const qualityGateBanner = document.getElementById("quality-gate-banner");
+    const qualityGateToggle = document.getElementById("quality-gate-toggle");
+    const qualityGateLabel = document.getElementById("quality-gate-label");
+    const qualityGateChevron = document.getElementById("quality-gate-chevron");
+    const qualityGateConditions = document.getElementById("quality-gate-conditions");
 
     const issuesSection = document.getElementById("issues-section");
     const issuesListTitle = document.getElementById("issues-list-title");
@@ -2228,6 +2367,85 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       if (acceptedCount && overview.acceptedIssues) {
         acceptedCount.textContent = formatNumber(overview.acceptedIssues.count);
       }
+    }
+
+    const QUALITY_GATE_LABELS = { OK: "PASS", WARN: "WARN", ERROR: "FAIL" };
+    const QUALITY_GATE_CLASSES = {
+      OK: "quality-gate-pass",
+      WARN: "quality-gate-warn",
+      ERROR: "quality-gate-fail",
+    };
+    const COMPARATOR_SYMBOLS = { LT: "<", GT: ">", LTE: "≤", GTE: "≥", EQ: "=" };
+
+    function humanizeMetricKey(metricKey) {
+      return String(metricKey || "condition")
+        .replace(/^new_/, "New ")
+        .replace(/_/g, " ")
+        .replace(/\\b\\w/g, (ch) => ch.toUpperCase());
+    }
+
+    function formatGateCondition(condition) {
+      const symbol = COMPARATOR_SYMBOLS[condition.comparator] || condition.comparator || "";
+      const threshold =
+        condition.status === "WARN" && condition.warnThreshold
+          ? condition.warnThreshold
+          : condition.errorThreshold;
+      const parts = [humanizeMetricKey(condition.metricKey)];
+      if (symbol && threshold !== undefined && threshold !== "") {
+        parts.push(symbol, String(threshold));
+      }
+      let text = parts.join(" ");
+      if (condition.actualValue !== undefined && condition.actualValue !== "") {
+        text += " → actual " + condition.actualValue;
+      }
+      return text;
+    }
+
+    function renderQualityGate(status) {
+      if (!qualityGateBanner || !qualityGateToggle) return;
+      if (!status || !QUALITY_GATE_LABELS[status.status]) {
+        qualityGateBanner.className = "quality-gate hidden";
+        return;
+      }
+
+      const variant = QUALITY_GATE_CLASSES[status.status];
+      qualityGateBanner.className = "quality-gate " + variant;
+      if (qualityGateLabel) {
+        qualityGateLabel.textContent = "Quality Gate: " + QUALITY_GATE_LABELS[status.status];
+      }
+
+      const failing = (status.conditions || []).filter(
+        (c) => c.status === "ERROR" || c.status === "WARN",
+      );
+      if (qualityGateConditions) {
+        qualityGateConditions.innerHTML = "";
+        failing.forEach((condition) => {
+          const li = document.createElement("li");
+          li.className =
+            "quality-gate-condition " +
+            (condition.status === "ERROR" ? "condition-error" : "condition-warn");
+          const metricSpan = document.createElement("span");
+          metricSpan.className = "condition-metric";
+          metricSpan.textContent = formatGateCondition(condition);
+          li.appendChild(metricSpan);
+          qualityGateConditions.appendChild(li);
+        });
+        qualityGateConditions.classList.add("hidden");
+      }
+      qualityGateToggle.setAttribute("aria-expanded", "false");
+      qualityGateToggle.disabled = failing.length === 0;
+      if (qualityGateChevron) {
+        qualityGateChevron.style.visibility = failing.length === 0 ? "hidden" : "visible";
+      }
+    }
+
+    if (qualityGateToggle) {
+      qualityGateToggle.addEventListener("click", () => {
+        if (!qualityGateConditions || qualityGateToggle.disabled) return;
+        const expanded = qualityGateToggle.getAttribute("aria-expanded") === "true";
+        qualityGateToggle.setAttribute("aria-expanded", String(!expanded));
+        qualityGateConditions.classList.toggle("hidden", expanded);
+      });
     }
 
     function isTestFile(filePath) {
@@ -2878,6 +3096,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           } else {
             issuesLoading.classList.add("hidden");
           }
+          break;
+        }
+        case "qualityGate": {
+          renderQualityGate(message.status);
           break;
         }
         case "details": {
