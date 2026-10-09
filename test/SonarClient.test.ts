@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SonarClient } from '../src/modules/SonarClient.js';
+import { SonarClient, InsufficientPermissionError } from '../src/modules/SonarClient.js';
 
 describe('SonarClient - Connection Verification', () => {
   beforeEach(() => {
@@ -449,5 +449,114 @@ describe('SonarClient - Quality Gate Status', () => {
     const { client } = gateClient({ errors: [{ msg: 'Server error' }] }, 500);
 
     await expect(client.getQualityGateStatus('my-project')).rejects.toThrow('HTTP 500');
+  });
+});
+
+describe('SonarClient - Issue Lifecycle Actions', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const okJson = (data: any) => ({ ok: true, status: 200, json: async () => data });
+
+  function lifecycleClient(handler: (url: string, init?: any) => Promise<any>) {
+    const fetchMock = vi.fn(async (url: any, init?: any) => handler(String(url), init));
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'secret-token-xyz',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+    return { client, fetchMock };
+  }
+
+  it('getIssueTransitions returns the server response 1:1 without filtering', async () => {
+    const { client, fetchMock } = lifecycleClient(async (url) => {
+      expect(url).toBe('http://localhost:9000/api/issues/transitions?issue=ISSUE-1');
+      return okJson({ transitions: ['confirm', 'falsepositive', 'wontfix'] });
+    });
+
+    const transitions = await client.getIssueTransitions('ISSUE-1');
+
+    expect(transitions).toEqual(['confirm', 'falsepositive', 'wontfix']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('doIssueTransition POSTs urlencoded issue/transition with no token in URL or body', async () => {
+    let captured: { url?: string; init?: any } = {};
+    const { client } = lifecycleClient(async (url, init) => {
+      captured = { url, init };
+      return okJson({});
+    });
+
+    await client.doIssueTransition('ISSUE-1', 'falsepositive');
+
+    expect(captured.url).toBe('http://localhost:9000/api/issues/do_transition');
+    expect(captured.init.method).toBe('POST');
+    expect(captured.init.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    const params = new URLSearchParams(String(captured.init.body));
+    expect(params.get('issue')).toBe('ISSUE-1');
+    expect(params.get('transition')).toBe('falsepositive');
+    // Token must not leak into the URL or the POST body…
+    expect(captured.url).not.toContain('secret-token-xyz');
+    expect(String(captured.init.body)).not.toContain('secret-token-xyz');
+    // …it travels in the Authorization header only.
+    expect(String(captured.init.headers.Authorization || '')).toMatch(/^(Basic|Bearer) /);
+  });
+
+  it('assignIssue sends the assignee; empty assignee unassigns', async () => {
+    const bodies: string[] = [];
+    const { client } = lifecycleClient(async (url, init) => {
+      expect(url).toBe('http://localhost:9000/api/issues/assign');
+      bodies.push(String(init.body));
+      return okJson({});
+    });
+
+    await client.assignIssue('ISSUE-1', 'alice');
+    await client.assignIssue('ISSUE-2');
+
+    expect(new URLSearchParams(bodies[0]).get('assignee')).toBe('alice');
+    expect(new URLSearchParams(bodies[1]).get('assignee')).toBe('');
+    expect(bodies[1]).not.toContain('secret-token-xyz');
+  });
+
+  it('addIssueComment POSTs the comment text', async () => {
+    let captured: { url?: string; init?: any } = {};
+    const { client } = lifecycleClient(async (url, init) => {
+      captured = { url, init };
+      return okJson({});
+    });
+
+    await client.addIssueComment('ISSUE-1', 'Looks good to me');
+
+    expect(captured.url).toBe('http://localhost:9000/api/issues/add_comment');
+    expect(new URLSearchParams(String(captured.init.body)).get('text')).toBe('Looks good to me');
+  });
+
+  it('write operations surface InsufficientPermissionError on HTTP 403', async () => {
+    const { client } = lifecycleClient(async () => ({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      json: async () => ({}),
+    }));
+
+    await expect(client.doIssueTransition('ISSUE-1', 'falsepositive')).rejects.toBeInstanceOf(
+      InsufficientPermissionError,
+    );
+    await expect(client.assignIssue('ISSUE-1', 'alice')).rejects.toBeInstanceOf(
+      InsufficientPermissionError,
+    );
+    await expect(client.addIssueComment('ISSUE-1', 'hi')).rejects.toBeInstanceOf(
+      InsufficientPermissionError,
+    );
+  });
+
+  it('getCurrentUserLogin returns the token owner login', async () => {
+    const { client } = lifecycleClient(async (url) => {
+      expect(url).toBe('http://localhost:9000/api/users/current');
+      return okJson({ login: 'alice' });
+    });
+
+    await expect(client.getCurrentUserLogin()).resolves.toBe('alice');
   });
 });
