@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/chulit/sonar-agent/compare/v1.5.0...v1.5.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **dispatcher:** harden direct-send paths and honest clipboard fallbacks ([0beb983](https://github.com/chulit/sonar-agent/commit/0beb983b2e7399a847be47b0595bf7a6ce6a6c15))
+
 # [1.5.0](https://github.com/chulit/sonar-agent/compare/v1.4.0...v1.5.0) (2026-10-09)
 
 
