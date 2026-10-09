@@ -1,17 +1,34 @@
 import * as crypto from 'node:crypto';
 import * as vscode from 'vscode';
 import { ProjectDetector } from './ProjectDetector.js';
-import { SonarClient, SonarDetailItem, SonarOverview, QualityGateStatus } from './SonarClient.js';
+import {
+  SonarClient,
+  SonarDetailItem,
+  SonarOverview,
+  QualityGateStatus,
+  InsufficientPermissionError,
+} from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
 import { AgentDispatcher } from './AgentDispatcher.js';
 import { ConnectionProfileWizard } from './ConnectionProfileWizard.js';
 import { SonarLocalScanner } from './SonarLocalScanner.js';
 import { Logger } from './Logger.js';
+import {
+  ISSUE_LIFECYCLE_CSS,
+  ISSUE_LIFECYCLE_MENU_SCRIPT,
+  ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT,
+  ISSUE_LIFECYCLE_MESSAGE_SCRIPT,
+} from './IssueLifecycleWebview.js';
 
 export type CurrentCodeTab = 'overallCode' | 'currentCode';
 
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'sonarAgent.overviewView';
+  /**
+   * Transitions that resolve an issue and change shared server state.
+   * These require an explicit confirmation dialog before being applied.
+   */
+  private static readonly RESOLUTION_TRANSITIONS = new Set(['falsepositive', 'wontfix']);
   private _view?: vscode.WebviewView;
   private _webviewReady = false;
   private _lastStateMessage?: any;
@@ -27,6 +44,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private _currentCodeSubscription?: vscode.Disposable;
   private _statusBarItem?: vscode.StatusBarItem;
   private _scanInProgress = false;
+  private readonly issueTransitionsCache = new Map<string, string[]>();
+  private currentUserLogin: string | null = null;
+  private _currentDetailCategory: string | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -142,6 +162,22 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           }
           case 'sendBatchToAgent': {
             await this._handleSendBatchToAgent(message.items, message.targetAgentId);
+            break;
+          }
+          case 'fetchIssueTransitions': {
+            await this._handleFetchIssueTransitions(message.issueKey);
+            break;
+          }
+          case 'issueTransition': {
+            await this._handleIssueTransition(message.issueKey, message.transition);
+            break;
+          }
+          case 'assignIssue': {
+            await this._handleAssignIssue(message.issueKey);
+            break;
+          }
+          case 'addIssueComment': {
+            await this._handleAddIssueComment(message.issueKey, message.text);
             break;
           }
           case 'setTargetAgent': {
@@ -421,6 +457,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private async _handleFetchDetails(category: string): Promise<void> {
     if (!this._view) return;
 
+    this._currentDetailCategory = category;
+
     const config = await this.projectDetector.getConfig();
     const token = await this.projectDetector.getToken();
     if (!config.serverUrl || !config.projectKey || !token) return;
@@ -461,6 +499,149 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       });
     } finally {
       this._view.webview.postMessage({ type: 'loadingDetails', loading: false });
+    }
+  }
+
+  /**
+   * Builds an authenticated SonarClient for the active project binding,
+   * or null when the extension is not connected.
+   */
+  private async getLifecycleClient(): Promise<SonarClient | null> {
+    const config = await this.projectDetector.getConfig();
+    const token = await this.projectDetector.getToken();
+    if (!config.serverUrl || !config.projectKey || !token) return null;
+    return new SonarClient({ serverUrl: config.serverUrl, token });
+  }
+
+  /**
+   * Lazily fetches the server-provided transitions for an issue (cached per
+   * issue key) and forwards them to the webview for the overflow menu.
+   */
+  private async _handleFetchIssueTransitions(issueKey: string): Promise<void> {
+    if (!this._view || !issueKey) return;
+
+    const cached = this.issueTransitionsCache.get(issueKey);
+    if (cached) {
+      await this._view.webview.postMessage({
+        type: 'issueTransitions',
+        issueKey,
+        transitions: cached,
+      });
+      return;
+    }
+
+    const client = await this.getLifecycleClient();
+    if (!client) return;
+
+    try {
+      const transitions = await client.getIssueTransitions(issueKey);
+      this.issueTransitionsCache.set(issueKey, transitions);
+      await this._view.webview.postMessage({ type: 'issueTransitions', issueKey, transitions });
+    } catch (err: any) {
+      Logger.error(`[Host] Failed to fetch transitions for issue ${issueKey}`, err);
+      await this._view.webview.postMessage({ type: 'issueTransitions', issueKey, transitions: [] });
+    }
+  }
+
+  /**
+   * Applies an issue transition. Resolution-type transitions (false
+   * positive / won't fix) change shared server state, so they require an
+   * explicit confirmation — a dismissed dialog is a no-op.
+   */
+  private async _handleIssueTransition(issueKey: string, transition: string): Promise<void> {
+    if (!issueKey || !transition) return;
+    const client = await this.getLifecycleClient();
+    if (!client) return;
+
+    if (SonarOverviewViewProvider.RESOLUTION_TRANSITIONS.has(transition)) {
+      const actionLabel =
+        transition === 'falsepositive' ? 'Mark as False Positive' : `Accept (Won't Fix)`;
+      const picked = await vscode.window.showWarningMessage(
+        `${actionLabel} for this issue? This changes shared state on the SonarQube server.`,
+        { modal: true },
+        actionLabel,
+      );
+      if (!picked) {
+        Logger.info(
+          `[Host] Issue transition dismissed by user: issue=${issueKey} transition=${transition}`,
+        );
+        return;
+      }
+    }
+
+    try {
+      Logger.info(`[Host] Applying issue transition: issue=${issueKey} transition=${transition}`);
+      await client.doIssueTransition(issueKey, transition);
+      this.issueTransitionsCache.delete(issueKey);
+      vscode.window.showInformationMessage(`Issue ${humanizeIssueTransition(transition)}.`);
+      await this.refreshIssueList();
+    } catch (err: any) {
+      this.handleLifecycleError(err);
+    }
+  }
+
+  /**
+   * Assigns the issue to the current user ("Assign to me").
+   */
+  private async _handleAssignIssue(issueKey: string): Promise<void> {
+    if (!issueKey) return;
+    const client = await this.getLifecycleClient();
+    if (!client) return;
+
+    try {
+      if (!this.currentUserLogin) {
+        this.currentUserLogin = await client.getCurrentUserLogin();
+      }
+      Logger.info(`[Host] Assigning issue ${issueKey} to ${this.currentUserLogin}`);
+      await client.assignIssue(issueKey, this.currentUserLogin);
+      vscode.window.showInformationMessage(`Issue assigned to ${this.currentUserLogin}.`);
+      await this.refreshIssueList();
+    } catch (err: any) {
+      this.handleLifecycleError(err);
+    }
+  }
+
+  /**
+   * Adds a comment to the issue. Empty text is a no-op.
+   */
+  private async _handleAddIssueComment(issueKey: string, text: string): Promise<void> {
+    if (!issueKey || !text?.trim()) return;
+    const client = await this.getLifecycleClient();
+    if (!client) return;
+
+    try {
+      Logger.info(`[Host] Adding comment to issue ${issueKey}`);
+      await client.addIssueComment(issueKey, text.trim());
+      vscode.window.showInformationMessage('Comment added to issue.');
+      await this.refreshIssueList();
+    } catch (err: any) {
+      this.handleLifecycleError(err);
+    }
+  }
+
+  /**
+   * Renders lifecycle failures honestly: a friendly permission hint for
+   * 403s, a generic message otherwise. Raw errors go to the log channel
+   * only — never to the user.
+   */
+  private handleLifecycleError(err: any): void {
+    Logger.error('[Host] Issue lifecycle action failed', err);
+    if (err instanceof InsufficientPermissionError) {
+      vscode.window.showWarningMessage(err.message);
+    } else {
+      vscode.window.showWarningMessage(
+        'Could not complete the action. See the Sonar Agent logs for details.',
+      );
+    }
+  }
+
+  /**
+   * Re-fetches the currently visible issue list so lifecycle actions are
+   * reflected immediately.
+   */
+  private async refreshIssueList(): Promise<void> {
+    if (this._currentDetailCategory) {
+      await this._handleFetchDetails(this._currentDetailCategory);
     }
   }
 
@@ -1545,6 +1726,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       flex-direction: column;
       gap: 6px;
       transition: border-color 0.15s ease;
+${ISSUE_LIFECYCLE_CSS}
     }
 
     .issue-card:hover {
@@ -2298,6 +2480,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     let currentItems = [];
     const selectedItemIds = new Set();
 
+${ISSUE_LIFECYCLE_MENU_SCRIPT}
     function showAlert(msg, type = "error") {
       alertBox.textContent = msg;
       alertBox.className = "alert " + type;
@@ -2628,6 +2811,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       actionsDiv.appendChild(jumpBtn);
       actionsDiv.appendChild(agentBtn);
 
+${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       footerDiv.appendChild(footerMeta);
       footerDiv.appendChild(actionsDiv);
 
@@ -3102,6 +3286,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
           renderQualityGate(message.status);
           break;
         }
+${ISSUE_LIFECYCLE_MESSAGE_SCRIPT}
         case "details": {
           renderIssues(message.items || [], message.category);
           break;
@@ -3237,4 +3422,27 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
 function getNonce(): string {
   return crypto.randomBytes(16).toString('hex');
+}
+
+/**
+ * Human-readable past-tense label for an applied issue transition,
+ * used in the success toast.
+ */
+function humanizeIssueTransition(transition: string): string {
+  switch (transition) {
+    case 'falsepositive':
+      return 'marked as false positive';
+    case 'wontfix':
+      return `accepted (won't fix)`;
+    case 'confirm':
+      return 'confirmed';
+    case 'unconfirm':
+      return 'unconfirmed';
+    case 'reopen':
+      return 'reopened';
+    case 'resolve':
+      return 'resolved';
+    default:
+      return `transition "${transition}" applied`;
+  }
 }
