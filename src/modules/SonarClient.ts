@@ -1,6 +1,12 @@
 export interface SonarClientConfig {
   serverUrl: string;
   token?: string;
+  /**
+   * SonarQube Cloud organization key. Required by several SonarCloud-only
+   * endpoints (project search, rule details). Leave empty for self-hosted
+   * SonarQube, where the parameter does not exist.
+   */
+  organization?: string;
   fetchFn?: typeof fetch;
 }
 
@@ -64,6 +70,7 @@ export interface QualityGateStatus {
 export class SonarClient {
   private readonly serverUrl: string;
   private readonly token?: string;
+  private readonly organization?: string;
   private readonly fetchFn: typeof fetch;
 
   constructor(config: SonarClientConfig) {
@@ -73,6 +80,8 @@ export class SonarClient {
     }
     this.serverUrl = url;
     this.token = config.token ? config.token.trim() : undefined;
+    const org = config.organization ? config.organization.trim() : '';
+    this.organization = org ? org : undefined;
     this.fetchFn = config.fetchFn ?? globalThis.fetch;
   }
 
@@ -84,6 +93,15 @@ export class SonarClient {
     return {
       Authorization: `Basic ${encoded}`,
     };
+  }
+
+  /**
+   * SonarQube Cloud requires an `organization` query parameter on several
+   * endpoints (project search, rule details). Returns '' when no organization
+   * is configured so self-hosted SonarQube URLs stay untouched.
+   */
+  private orgParam(): string {
+    return this.organization ? `&organization=${encodeURIComponent(this.organization)}` : '';
   }
 
   private parseRating(val?: string | number): SonarRating {
@@ -193,11 +211,12 @@ export class SonarClient {
    * Supports /api/components/search?qualifiers=TRK, /api/components/search_projects, /api/projects/search
    */
   async fetchProjects(): Promise<{ key: string; name: string }[]> {
+    const org = this.orgParam();
     const endpoints = [
-      `${this.serverUrl}/api/components/search?qualifiers=TRK&ps=100`,
-      `${this.serverUrl}/api/projects/search?ps=100`,
-      `${this.serverUrl}/api/components/search_projects?ps=100`,
-      `${this.serverUrl}/api/projects/search?ps=100&qualifiers=TRK`,
+      `${this.serverUrl}/api/components/search?qualifiers=TRK&ps=100${org}`,
+      `${this.serverUrl}/api/projects/search?ps=100${org}`,
+      `${this.serverUrl}/api/components/search_projects?ps=100${org}`,
+      `${this.serverUrl}/api/projects/search?ps=100&qualifiers=TRK${org}`,
     ];
 
     for (const url of endpoints) {
@@ -459,7 +478,7 @@ export class SonarClient {
    */
   async getEnrichedRule(ruleKey: string): Promise<SonarRuleDoc> {
     try {
-      const url = `${this.serverUrl}/api/rules/show?key=${encodeURIComponent(ruleKey)}`;
+      const url = `${this.serverUrl}/api/rules/show?key=${encodeURIComponent(ruleKey)}${this.orgParam()}`;
       const response = await this.authenticatedFetch(url);
 
       if (!response.ok) {

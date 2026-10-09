@@ -121,6 +121,11 @@
           "default": "",
           "description": "SonarQube Project Key"
         },
+        "sonarAgent.organization": {
+          "type": "string",
+          "default": "",
+          "description": "SonarQube Cloud organization key (required for sonarcloud.io; leave empty for self-hosted SonarQube)"
+        },
         "sonarAgent.profiles": {
           "type": "array",
           "default": [],

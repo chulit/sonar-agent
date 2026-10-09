@@ -19,7 +19,11 @@ export interface DispatchOptions {
 export interface AgentDispatcherOptions {
   fileNavigator?: FileNavigator;
   projectDetector?: ProjectDetector;
-  sonarClientFactory?: (config: { serverUrl: string; token: string }) => SonarClient;
+  sonarClientFactory?: (config: {
+    serverUrl: string;
+    token: string;
+    organization?: string;
+  }) => SonarClient;
   fetchRuleFn?: (ruleKey: string) => Promise<SonarRuleDoc>;
   readCodeSnippetFn?: (filePath: string, line?: number) => Promise<CodeSnippetContext | null>;
   isExtensionInstalledFn?: (extensionId: string) => boolean;
@@ -50,6 +54,7 @@ export class AgentDispatcher {
   private readonly sonarClientFactory: (config: {
     serverUrl: string;
     token: string;
+    organization?: string;
   }) => SonarClient;
   private readonly getDefaultAgentFn: () => string;
   private readonly fetchRuleFn?: (ruleKey: string) => Promise<SonarRuleDoc>;
@@ -73,7 +78,12 @@ export class AgentDispatcher {
     this.projectDetector = options?.projectDetector;
     this.sonarClientFactory =
       options?.sonarClientFactory ??
-      ((cfg) => new SonarClient({ serverUrl: cfg.serverUrl, token: cfg.token }));
+      ((cfg) =>
+        new SonarClient({
+          serverUrl: cfg.serverUrl,
+          token: cfg.token,
+          organization: cfg.organization,
+        }));
     this.getDefaultAgentFn =
       options?.getDefaultAgentFn ??
       (() =>
@@ -241,7 +251,11 @@ export class AgentDispatcher {
         const config = await this.projectDetector.getConfig();
         const token = await this.projectDetector.getToken();
         if (config.serverUrl && token) {
-          const client = this.sonarClientFactory({ serverUrl: config.serverUrl, token });
+          const client = this.sonarClientFactory({
+            serverUrl: config.serverUrl,
+            token,
+            organization: config.organization,
+          });
           doc = await client.getEnrichedRule(ruleKey);
         }
       } catch {

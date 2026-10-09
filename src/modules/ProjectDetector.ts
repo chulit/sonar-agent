@@ -26,12 +26,14 @@ export interface ProjectDetectorOptions {
 export interface ParsedSonarProperties {
   projectKey?: string;
   serverUrl?: string;
+  organization?: string;
   hasPlaintextCredentials: boolean;
 }
 
 export interface ResolvedProjectConfig {
   serverUrl: string;
   projectKey: string;
+  organization?: string;
   hasToken: boolean;
   detectedFromProperties?: boolean;
   hasPlaintextCredentialsWarning?: boolean;
@@ -42,6 +44,7 @@ export interface ConnectionProfileMeta {
   name: string;
   serverUrl: string;
   projectKey: string;
+  organization?: string;
   updatedAt: number;
 }
 
@@ -49,17 +52,20 @@ export interface CreateProfileInput {
   name: string;
   serverUrl: string;
   projectKey: string;
+  organization?: string;
   token?: string;
 }
 
 export interface UpdateProfileTargetInput {
   serverUrl?: string;
   projectKey?: string;
+  organization?: string;
 }
 
 export interface CreationSuggestion {
   serverUrl?: string;
   projectKey?: string;
+  organization?: string;
   hasPlaintextCredentials: boolean;
 }
 
@@ -68,6 +74,18 @@ const PROFILES_CONFIG_KEY = 'profiles';
 const ACTIVE_PROFILE_CONFIG_KEY = 'activeProfileId';
 
 const tokenKeyFor = (id: string): string => `${TOKEN_SECRET_KEY}.${id}`;
+
+/**
+ * True when the server URL points at SonarQube Cloud (sonarcloud.io),
+ * where several API endpoints require an `organization` parameter.
+ */
+export function isSonarCloudUrl(serverUrl: string): boolean {
+  try {
+    return new URL(serverUrl.trim()).hostname.toLowerCase() === 'sonarcloud.io';
+  } catch {
+    return false;
+  }
+}
 
 function slugify(name: string): string {
   let result = '';
@@ -96,6 +114,7 @@ export class ProjectDetector {
 
   private activeProjectKey?: string;
   private activeServerUrl?: string;
+  private activeOrganization?: string;
   private activeToken?: string | null;
   private readonly profileTokenCache = new Map<string, string | null>();
 
@@ -113,6 +132,7 @@ export class ProjectDetector {
     const lines = content.split(/\r?\n/);
     let projectKey: string | undefined;
     let serverUrl: string | undefined;
+    let organization: string | undefined;
     let hasPlaintextCredentials = false;
 
     for (const rawLine of lines) {
@@ -133,6 +153,8 @@ export class ProjectDetector {
         projectKey = value;
       } else if (key === 'sonar.host.url') {
         serverUrl = value;
+      } else if (key === 'sonar.organization') {
+        organization = value;
       } else if (key === 'sonar.login' || key === 'sonar.password' || key === 'sonar.token') {
         hasPlaintextCredentials = true;
       }
@@ -141,6 +163,7 @@ export class ProjectDetector {
     return {
       projectKey,
       serverUrl,
+      organization,
       hasPlaintextCredentials,
     };
   }
@@ -187,6 +210,7 @@ export class ProjectDetector {
       name: input.name.trim(),
       serverUrl: input.serverUrl.trim(),
       projectKey: input.projectKey.trim(),
+      organization: input.organization?.trim() ? input.organization.trim() : undefined,
       updatedAt: Date.now(),
     };
     await this.persistProfiles([...profiles, meta], id);
@@ -245,6 +269,10 @@ export class ProjectDetector {
             ...p,
             serverUrl: target.serverUrl !== undefined ? target.serverUrl.trim() : p.serverUrl,
             projectKey: target.projectKey !== undefined ? target.projectKey.trim() : p.projectKey,
+            organization:
+              target.organization !== undefined
+                ? target.organization.trim() || undefined
+                : p.organization,
             updatedAt: Date.now(),
           }
         : p,
@@ -333,6 +361,18 @@ export class ProjectDetector {
     await this.config.update('projectKey', this.activeProjectKey, true);
   }
 
+  async setOrganization(organization: string): Promise<void> {
+    if (this.hasProfiles()) {
+      const active = await this.getActiveProfile();
+      if (active) {
+        await this.updateProfileTarget(active.id, { organization });
+        return;
+      }
+    }
+    this.activeOrganization = organization.trim();
+    await this.config.update('organization', this.activeOrganization, true);
+  }
+
   isConfiguredSync(): boolean {
     if (this.hasProfiles()) {
       const active = this.readProfiles().find((p) => p.id === this.readActiveId());
@@ -368,6 +408,7 @@ export class ProjectDetector {
     return {
       serverUrl: detected?.serverUrl,
       projectKey: detected?.projectKey,
+      organization: detected?.organization,
       hasPlaintextCredentials: detected?.hasPlaintextCredentials ?? false,
     };
   }
@@ -376,15 +417,18 @@ export class ProjectDetector {
     const legacyToken = await this.secrets.get(TOKEN_SECRET_KEY);
     const serverUrl = this.activeServerUrl ?? this.config.get<string>('serverUrl', '');
     const projectKey = this.activeProjectKey ?? this.config.get<string>('projectKey', '');
-    if (!(legacyToken?.trim() || serverUrl || projectKey)) {
+    const organization = this.activeOrganization ?? this.config.get<string>('organization', '');
+    if (!(legacyToken?.trim() || serverUrl || projectKey || organization)) {
       return false;
     }
     this.activeToken = null;
     this.activeServerUrl = undefined;
     this.activeProjectKey = undefined;
+    this.activeOrganization = undefined;
     await this.secrets.delete(TOKEN_SECRET_KEY);
     await this.config.update('serverUrl', undefined, true);
     await this.config.update('projectKey', undefined, true);
+    await this.config.update('organization', undefined, true);
     return true;
   }
 
@@ -403,18 +447,21 @@ export class ProjectDetector {
       return {
         serverUrl: active.serverUrl,
         projectKey: active.projectKey,
+        organization: active.organization,
         hasToken: Boolean(token && token.trim().length > 0),
         detectedFromProperties: false,
       };
     }
     const serverUrl = this.activeServerUrl ?? this.config.get<string>('serverUrl', '');
     const projectKey = this.activeProjectKey ?? this.config.get<string>('projectKey', '');
+    const organization = this.activeOrganization ?? this.config.get<string>('organization', '');
 
     const token = await this.getToken();
 
     return {
       serverUrl,
       projectKey,
+      organization: organization || undefined,
       hasToken: Boolean(token && token.trim().length > 0),
       detectedFromProperties: false,
       hasPlaintextCredentialsWarning: false,

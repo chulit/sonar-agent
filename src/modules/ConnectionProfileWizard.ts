@@ -1,14 +1,20 @@
 import * as vscode from 'vscode';
-import { ProjectDetector } from './ProjectDetector.js';
+import { ProjectDetector, isSonarCloudUrl } from './ProjectDetector.js';
 import { SonarClient } from './SonarClient.js';
 import { Logger } from './Logger.js';
+
+export interface SonarClientFactoryConfig {
+  serverUrl: string;
+  token: string;
+  organization?: string;
+}
 
 export type ProfileAction =
   'switchProfile' | 'newProfile' | 'renameProfile' | 'deleteProfile' | 'verifyConnection';
 
 export interface ConnectionProfileWizardOptions {
   projectDetector: ProjectDetector;
-  sonarClientFactory?: (config: { serverUrl: string; token: string }) => SonarClient;
+  sonarClientFactory?: (config: SonarClientFactoryConfig) => SonarClient;
   onConfigChanged?: () => Promise<void> | void;
   promptProjectSelectionFn?: () => Promise<void>;
   showQuickPickFn?: typeof vscode.window.showQuickPick;
@@ -29,8 +35,29 @@ export class ConnectionProfileWizard {
     this.onConfigChanged = options.onConfigChanged;
   }
 
-  private get sonarClientFactory(): (config: { serverUrl: string; token: string }) => SonarClient {
+  private get sonarClientFactory(): (config: SonarClientFactoryConfig) => SonarClient {
     return this.options.sonarClientFactory ?? ((cfg) => new SonarClient(cfg));
+  }
+
+  /**
+   * Prompts for the SonarQube Cloud organization key. Returns the trimmed key,
+   * or undefined when the user cancels or leaves it empty (existing config is
+   * then kept as-is by the caller).
+   */
+  private async promptOrganizationKey(initial?: string): Promise<string | undefined> {
+    const organization = await this.showInputBoxFn({
+      title: 'SonarQube Cloud Organization',
+      prompt:
+        'Enter your SonarQube Cloud organization key (required for project search & rule details)',
+      placeHolder: 'e.g. my-org',
+      value: initial ?? '',
+      ignoreFocusOut: true,
+    });
+    if (organization === undefined) {
+      return undefined;
+    }
+    const trimmed = organization.trim();
+    return trimmed ? trimmed : undefined;
   }
 
   private get showQuickPickFn(): typeof vscode.window.showQuickPick {
@@ -90,7 +117,11 @@ export class ConnectionProfileWizard {
       return;
     }
 
-    const client = this.sonarClientFactory({ serverUrl: config.serverUrl, token });
+    const client = this.sonarClientFactory({
+      serverUrl: config.serverUrl,
+      token,
+      organization: config.organization,
+    });
     const projects = await client.fetchProjects();
 
     const manualOption = {
@@ -303,6 +334,14 @@ export class ConnectionProfileWizard {
 
       currentToken = token.trim();
 
+      let organization = (await this.projectDetector.getConfig()).organization;
+      if (isSonarCloudUrl(currentUrl)) {
+        const entered = await this.promptOrganizationKey(organization);
+        if (entered !== undefined) {
+          organization = entered;
+        }
+      }
+
       let verificationResult: { ok: boolean; message?: string } = { ok: false };
       await this.withProgressFn(
         {
@@ -311,7 +350,11 @@ export class ConnectionProfileWizard {
           cancellable: false,
         },
         async () => {
-          const client = this.sonarClientFactory({ serverUrl: currentUrl, token: currentToken });
+          const client = this.sonarClientFactory({
+            serverUrl: currentUrl,
+            token: currentToken,
+            organization,
+          });
           verificationResult = await client.verifyConnection();
         },
       );
@@ -331,6 +374,9 @@ export class ConnectionProfileWizard {
 
       await this.projectDetector.setServerUrl(currentUrl);
       await this.projectDetector.setToken(currentToken);
+      if (organization !== undefined) {
+        await this.projectDetector.setOrganization(organization);
+      }
 
       this.showInformationMessageFn('SonarQube connection successfully verified and saved!');
 
@@ -461,7 +507,11 @@ export class ConnectionProfileWizard {
       this.showWarningMessageFn('No active connection profile to verify.');
       return;
     }
-    const result = await this.verifyConnectionWithProgress(binding.serverUrl, bindingToken);
+    const result = await this.verifyConnectionWithProgress(
+      binding.serverUrl,
+      bindingToken,
+      binding.organization,
+    );
     if (result.ok) {
       this.showInformationMessageFn('SonarQube connection verified.');
     } else {
@@ -474,6 +524,7 @@ export class ConnectionProfileWizard {
   private async verifyConnectionWithProgress(
     serverUrl: string,
     token: string,
+    organization?: string,
   ): Promise<{ ok: boolean; message?: string }> {
     let result: { ok: boolean; message?: string } = { ok: false };
     await this.withProgressFn(
@@ -486,6 +537,7 @@ export class ConnectionProfileWizard {
         const client = this.sonarClientFactory({
           serverUrl,
           token,
+          organization,
         });
         result = await client.verifyConnection();
       },
@@ -520,7 +572,11 @@ export class ConnectionProfileWizard {
     serverUrl: string;
     token: string;
     projectKey: string;
-  }): Promise<{ name: string; serverUrl: string; token: string; projectKey: string } | undefined> {
+    organization: string;
+  }): Promise<
+    | { name: string; serverUrl: string; token: string; projectKey: string; organization: string }
+    | undefined
+  > {
     const name = await this.showInputBoxFn({
       title: 'New Connection Profile (1/4)',
       prompt: 'Name this profile (e.g. kantor-prod)',
@@ -572,6 +628,7 @@ export class ConnectionProfileWizard {
       serverUrl: serverUrl.trim(),
       token: token.trim(),
       projectKey: projectKey.trim(),
+      organization: initial.organization,
     };
   }
 
@@ -582,6 +639,7 @@ export class ConnectionProfileWizard {
       serverUrl: suggested?.serverUrl ?? 'http://localhost:9000',
       token: '',
       projectKey: suggested?.projectKey ?? '',
+      organization: suggested?.organization ?? '',
     };
 
     while (true) {
@@ -591,9 +649,17 @@ export class ConnectionProfileWizard {
       }
       current = inputs;
 
+      if (isSonarCloudUrl(current.serverUrl) && !current.organization.trim()) {
+        const entered = await this.promptOrganizationKey(current.organization);
+        if (entered !== undefined) {
+          current.organization = entered;
+        }
+      }
+
       const verificationResult = await this.verifyConnectionWithProgress(
         current.serverUrl,
         current.token,
+        current.organization.trim() || undefined,
       );
 
       if (!verificationResult.ok) {
@@ -614,10 +680,19 @@ export class ConnectionProfileWizard {
   }
 
   private async finalizeProfileCreation(
-    profile: { name: string; serverUrl: string; token: string; projectKey: string },
+    profile: {
+      name: string;
+      serverUrl: string;
+      token: string;
+      projectKey: string;
+      organization: string;
+    },
     hasPlaintextCredentials?: boolean,
   ): Promise<void> {
-    const created = await this.projectDetector.createProfile(profile);
+    const created = await this.projectDetector.createProfile({
+      ...profile,
+      organization: profile.organization.trim() || undefined,
+    });
     if (hasPlaintextCredentials) {
       this.showWarningMessageFn(
         'sonar-project.properties contains plaintext credentials. They were not imported; remove them to avoid leaking secrets.',
