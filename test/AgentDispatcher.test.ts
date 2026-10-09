@@ -201,32 +201,48 @@ describe('AgentDispatcher - Interactive Dispatching', () => {
     creationDate: '2026-09-13T10:00:00+0000',
   };
 
-  it('should send the prompt to a new Claude Code session', async () => {
-    const executedCommands: { cmd: string; args: unknown[] }[] = [];
+  it('should open Claude Code chat and leave the prompt in the clipboard (no prompt-injection API exists)', async () => {
+    const executedCommands: string[] = [];
     const openFileAtLine = vi.fn().mockResolvedValue(true);
     const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+    const clipboardWriteFn = vi.fn().mockResolvedValue(undefined);
 
     const dispatcher = new AgentDispatcher({
       fileNavigator: mockNavigator,
       isExtensionInstalledFn: (id) => id === 'anthropic.claude-code',
-      executeCommandFn: async (cmd, ...args) => {
-        executedCommands.push({ cmd, args });
+      clipboardWriteFn,
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
         return undefined;
       },
     });
 
     const res = await dispatcher.dispatch('prompt content', 'claude-code', sampleItem);
     expect(res.ok).toBe(true);
-    expect(executedCommands).toContainEqual({
-      cmd: 'claude-vscode.editor.open',
-      args: [undefined, 'prompt content'],
-    });
-    expect(executedCommands).toContainEqual({
-      cmd: 'claude-vscode.insertAtMention',
-      args: [],
-    });
+    // focuses/opens the Claude Code chat — never pretends to inject the prompt
+    expect(executedCommands[0]).toBe('claude-vscode.focus');
+    expect(clipboardWriteFn).toHaveBeenCalledWith('prompt content');
     expect(openFileAtLine).toHaveBeenCalledWith('src/App.vue', 42);
-    expect(res.message).toBe('Dispatched to Claude Code.');
+    expect(res.message).toBe('Prompt ready in clipboard for Claude Code.');
+  });
+
+  it('should degrade gracefully when no Claude Code open command is registered', async () => {
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+    const clipboardWriteFn = vi.fn().mockResolvedValue(undefined);
+
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      clipboardWriteFn,
+      executeCommandFn: async () => {
+        throw new Error('command not found');
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'claude-code', sampleItem);
+    expect(res.ok).toBe(true);
+    expect(clipboardWriteFn).toHaveBeenCalledWith('prompt content');
+    expect(res.message).toBe('Prompt ready in clipboard for Claude Code.');
   });
 
   it('should trigger focus command when dispatching to Cline', async () => {
@@ -809,5 +825,205 @@ describe('AgentDispatcher - Deep Dispatch Seam', () => {
       expect(items[2].ruleKey).toBe('');
       expect(items[2].id).toBe('sonar-issue');
     });
+  });
+});
+
+describe('AgentDispatcher - Copilot Dispatch Hardening', () => {
+  const sampleItem: SonarDetailItem = {
+    id: 'ISSUE-1',
+    ruleKey: 'typescript:S123',
+    message: 'Remove this unused variable.',
+    component: 'my-project:src/index.ts',
+    filePath: 'src/index.ts',
+    line: 10,
+    type: 'CODE_SMELL',
+    severity: 'MAJOR',
+    status: 'OPEN',
+    tags: ['clean-code'],
+    creationDate: '2026-09-13T10:00:00+0000',
+  };
+
+  function buildDispatcher(overrides?: ConstructorParameters<typeof AgentDispatcher>[0]) {
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+    const dispatcher = new AgentDispatcher({ fileNavigator: mockNavigator, ...overrides });
+    return { dispatcher, openFileAtLine };
+  }
+
+  it('should prefill Copilot Chat via workbench.action.chat.open on the success path', async () => {
+    const executedCommands: { cmd: string; args: unknown[] }[] = [];
+    const clipboardWriteFn = vi.fn().mockResolvedValue(undefined);
+    const { dispatcher } = buildDispatcher({
+      isExtensionInstalledFn: (id) => id === 'github.copilot-chat',
+      clipboardWriteFn,
+      executeCommandFn: async (cmd, ...args) => {
+        executedCommands.push({ cmd, args });
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'copilot', sampleItem);
+
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Dispatched to GitHub Copilot Chat.');
+    expect(executedCommands).toContainEqual({
+      cmd: 'workbench.action.chat.open',
+      args: [{ query: 'prompt content' }],
+    });
+  });
+
+  it('should actually write the prompt to the clipboard when the Copilot chat command fails', async () => {
+    const clipboardWriteFn = vi.fn().mockResolvedValue(undefined);
+    const { dispatcher } = buildDispatcher({
+      clipboardWriteFn,
+      executeCommandFn: async () => {
+        throw new Error('command not found');
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'copilot', sampleItem);
+
+    expect(res.ok).toBe(true);
+    expect(clipboardWriteFn).toHaveBeenCalledWith('prompt content');
+    expect(res.message).toBe('Prompt copied to clipboard (Copilot chat command unavailable).');
+  });
+
+  it('should report failure honestly when both Copilot chat and clipboard fail', async () => {
+    const { dispatcher } = buildDispatcher({
+      clipboardWriteFn: async () => {
+        throw new Error('no clipboard in headless env');
+      },
+      executeCommandFn: async () => {
+        throw new Error('command not found');
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'copilot', sampleItem);
+
+    expect(res.ok).toBe(false);
+    expect(res.message).toBe('Copilot chat unavailable and clipboard copy failed.');
+  });
+});
+
+describe('AgentDispatcher - Five-Agent Routing Matrix', () => {
+  const sampleItem: SonarDetailItem = {
+    id: 'ISSUE-1',
+    ruleKey: 'typescript:S123',
+    message: 'Remove this unused variable.',
+    component: 'my-project:src/index.ts',
+    filePath: 'src/index.ts',
+    line: 10,
+    type: 'CODE_SMELL',
+    severity: 'MAJOR',
+    status: 'OPEN',
+    tags: ['clean-code'],
+    creationDate: '2026-09-13T10:00:00+0000',
+  };
+
+  function buildDispatcher(overrides?: ConstructorParameters<typeof AgentDispatcher>[0]) {
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
+    const dispatcher = new AgentDispatcher({ fileNavigator: mockNavigator, ...overrides });
+    return { dispatcher, openFileAtLine };
+  }
+
+  it('copilot: injects the prompt by prefilling Copilot Chat input', async () => {
+    const executedCommands: { cmd: string; args: unknown[] }[] = [];
+    const { dispatcher } = buildDispatcher({
+      executeCommandFn: async (cmd, ...args) => {
+        executedCommands.push({ cmd, args });
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'copilot', sampleItem);
+
+    expect(res.ok).toBe(true);
+    expect(executedCommands).toContainEqual({
+      cmd: 'workbench.action.chat.open',
+      args: [{ query: 'prompt content' }],
+    });
+  });
+
+  it('antigravity: injects the prompt via sendToAgentPanelFn', async () => {
+    let capturedOptions: unknown = null;
+    const openFileAtLine = vi.fn().mockResolvedValue(true);
+    const resolveFilePath = vi.fn().mockResolvedValue('/abs/path/src/index.ts');
+    const mockNavigator = { openFileAtLine, resolveFilePath } as unknown as FileNavigator;
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      isAntigravityEnvFn: () => true,
+      sendToAgentPanelFn: async (opts) => {
+        capturedOptions = opts;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'antigravity', sampleItem);
+
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Dispatched to Antigravity Chat.');
+    expect((capturedOptions as { message: string }).message).toBe('prompt content');
+    expect(openFileAtLine).toHaveBeenCalledWith('src/index.ts', 10);
+  });
+
+  it('codex: falls back to focus + clipboard when no extension API is exported', async () => {
+    const executedCommands: string[] = [];
+    const clipboardWriteFn = vi.fn().mockResolvedValue(undefined);
+    const { dispatcher } = buildDispatcher({
+      isExtensionInstalledFn: (id) => id === 'openai.chatgpt',
+      getExtensionFn: () => undefined,
+      clipboardWriteFn,
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'codex', sampleItem);
+
+    expect(res.ok).toBe(true);
+    expect(executedCommands).toContain('chatgpt.openSidebar');
+    expect(clipboardWriteFn).toHaveBeenCalledWith('prompt content');
+    expect(res.message).toBe('Prompt ready in clipboard for Codex Agent.');
+  });
+
+  it('claude-code: opens the chat and leaves the prompt in the clipboard', async () => {
+    const executedCommands: string[] = [];
+    const clipboardWriteFn = vi.fn().mockResolvedValue(undefined);
+    const { dispatcher } = buildDispatcher({
+      isExtensionInstalledFn: (id) => id === 'anthropic.claude-code',
+      clipboardWriteFn,
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'claude-code', sampleItem);
+
+    expect(res.ok).toBe(true);
+    expect(executedCommands[0]).toBe('claude-vscode.focus');
+    expect(clipboardWriteFn).toHaveBeenCalledWith('prompt content');
+    expect(res.message).toBe('Prompt ready in clipboard for Claude Code.');
+  });
+
+  it('cline: focuses the Cline view and leaves the prompt in the clipboard', async () => {
+    const executedCommands: string[] = [];
+    const clipboardWriteFn = vi.fn().mockResolvedValue(undefined);
+    const { dispatcher } = buildDispatcher({
+      isExtensionInstalledFn: (id) => id === 'saoudrizwan.claude-dev',
+      clipboardWriteFn,
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
+        return undefined;
+      },
+    });
+
+    const res = await dispatcher.dispatch('prompt content', 'cline', sampleItem);
+
+    expect(res.ok).toBe(true);
+    expect(executedCommands).toContain('claude-dev.focus');
+    expect(clipboardWriteFn).toHaveBeenCalledWith('prompt content');
+    expect(res.message).toContain('Cline');
   });
 });

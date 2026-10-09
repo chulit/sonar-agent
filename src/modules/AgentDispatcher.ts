@@ -26,6 +26,7 @@ export interface AgentDispatcherOptions {
   getExtensionFn?: (extensionId: string) => vscode.Extension<unknown> | undefined;
   isAntigravityEnvFn?: () => boolean;
   executeCommandFn?: (command: string, ...args: unknown[]) => Thenable<unknown> | Promise<unknown>;
+  clipboardWriteFn?: (text: string) => Thenable<void> | Promise<void>;
   sendToAgentPanelFn?: (options: SendToAgentPanelOptions) => Thenable<void> | Promise<void>;
   getDefaultAgentFn?: () => string;
 }
@@ -64,6 +65,7 @@ export class AgentDispatcher {
     command: string,
     ...args: unknown[]
   ) => Thenable<unknown> | Promise<unknown>;
+  private readonly clipboardWriteFn: (text: string) => Thenable<void> | Promise<void>;
   private readonly sendToAgentPanelFn: (
     options: SendToAgentPanelOptions,
   ) => Thenable<void> | Promise<void>;
@@ -83,6 +85,8 @@ export class AgentDispatcher {
     this.executeCommandFn =
       options?.executeCommandFn ??
       ((cmd: string, ...args: unknown[]) => vscode.commands.executeCommand(cmd, ...args));
+    this.clipboardWriteFn =
+      options?.clipboardWriteFn ?? ((text: string) => vscode.env.clipboard.writeText(text));
     this.sendToAgentPanelFn =
       options?.sendToAgentPanelFn ??
       ((opts) => {
@@ -451,11 +455,22 @@ export class AgentDispatcher {
       vscode.window.showInformationMessage('Dispatched Fix Prompt to GitHub Copilot Chat!');
       return { ok: true, message: 'Dispatched to GitHub Copilot Chat.' };
     } catch {
-      vscode.window.showInformationMessage(
-        'Prompt copied to clipboard! Paste it into GitHub Copilot Chat.',
-      );
-      return { ok: true, message: 'Copied to clipboard (Copilot chat command not found).' };
+      // Copilot Chat command unavailable — fall through to the clipboard fallback.
     }
+
+    try {
+      await this.clipboardWriteFn(prompt);
+    } catch {
+      vscode.window.showErrorMessage(
+        'Could not open Copilot Chat and failed to copy the prompt to the clipboard.',
+      );
+      return { ok: false, message: 'Copilot chat unavailable and clipboard copy failed.' };
+    }
+
+    vscode.window.showInformationMessage(
+      'Copilot Chat unavailable — prompt copied to clipboard. Paste it into GitHub Copilot Chat.',
+    );
+    return { ok: true, message: 'Prompt copied to clipboard (Copilot chat command unavailable).' };
   }
 
   private async collectAntigravityFiles(
@@ -645,22 +660,37 @@ export class AgentDispatcher {
     return { ok: true, message: 'Prompt ready in clipboard for Codex Agent.' };
   }
 
-  private async focusTargetAgent(targetAgentId: string, matchedAgent?: TargetAgent): Promise<void> {
-    if (targetAgentId === 'claude-code') {
-      const claudeCommands = [
-        'claude-vscode.editor.openLast',
-        'claude-vscode.sidebar.open',
-        'claude-vscode.focus',
-      ];
-      for (const cmd of claudeCommands) {
-        try {
-          await this.executeCommandFn(cmd);
-          break;
-        } catch {
-          // continue trying next command
-        }
+  /**
+   * Best-effort dispatch to Claude Code. The Claude Code extension exposes no
+   * public API for injecting a prompt (its contributed commands only open or
+   * focus the chat), so this opens/focuses the chat and relies on the prompt
+   * already copied to the clipboard. The toast is explicit about the manual
+   * paste step.
+   */
+  private async dispatchClaudeCode(): Promise<{ ok: boolean; message: string }> {
+    const openCommands = [
+      'claude-vscode.focus',
+      'claude-vscode.editor.open',
+      'claude-vscode.sidebar.open',
+      'claude-vscode.editor.openLast',
+    ];
+    for (const cmd of openCommands) {
+      try {
+        await this.executeCommandFn(cmd);
+        break;
+      } catch {
+        // try the next command
       }
-    } else if (targetAgentId === 'codex') {
+    }
+
+    vscode.window.showInformationMessage(
+      'Fix Prompt copied to clipboard for Claude Code! Press Cmd+V / Ctrl+V to paste it into the Claude Code chat.',
+    );
+    return { ok: true, message: 'Prompt ready in clipboard for Claude Code.' };
+  }
+
+  private async focusTargetAgent(targetAgentId: string, matchedAgent?: TargetAgent): Promise<void> {
+    if (targetAgentId === 'codex') {
       const codexCommands = ['chatgpt.openSidebar', 'chatgpt.focus'];
       for (const cmd of codexCommands) {
         try {
@@ -689,7 +719,7 @@ export class AgentDispatcher {
     allItems?: SonarDetailItem[],
   ): Promise<{ ok: boolean; message: string }> {
     try {
-      await vscode.env.clipboard.writeText(prompt);
+      await this.clipboardWriteFn(prompt);
     } catch {
       // ignore clipboard error in headless test environments
     }
@@ -707,18 +737,7 @@ export class AgentDispatcher {
     }
 
     if (targetAgentId === 'claude-code') {
-      try {
-        await this.executeCommandFn('claude-vscode.editor.open', undefined, prompt);
-        try {
-          await this.executeCommandFn('claude-vscode.insertAtMention');
-        } catch {
-          // The Claude Code extension may not have an active editor selection.
-        }
-        vscode.window.showInformationMessage('Dispatched Fix Prompt to Claude Code.');
-        return { ok: true, message: 'Dispatched to Claude Code.' };
-      } catch {
-        // The Claude Code prompt command is unavailable in older extension versions.
-      }
+      return this.dispatchClaudeCode();
     }
 
     if (targetAgentId === 'codex') {
