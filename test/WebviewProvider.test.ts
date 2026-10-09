@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as vscode from 'vscode';
 import { SonarOverviewViewProvider } from '../src/modules/SonarOverviewViewProvider.js';
 import { ProjectDetector } from '../src/modules/ProjectDetector.js';
 import { SonarClient } from '../src/modules/SonarClient.js';
@@ -605,5 +606,234 @@ describe('SonarOverviewViewProvider - Quality Gate widget', () => {
     const gateMessages = postedMessages.filter((m) => m.type === 'qualityGate');
     expect(gateMessages.length).toBeGreaterThan(0);
     expect(gateMessages[gateMessages.length - 1].status).toBeNull();
+  });
+});
+
+describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
+  let mockProjectDetector: any;
+  let provider: SonarOverviewViewProvider;
+  let mockWebviewView: any;
+  let messageCallback: ((msg: any) => Promise<void>) | undefined;
+  let postedMessages: any[] = [];
+  let fetchCalls: { url: string; init: any }[] = [];
+
+  const okJson = (data: any) => ({ ok: true, status: 200, json: async () => data });
+
+  function stubFetch(handler: (url: string, init?: any) => Promise<any>) {
+    fetchCalls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request, init?: any) => {
+        fetchCalls.push({ url: String(url), init });
+        return handler(String(url), init);
+      }),
+    );
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    postedMessages = [];
+    messageCallback = undefined;
+
+    // Stub fetch before the provider is created: resolveWebviewView kicks off
+    // a background _syncState, which must not hit the real network.
+    stubFetch(async (url) => {
+      if (url.includes('/api/issues/transitions')) return okJson({ transitions: [] });
+      if (url.includes('/api/users/current')) return okJson({ login: 'alice' });
+      if (url.includes('/api/issues/search')) return okJson({ issues: [] });
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    });
+
+    mockProjectDetector = {
+      getConfig: vi.fn(async () => ({
+        serverUrl: 'http://localhost:9000',
+        projectKey: 'my-project',
+        hasToken: true,
+      })),
+      getToken: vi.fn(async () => 'sqp_valid_token_123'),
+      setProjectKey: vi.fn(async () => {}),
+      listProfiles: vi.fn(async () => []),
+      getActiveProfile: vi.fn(async () => null),
+    };
+
+    mockWebviewView = {
+      visible: true,
+      webview: {
+        options: {},
+        html: '',
+        cspSource: 'vscode-webview-test-resource:',
+        postMessage: vi.fn(async (msg: any) => {
+          postedMessages.push(msg);
+          return true;
+        }),
+        onDidReceiveMessage: vi.fn((cb: any) => {
+          messageCallback = cb;
+          return { dispose: vi.fn() };
+        }),
+      },
+      onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+    };
+
+    provider = new SonarOverviewViewProvider(
+      { fsPath: '/extension' } as any,
+      mockProjectDetector as unknown as ProjectDetector,
+    );
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function send(msg: any) {
+    expect(messageCallback).toBeDefined();
+    await messageCallback!(msg);
+  }
+
+  it('forwards server transitions to the webview and caches them per issue key', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('/api/issues/transitions?issue=ISSUE-1')) {
+        return okJson({ transitions: ['confirm', 'falsepositive'] });
+      }
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    });
+
+    await send({ command: 'fetchIssueTransitions', issueKey: 'ISSUE-1' });
+
+    const msgs = postedMessages.filter((m) => m.type === 'issueTransitions');
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({
+      issueKey: 'ISSUE-1',
+      transitions: ['confirm', 'falsepositive'],
+    });
+
+    // Second request for the same issue is served from the host cache: no new transitions fetch.
+    postedMessages = [];
+    const transitionsCallsBefore = fetchCalls.filter((c) =>
+      c.url.includes('/api/issues/transitions'),
+    ).length;
+    await send({ command: 'fetchIssueTransitions', issueKey: 'ISSUE-1' });
+    expect(fetchCalls.filter((c) => c.url.includes('/api/issues/transitions')).length).toBe(
+      transitionsCallsBefore,
+    );
+    expect(postedMessages.filter((m) => m.type === 'issueTransitions')).toHaveLength(1);
+  });
+
+  it('posts an empty transition list when the server call fails', async () => {
+    stubFetch(async () => ({
+      ok: false,
+      status: 500,
+      statusText: 'Error',
+      json: async () => ({}),
+    }));
+
+    await send({ command: 'fetchIssueTransitions', issueKey: 'ISSUE-9' });
+
+    const msgs = postedMessages.filter((m) => m.type === 'issueTransitions');
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ issueKey: 'ISSUE-9', transitions: [] });
+  });
+
+  it('is a no-op when the false-positive confirmation dialog is dismissed', async () => {
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    stubFetch(async () => okJson({}));
+
+    await send({ command: 'issueTransition', issueKey: 'ISSUE-1', transition: 'falsepositive' });
+
+    expect(fetchCalls.some((c) => c.url.includes('/api/issues/do_transition'))).toBe(false);
+  });
+
+  it('applies a confirmed false-positive transition and re-fetches the issue list', async () => {
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(
+      'Mark as False Positive' as any,
+    );
+    const infoSpy = vi
+      .spyOn(vscode.window, 'showInformationMessage')
+      .mockResolvedValue(undefined as any);
+    stubFetch(async (url) => {
+      if (url.includes('/api/issues/do_transition')) return okJson({});
+      if (url.includes('/api/issues/search')) return okJson({ issues: [] });
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    });
+
+    await send({ command: 'fetchDetails', category: 'reliability' });
+    const detailsBefore = postedMessages.filter((m) => m.type === 'details').length;
+
+    await send({ command: 'issueTransition', issueKey: 'ISSUE-1', transition: 'falsepositive' });
+
+    const transitionCall = fetchCalls.find((c) => c.url.includes('/api/issues/do_transition'));
+    expect(transitionCall).toBeDefined();
+    expect(new URLSearchParams(String(transitionCall!.init.body)).get('transition')).toBe(
+      'falsepositive',
+    );
+    expect(infoSpy).toHaveBeenCalledWith('Issue marked as false positive.');
+    // The affected list is re-fetched so the UI reflects the change.
+    expect(postedMessages.filter((m) => m.type === 'details').length).toBeGreaterThan(
+      detailsBefore,
+    );
+  });
+
+  it('shows the permission hint when the server rejects a transition with 403', async () => {
+    const warnSpy = vi
+      .spyOn(vscode.window, 'showWarningMessage')
+      .mockResolvedValue(undefined as any);
+    stubFetch(async (url) => {
+      if (url.includes('/api/issues/do_transition')) {
+        return { ok: false, status: 403, statusText: 'Forbidden', json: async () => ({}) };
+      }
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    });
+
+    await send({ command: 'issueTransition', issueKey: 'ISSUE-1', transition: 'confirm' });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Your SonarQube token needs the "Administer Issues" permission for this action.',
+    );
+  });
+
+  it('assignIssue resolves the current user and posts to /api/issues/assign', async () => {
+    const infoSpy = vi
+      .spyOn(vscode.window, 'showInformationMessage')
+      .mockResolvedValue(undefined as any);
+    stubFetch(async (url) => {
+      if (url.includes('/api/users/current')) return okJson({ login: 'alice' });
+      if (url.includes('/api/issues/assign')) return okJson({});
+      if (url.includes('/api/issues/search')) return okJson({ issues: [] });
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    });
+
+    await send({ command: 'fetchDetails', category: 'reliability' });
+    await send({ command: 'assignIssue', issueKey: 'ISSUE-1' });
+
+    const assignCall = fetchCalls.find((c) => c.url.includes('/api/issues/assign'));
+    expect(assignCall).toBeDefined();
+    const params = new URLSearchParams(String(assignCall!.init.body));
+    expect(params.get('issue')).toBe('ISSUE-1');
+    expect(params.get('assignee')).toBe('alice');
+    expect(infoSpy).toHaveBeenCalledWith('Issue assigned to alice.');
+  });
+
+  it('addIssueComment posts the comment and ignores empty text', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('/api/issues/add_comment')) return okJson({});
+      if (url.includes('/api/issues/search')) return okJson({ issues: [] });
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    });
+
+    await send({ command: 'addIssueComment', issueKey: 'ISSUE-1', text: '   ' });
+    expect(fetchCalls.some((c) => c.url.includes('/api/issues/add_comment'))).toBe(false);
+
+    await send({ command: 'addIssueComment', issueKey: 'ISSUE-1', text: 'needs review' });
+    const commentCall = fetchCalls.find((c) => c.url.includes('/api/issues/add_comment'));
+    expect(commentCall).toBeDefined();
+    expect(new URLSearchParams(String(commentCall!.init.body)).get('text')).toBe('needs review');
+  });
+
+  it('renders the overflow menu button only for real issue types in the webview html', async () => {
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    const html = mockWebviewView.webview.html as string;
+    expect(html).toContain('toggleIssueMenu(card, item)');
+    expect(html).toContain('issue-menu-popover');
+    expect(html).toContain('fetchIssueTransitions');
   });
 });
