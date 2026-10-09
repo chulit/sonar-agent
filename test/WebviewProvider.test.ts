@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SonarOverviewViewProvider } from '../src/modules/SonarOverviewViewProvider.js';
 import { ProjectDetector } from '../src/modules/ProjectDetector.js';
 import { SonarClient } from '../src/modules/SonarClient.js';
@@ -169,6 +169,7 @@ describe('SonarOverviewViewProvider - Webview Lifecycle & CSP', () => {
     vi.spyOn(SonarClient.prototype, 'fetchProjects').mockResolvedValue([
       { key: 'my-project', name: 'My Project' },
     ]);
+    vi.spyOn(SonarClient.prototype, 'getQualityGateStatus').mockResolvedValue(null);
     vi.spyOn(SonarClient.prototype, 'getOverview').mockResolvedValue({
       security: { count: 0, rating: 'A' },
       reliability: { count: 0, rating: 'A' },
@@ -337,6 +338,7 @@ describe('SonarOverviewViewProvider - Profile Switcher UI', () => {
   });
 
   it('should switch the active binding via switchProfile message', async () => {
+    vi.spyOn(SonarClient.prototype, 'getQualityGateStatus').mockResolvedValue(null);
     await detector.createProfile({
       name: 'Alpha',
       serverUrl: 'http://a:9000',
@@ -472,5 +474,136 @@ describe('SonarOverviewViewProvider - Profile Switcher UI', () => {
     expect(actions).toContain('deleteProfile');
     expect(actions).toContain('verifyConnection');
     expect(actions).toContain('updateCredentials');
+  });
+});
+
+describe('SonarOverviewViewProvider - Quality Gate widget', () => {
+  let mockProjectDetector: any;
+  let provider: SonarOverviewViewProvider;
+  let mockWebviewView: any;
+  let postedMessages: any[] = [];
+
+  const errorGatePayload = {
+    projectStatus: {
+      status: 'ERROR',
+      conditions: [
+        {
+          status: 'ERROR',
+          metricKey: 'coverage',
+          comparator: 'LT',
+          errorThreshold: '80',
+          actualValue: '62.4',
+        },
+      ],
+    },
+  };
+
+  function stubFetch(handler: (url: string) => Promise<any>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) => handler(String(url))),
+    );
+  }
+
+  beforeEach(() => {
+    // restoreAllMocks (not clearAllMocks): earlier suites spy on
+    // SonarClient.prototype.getQualityGateStatus, and this suite needs the
+    // real implementation against the stubbed fetch below.
+    vi.restoreAllMocks();
+    postedMessages = [];
+
+    mockProjectDetector = {
+      getConfig: vi.fn(async () => ({
+        serverUrl: 'http://localhost:9000',
+        projectKey: 'org.sample:project',
+        hasToken: true,
+      })),
+      getToken: vi.fn(async () => 'sqp_valid_token_123'),
+      setProjectKey: vi.fn(async () => {}),
+      listProfiles: vi.fn(async () => []),
+      getActiveProfile: vi.fn(async () => null),
+    };
+
+    mockWebviewView = {
+      visible: true,
+      webview: {
+        options: {},
+        html: '',
+        cspSource: 'vscode-webview-test-resource:',
+        postMessage: vi.fn(async (msg: any) => {
+          postedMessages.push(msg);
+          return true;
+        }),
+        onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
+      },
+      onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+    };
+
+    provider = new SonarOverviewViewProvider(
+      { fsPath: '/extension' } as any,
+      mockProjectDetector as unknown as ProjectDetector,
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function syncAndCollect() {
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    await provider.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return postedMessages.filter((m) => m.type === 'qualityGate');
+  }
+
+  it('should post {type: qualityGate} with the parsed ERROR status alongside overview data', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('/api/qualitygates/project_status')) {
+        return { ok: true, status: 200, json: async () => errorGatePayload };
+      }
+      throw new Error('connection refused');
+    });
+
+    const gateMessages = await syncAndCollect();
+
+    expect(gateMessages.length).toBeGreaterThan(0);
+    const last = gateMessages[gateMessages.length - 1];
+    expect(last.status).toMatchObject({ status: 'ERROR' });
+    expect(last.status.conditions).toHaveLength(1);
+    expect(last.status.conditions[0]).toMatchObject({
+      metricKey: 'coverage',
+      actualValue: '62.4',
+    });
+  });
+
+  it('should post {type: qualityGate, status: null} on HTTP 404 so the widget hides silently', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('/api/qualitygates/project_status')) {
+        return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+      }
+      throw new Error('connection refused');
+    });
+
+    const gateMessages = await syncAndCollect();
+
+    expect(gateMessages.length).toBeGreaterThan(0);
+    const last = gateMessages[gateMessages.length - 1];
+    expect(last.status).toBeNull();
+  });
+
+  it('should still deliver overview state messages when the gate request fails outright', async () => {
+    stubFetch(async () => {
+      throw new Error('connection refused');
+    });
+
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    await provider.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Overview pipeline is unaffected by the gate failure
+    expect(postedMessages.some((m) => m.type === 'state')).toBe(true);
+    const gateMessages = postedMessages.filter((m) => m.type === 'qualityGate');
+    expect(gateMessages.length).toBeGreaterThan(0);
+    expect(gateMessages[gateMessages.length - 1].status).toBeNull();
   });
 });
