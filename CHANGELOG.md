@@ -1,3 +1,29 @@
+## [1.5.1](https://github.com/chulit/sonar-agent/compare/v1.5.0...v1.5.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **dispatcher:** harden direct-send paths and honest clipboard fallbacks ([0beb983](https://github.com/chulit/sonar-agent/commit/0beb983b2e7399a847be47b0595bf7a6ce6a6c15))
+
+# [1.5.0](https://github.com/chulit/sonar-agent/compare/v1.4.0...v1.5.0) (2026-10-09)
+
+
+### Features
+
+* **issues:** add issue lifecycle actions (transitions, assign, comment) ([3a00ef3](https://github.com/chulit/sonar-agent/commit/3a00ef397f39b25579ac829bdd0c0dda1a88da5c))
+* **issues:** add issue lifecycle actions (transitions, assign, comment) ([892f53d](https://github.com/chulit/sonar-agent/commit/892f53de3dac49cc9bd7246973fb813edf7f96f1))
+* **issues:** add issue lifecycle actions (transitions, assign, comment) ([3641ffa](https://github.com/chulit/sonar-agent/commit/3641ffa0c37626b8df095fbd4fb63c96c1d6c184))
+* **issues:** lifecycle actions in sidebar webview ([0eda54f](https://github.com/chulit/sonar-agent/commit/0eda54f01b536ee53be9a66c396fb31b36ef6439))
+* **issues:** lifecycle actions webview (extract menu assets to module) ([a4036a5](https://github.com/chulit/sonar-agent/commit/a4036a505c4c7a6c958f02d64abc3b6023162398))
+
+# [1.4.0](https://github.com/chulit/sonar-agent/compare/v1.3.0...v1.4.0) (2026-10-09)
+
+
+### Features
+
+* **ui:** add Quality Gate status widget to sidebar ([81c3574](https://github.com/chulit/sonar-agent/commit/81c3574f610105a2fd47d469739b9b210e38b29c))
+* **ui:** quality gate banner in sidebar webview ([435aadb](https://github.com/chulit/sonar-agent/commit/435aadb7ce429d5bc8d45d55d4de58f484115071))
+
 # [1.3.0](https://github.com/chulit/sonar-agent/compare/v1.2.0...v1.3.0) (2026-09-22)
 
 
