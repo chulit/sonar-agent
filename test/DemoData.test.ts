@@ -21,6 +21,16 @@ describe('DemoData', () => {
     expect(['A', 'B', 'C', 'D', 'E']).toContain(overview.security.rating);
   });
 
+  it('returns valid SonarOverview for new code period', () => {
+    const overview = DemoData.getOverview('new');
+    expect(overview.period).toBe('new');
+    expect(overview.hasNewCode).toBe(true);
+    expect(overview.security.count).toBe(1);
+    expect(overview.reliability.count).toBe(2);
+    expect(overview.maintainability.count).toBe(4);
+    expect(overview.coverage.percentage).toBe(78.5);
+  });
+
   it('returns failing QualityGateStatus with failed conditions', () => {
     const gate = DemoData.getQualityGate();
     expect(gate).toBeDefined();
@@ -68,5 +78,21 @@ describe('DemoData', () => {
     const credDoc = DemoData.getRuleDoc('javascript:S2068');
     expect(credDoc).toBeDefined();
     expect(credDoc?.cleanDesc).toContain('Hard-coded credentials');
+  });
+
+  it('returns scoped detail items for new code period', () => {
+    const newItems = DemoData.getDetails(undefined, 'new');
+    expect(newItems.length).toBeGreaterThan(0);
+    expect(newItems.every((i) => i.inNewCodePeriod === true)).toBe(true);
+
+    const reliabilityNew = DemoData.getDetails('reliability', 'new');
+    expect(reliabilityNew).toHaveLength(2);
+    expect(reliabilityNew.every((i) => i.inNewCodePeriod === true)).toBe(true);
+
+    const securityNew = DemoData.getDetails('security', 'new');
+    expect(securityNew).toHaveLength(1);
+
+    const duplicationsNew = DemoData.getDetails('duplications', 'new');
+    expect(duplicationsNew).toHaveLength(0);
   });
 });

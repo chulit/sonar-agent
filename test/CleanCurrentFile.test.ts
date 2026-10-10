@@ -267,5 +267,94 @@ describe('FileIssueAggregator & Clean Current File', () => {
       await messageListener({ command: 'cleanCurrentFile' });
       expect(cleanSpy).toHaveBeenCalled();
     });
+
+    it('filters issues to New Code period and alerts when 0 new issues exist', async () => {
+      const infoSpy = vi.spyOn(vscode.window, 'showInformationMessage');
+      await provider.handleSwitchCodePeriod('new');
+
+      // Sample issues without inNewCodePeriod
+      (provider as any)._cachedServerIssues = [
+        {
+          id: 'old-1',
+          ruleKey: 'typescript:S123',
+          message: 'Old issue',
+          component: 'src/services/UserService.ts',
+          filePath: 'src/services/UserService.ts',
+          line: 10,
+          severity: 'MAJOR',
+          type: 'CODE_SMELL',
+          status: 'OPEN',
+          tags: [],
+          creationDate: '2026-09-01T00:00:00Z',
+          inNewCodePeriod: false,
+        },
+      ];
+
+      const doc = {
+        uri: vscode.Uri.file('/workspace/src/services/UserService.ts'),
+        fileName: '/workspace/src/services/UserService.ts',
+      } as vscode.TextDocument;
+
+      const result = await provider.cleanCurrentFile(doc);
+
+      expect(result.ok).toBe(true);
+      expect(result.count).toBe(0);
+      expect(infoSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'No new Sonar issues detected in UserService.ts for the current leak period!',
+        ),
+      );
+      expect(mockDispatcher.dispatchBatch).not.toHaveBeenCalled();
+    });
+
+    it('dispatches only New Code issues when active code period is new', async () => {
+      await provider.handleSwitchCodePeriod('new');
+
+      (provider as any)._cachedServerIssues = [
+        {
+          id: 'old-1',
+          ruleKey: 'typescript:S123',
+          message: 'Old issue',
+          component: 'src/services/UserService.ts',
+          filePath: 'src/services/UserService.ts',
+          line: 10,
+          severity: 'MAJOR',
+          type: 'CODE_SMELL',
+          status: 'OPEN',
+          tags: [],
+          creationDate: '2026-09-01T00:00:00Z',
+          inNewCodePeriod: false,
+        },
+        {
+          id: 'new-1',
+          ruleKey: 'typescript:S2259',
+          message: 'New issue in leak period',
+          component: 'src/services/UserService.ts',
+          filePath: 'src/services/UserService.ts',
+          line: 42,
+          severity: 'CRITICAL',
+          type: 'BUG',
+          status: 'OPEN',
+          tags: ['bug'],
+          creationDate: '2026-10-10T00:00:00Z',
+          inNewCodePeriod: true,
+        },
+      ];
+
+      const doc = {
+        uri: vscode.Uri.file('/workspace/src/services/UserService.ts'),
+        fileName: '/workspace/src/services/UserService.ts',
+      } as vscode.TextDocument;
+
+      const result = await provider.cleanCurrentFile(doc);
+
+      expect(result.ok).toBe(true);
+      expect(result.count).toBe(1);
+      expect(mockDispatcher.dispatchBatch).toHaveBeenCalledTimes(1);
+      expect(mockDispatcher.dispatchBatch).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ id: 'new-1' })]),
+        expect.objectContaining({ codePeriod: 'new' }),
+      );
+    });
   });
 });

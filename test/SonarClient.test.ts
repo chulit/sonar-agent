@@ -168,6 +168,148 @@ describe('SonarClient - Connection Verification', () => {
     expect(overview.securityHotspots).toEqual({ count: 4, rating: 'C' });
   });
 
+  it('should fetch and map New Code measures when codePeriod is new', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'new_bugs', value: '1' },
+          { metric: 'new_reliability_rating', value: '2.0' },
+          { metric: 'new_vulnerabilities', value: '0' },
+          { metric: 'new_security_rating', value: '1.0' },
+          { metric: 'new_code_smells', value: '3' },
+          { metric: 'new_maintainability_rating', value: '1.0' },
+          { metric: 'new_coverage', value: '88.5' },
+          { metric: 'new_lines_to_cover', value: '120' },
+          { metric: 'new_duplicated_lines_density', value: '0.0' },
+          { metric: 'new_duplicated_lines', value: '0' },
+          { metric: 'new_security_hotspots', value: '0' },
+          { metric: 'new_security_review_rating', value: '1.0' },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project', 'new');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('metricKeys=new_bugs'),
+      expect.any(Object),
+    );
+    expect(overview.period).toBe('new');
+    expect(overview.hasNewCode).toBe(true);
+    expect(overview.reliability).toEqual({ count: 1, rating: 'B' });
+    expect(overview.security).toEqual({ count: 0, rating: 'A' });
+    expect(overview.maintainability).toEqual({ count: 3, rating: 'A' });
+    expect(overview.coverage).toEqual({ percentage: 88.5, linesToCover: 120 });
+    expect(overview.duplications).toEqual({ percentage: 0.0, duplicatedLines: 0 });
+  });
+
+  it('should flag hasNewCode as false when New Code measures indicate 0 new lines and 0 issues', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'new_bugs', value: '0' },
+          { metric: 'new_vulnerabilities', value: '0' },
+          { metric: 'new_code_smells', value: '0' },
+          { metric: 'new_lines_to_cover', value: '0' },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project', 'new');
+    expect(overview.period).toBe('new');
+    expect(overview.hasNewCode).toBe(false);
+  });
+
+  it('should support period object response format from legacy SonarQube versions', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'new_bugs', period: { value: '2' } },
+          { metric: 'new_coverage', period: { value: '95.0' } },
+          { metric: 'new_lines_to_cover', period: { value: '50' } },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project', 'new');
+    expect(overview.reliability.count).toBe(2);
+    expect(overview.coverage.percentage).toBe(95.0);
+    expect(overview.coverage.linesToCover).toBe(50);
+    expect(overview.hasNewCode).toBe(true);
+  });
+
+  it('should support periods array response format from SonarCloud', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'new_bugs', periods: [{ index: 1, value: '3' }] },
+          { metric: 'new_coverage', periods: [{ index: 1, value: '92.5' }] },
+          { metric: 'new_lines_to_cover', periods: [{ index: 1, value: '80' }] },
+          { metric: 'new_reliability_rating', periods: [{ index: 1, value: '2.0' }] },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'https://sonarcloud.io',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project', 'new');
+    expect(overview.reliability.count).toBe(3);
+    expect(overview.reliability.rating).toBe('B');
+    expect(overview.coverage.percentage).toBe(92.5);
+    expect(overview.coverage.linesToCover).toBe(80);
+    expect(overview.hasNewCode).toBe(true);
+  });
+
   it('should fetch issues and extract clean relative file paths', async () => {
     const mockIssuesResponse = {
       issues: [
@@ -449,6 +591,99 @@ describe('SonarClient - Quality Gate Status', () => {
     const { client } = gateClient({ errors: [{ msg: 'Server error' }] }, 500);
 
     await expect(client.getQualityGateStatus('my-project')).rejects.toThrow('HTTP 500');
+  });
+
+  it('should evaluate only new_* conditions when codePeriod is new and return OK when all new conditions pass', async () => {
+    const { client } = gateClient({
+      projectStatus: {
+        status: 'ERROR',
+        conditions: [
+          {
+            status: 'ERROR',
+            metricKey: 'coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '62.4',
+          },
+          {
+            status: 'OK',
+            metricKey: 'new_coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '85.0',
+          },
+          {
+            status: 'OK',
+            metricKey: 'new_reliability_rating',
+            comparator: 'GT',
+            errorThreshold: '1',
+            actualValue: '1',
+          },
+        ],
+      },
+    });
+
+    const gate = await client.getQualityGateStatus('my-project', 'new');
+
+    expect(gate).not.toBeNull();
+    expect(gate?.period).toBe('new');
+    expect(gate?.status).toBe('OK');
+    expect(gate?.conditions).toHaveLength(2);
+    expect(gate?.conditions.every((c) => c.metricKey.startsWith('new_'))).toBe(true);
+  });
+
+  it('should evaluate ERROR when a new_* condition fails in new code period', async () => {
+    const { client } = gateClient({
+      projectStatus: {
+        status: 'ERROR',
+        conditions: [
+          {
+            status: 'OK',
+            metricKey: 'coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '90.0',
+          },
+          {
+            status: 'ERROR',
+            metricKey: 'new_coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '75.0',
+          },
+        ],
+      },
+    });
+
+    const gate = await client.getQualityGateStatus('my-project', 'new');
+
+    expect(gate?.period).toBe('new');
+    expect(gate?.status).toBe('ERROR');
+    expect(gate?.conditions).toHaveLength(1);
+    expect(gate?.conditions[0].metricKey).toBe('new_coverage');
+  });
+
+  it('should evaluate WARN when a new_* condition warns in new code period', async () => {
+    const { client } = gateClient({
+      projectStatus: {
+        status: 'WARN',
+        conditions: [
+          {
+            status: 'WARN',
+            metricKey: 'new_duplicated_lines_density',
+            comparator: 'GT',
+            warnThreshold: '3',
+            actualValue: '4.5',
+          },
+        ],
+      },
+    });
+
+    const gate = await client.getQualityGateStatus('my-project', 'new');
+
+    expect(gate?.period).toBe('new');
+    expect(gate?.status).toBe('WARN');
+    expect(gate?.conditions[0].metricKey).toBe('new_duplicated_lines_density');
   });
 });
 
@@ -799,6 +1034,51 @@ describe('SonarClient - Edge Cases, Fallbacks & Error Branches', () => {
     expect(callCount).toBe(2);
   });
 
+  it('falls back when metric keys are not found on SonarCloud (HTTP 404)', async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          clone: () => ({
+            json: async () => ({
+              errors: [
+                {
+                  msg: 'The following metric keys are not found: new_wont_fix_issues, new_sqale_rating',
+                },
+              ],
+            }),
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          component: {
+            measures: [
+              { metric: 'new_bugs', periods: [{ index: 1, value: '0' }] },
+              { metric: 'new_coverage', periods: [{ index: 1, value: '92.0' }] },
+            ],
+          },
+        }),
+      };
+    });
+    const client = new SonarClient({
+      serverUrl: 'https://sonarcloud.io',
+      token: 'tok',
+      fetchFn: fetchMock as any,
+    });
+    const overview = await client.getOverview('my-proj', 'new');
+    expect(overview).toBeDefined();
+    expect(overview.period).toBe('new');
+    expect(overview.coverage.percentage).toBe(92.0);
+    expect(callCount).toBe(2);
+  });
+
   it('getCurrentUserLogin handles non-ok response and missing login', async () => {
     const fetchErr = vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: 'Error' });
     const clientErr = new SonarClient({
@@ -928,5 +1208,73 @@ describe('SonarClient - Edge Cases, Fallbacks & Error Branches', () => {
     await expect(client.getDuplicationFiles('p')).rejects.toThrow(
       /Failed to fetch duplication files/,
     );
+  });
+
+  it('getIssues appends inNewCodePeriod=true and tags items when requested', async () => {
+    let capturedUrl = '';
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          issues: [
+            {
+              key: 'NEW-ISSUE-1',
+              rule: 'typescript:S2259',
+              component: 'proj:src/UserService.ts',
+              line: 42,
+              message: 'Null pointer check missing',
+            },
+          ],
+        }),
+      };
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchFn as any,
+    });
+
+    const issues = await client.getIssues('proj', 'reliability', true);
+    expect(capturedUrl).toContain('inNewCodePeriod=true');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].inNewCodePeriod).toBe(true);
+    expect(issues[0].id).toBe('NEW-ISSUE-1');
+  });
+
+  it('getHotspots appends inNewCodePeriod=true and tags hotspots when requested', async () => {
+    let capturedUrl = '';
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          hotspots: [
+            {
+              key: 'HOTSPOT-1',
+              ruleKey: 'javascript:S4790',
+              component: 'proj:src/hash.ts',
+              line: 12,
+              message: 'Weak hash algorithm',
+            },
+          ],
+        }),
+      };
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchFn as any,
+    });
+
+    const hotspots = await client.getHotspots('proj', true);
+    expect(capturedUrl).toContain('inNewCodePeriod=true');
+    expect(hotspots).toHaveLength(1);
+    expect(hotspots[0].inNewCodePeriod).toBe(true);
+    expect(hotspots[0].id).toBe('HOTSPOT-1');
   });
 });

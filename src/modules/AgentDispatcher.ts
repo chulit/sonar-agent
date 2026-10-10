@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
-import { SonarClient, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
+import { SonarClient, SonarCodePeriod, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
 import { ProjectDetector } from './ProjectDetector.js';
 import { DemoData } from './DemoData.js';
@@ -16,6 +16,7 @@ export interface CodeSnippetContext {
 
 export interface DispatchOptions {
   targetAgentId?: string;
+  codePeriod?: SonarCodePeriod;
 }
 
 export interface AgentDispatcherOptions {
@@ -337,7 +338,8 @@ export class AgentDispatcher {
   /**
    * Assembles an enriched Fix Prompt for a single issue.
    */
-  async assemblePrompt(item: SonarDetailItem): Promise<string> {
+  async assemblePrompt(item: SonarDetailItem, options?: DispatchOptions): Promise<string> {
+    const isNewCode = options?.codePeriod === 'new' || item.inNewCodePeriod === true;
     const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
 
     if (item.type === 'COVERAGE') {
@@ -345,7 +347,11 @@ export class AgentDispatcher {
       let prompt = `@workspace Please generate unit tests to improve test coverage for the following file:\n\n`;
       prompt += `### 📍 Target File\n`;
       prompt += `- File: \`${item.filePath}\`\n`;
-      prompt += `- Coverage Status: ${item.message}\n\n`;
+      prompt += `- Coverage Status: ${item.message}\n`;
+      if (isNewCode) {
+        prompt += `- Scope: New Code Period (Clean as You Code)\n`;
+      }
+      prompt += `\n`;
 
       prompt += `### 🛠️ Detected Test Framework\n`;
       prompt += `- Framework: ${framework.name}\n`;
@@ -372,7 +378,11 @@ export class AgentDispatcher {
       let prompt = `@workspace Please refactor duplicated code in the following file:\n\n`;
       prompt += `### 📍 Target File\n`;
       prompt += `- File: \`${item.filePath}\`\n`;
-      prompt += `- Status: ${item.message}\n\n`;
+      prompt += `- Status: ${item.message}\n`;
+      if (isNewCode) {
+        prompt += `- Scope: New Code Period (Clean as You Code)\n`;
+      }
+      prompt += `\n`;
 
       if (snippetContext) {
         prompt += `### 💻 Local Code Snippet (\`${item.filePath}\`)\n`;
@@ -396,6 +406,9 @@ export class AgentDispatcher {
     prompt += `### ⚠️ Issue Details\n`;
     prompt += `- Message: "${item.message}"\n`;
     prompt += `- Type: ${item.type} | Severity: ${item.severity}\n`;
+    if (isNewCode) {
+      prompt += `- Scope: New Code Period (Clean as You Code)\n`;
+    }
     prompt += `- Sonar Rule: \`${rule.key}\` - ${rule.name}\n\n`;
 
     prompt += `### 📖 SonarQube Rule Details\n`;
@@ -421,12 +434,18 @@ export class AgentDispatcher {
   /**
    * Assembles a batch Fix Prompt grouping multiple issues by file.
    */
-  async assembleBatchPrompt(items: SonarDetailItem[]): Promise<string> {
+  async assembleBatchPrompt(items: SonarDetailItem[], options?: DispatchOptions): Promise<string> {
     if (items.length === 1) {
-      return this.assemblePrompt(items[0]);
+      return options ? this.assemblePrompt(items[0], options) : this.assemblePrompt(items[0]);
     }
 
-    let prompt = `@workspace Please fix the following ${items.length} SonarQube issues:\n\n`;
+    const isNewCode =
+      options?.codePeriod === 'new' ||
+      (items.length > 0 && items.every((i) => i.inNewCodePeriod === true));
+
+    let prompt = isNewCode
+      ? `@workspace Please fix the following ${items.length} SonarQube issues (New Code Period - Clean as You Code):\n\n`
+      : `@workspace Please fix the following ${items.length} SonarQube issues:\n\n`;
 
     const fileGroups = new Map<string, SonarDetailItem[]>();
     for (const item of items) {
@@ -456,6 +475,9 @@ export class AgentDispatcher {
 
         prompt += `### Issue #${idx + 1}: Line ${item.line || 'File level'} [${item.severity}] ${rule.name}\n`;
         prompt += `- Message: "${item.message}"\n`;
+        if (item.inNewCodePeriod === true || options?.codePeriod === 'new') {
+          prompt += `- Scope: New Code Period\n`;
+        }
         prompt += `- Rule: \`${rule.key}\`\n`;
         prompt += `- Guidance: ${rule.cleanDesc}\n`;
 
@@ -847,7 +869,7 @@ export class AgentDispatcher {
     options?: DispatchOptions,
   ): Promise<{ ok: boolean; message: string }> {
     const targetAgentId = await this.resolveTargetAgent(options?.targetAgentId);
-    const prompt = await this.assemblePrompt(item);
+    const prompt = await this.assemblePrompt(item, options);
     return this.dispatch(prompt, targetAgentId, item);
   }
 
@@ -862,7 +884,7 @@ export class AgentDispatcher {
       return { ok: false, message: 'No items to dispatch.' };
     }
     const targetAgentId = await this.resolveTargetAgent(options?.targetAgentId);
-    const prompt = await this.assembleBatchPrompt(items);
+    const prompt = await this.assembleBatchPrompt(items, options);
     return this.dispatch(prompt, targetAgentId, items[0], items);
   }
 

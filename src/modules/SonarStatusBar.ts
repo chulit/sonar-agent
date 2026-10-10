@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
-import { SonarOverview, QualityGateStatus } from './SonarClient.js';
+import { SonarOverview, QualityGateStatus, SonarCodePeriod } from './SonarClient.js';
 
 export interface SonarStatusBarUpdateParams {
   projectKey?: string;
   overview?: SonarOverview | null;
   qualityGate?: QualityGateStatus | null;
   isDemoMode?: boolean;
+  codePeriod?: SonarCodePeriod;
 }
 
 export class SonarStatusBar implements vscode.Disposable {
@@ -19,32 +20,42 @@ export class SonarStatusBar implements vscode.Disposable {
 
   public update(params: SonarStatusBarUpdateParams): void {
     const { qualityGate, isDemoMode } = params;
+    const isNewCode =
+      params.codePeriod === 'new' ||
+      params.overview?.period === 'new' ||
+      qualityGate?.period === 'new';
 
     const gateStatus = qualityGate?.status;
     let icon = '$(shield)';
     let label = 'Connected';
 
+    const prefix = isNewCode ? 'Sonar (New)' : 'Sonar';
     if (isDemoMode) {
       icon = '$(beaker)';
       if (gateStatus === 'OK') {
         label = 'Demo (Passed)';
       } else if (gateStatus === 'ERROR') {
         label = 'Demo (Failed)';
+      } else if (gateStatus === 'WARN') {
+        label = 'Demo (Warning)';
       } else {
         label = 'Demo';
       }
-    } else if (gateStatus === 'OK') {
-      icon = '$(pass)';
-      label = 'Passed';
-    } else if (gateStatus === 'ERROR') {
-      icon = '$(error)';
-      label = 'Failed';
-    } else if (gateStatus === 'WARN') {
-      icon = '$(warning)';
-      label = 'Warning';
+    } else {
+      if (gateStatus === 'OK') {
+        icon = '$(pass)';
+        label = 'Passed';
+      } else if (gateStatus === 'ERROR') {
+        icon = '$(error)';
+        label = 'Failed';
+      } else if (gateStatus === 'WARN') {
+        icon = '$(warning)';
+        label = 'Warning';
+      }
     }
 
-    this.statusBarItem.text = `${icon} Sonar: ${label}`;
+    this.statusBarItem.text = `${icon} ${prefix}: ${label}`;
+
     this.statusBarItem.tooltip = this.buildTooltip(params);
     this.statusBarItem.show();
   }
@@ -59,6 +70,11 @@ export class SonarStatusBar implements vscode.Disposable {
 
   private buildTooltip(params: SonarStatusBarUpdateParams): vscode.MarkdownString {
     const { projectKey, overview, qualityGate, isDemoMode } = params;
+    const isNewCode =
+      params.codePeriod === 'new' ||
+      params.overview?.period === 'new' ||
+      qualityGate?.period === 'new';
+
     const md = new vscode.MarkdownString('', true);
     md.isTrusted = true;
     md.supportThemeIcons = true;
@@ -77,19 +93,42 @@ export class SonarStatusBar implements vscode.Disposable {
       gateIcon = '🟡';
     }
 
+    const periodLabel = isNewCode ? ' (New Code)' : '';
+
     if (isDemoMode) {
-      md.appendMarkdown(`### 🧪 Sonar Agent (Demo Mode)\n\n`);
+      md.appendMarkdown(`### 🧪 Sonar Agent (Demo Mode${periodLabel})\n\n`);
       md.appendMarkdown(
         `**Project:** \`${projectKey || 'demo-sample-project'}\` *(Sample Data)*\n\n`,
       );
     } else {
-      md.appendMarkdown(`### 🛡️ Sonar Agent: Quality Gate ${gateLabel}\n\n`);
+      md.appendMarkdown(`### 🛡️ Sonar Agent: Quality Gate ${gateLabel}${periodLabel}\n\n`);
       if (projectKey) {
         md.appendMarkdown(`**Project:** \`${projectKey}\`\n\n`);
       }
     }
 
     md.appendMarkdown(`**Quality Gate: ${gateLabel}** (${gateIcon})\n\n`);
+
+    if (qualityGate?.conditions && qualityGate.conditions.length > 0) {
+      md.appendMarkdown(`#### Quality Gate Conditions (${isNewCode ? 'New Code' : 'Overall'})\n\n`);
+      md.appendMarkdown(`| Status | Metric | Value | Threshold |\n`);
+      md.appendMarkdown(`| :--- | :--- | :--- | :--- |\n`);
+      for (const cond of qualityGate.conditions) {
+        let condIcon = '🟢';
+        if (cond.status === 'ERROR') condIcon = '🔴';
+        else if (cond.status === 'WARN') condIcon = '🟡';
+        const threshold = cond.errorThreshold
+          ? `${cond.comparator} ${cond.errorThreshold}`
+          : cond.warnThreshold
+            ? `${cond.comparator} ${cond.warnThreshold}`
+            : '-';
+        md.appendMarkdown(
+          `| ${condIcon} | \`${cond.metricKey}\` | ${cond.actualValue ?? '-'} | ${threshold} |\n`,
+        );
+      }
+      md.appendMarkdown(`\n`);
+    }
+
     md.appendMarkdown(`---\n\n`);
 
     if (overview) {

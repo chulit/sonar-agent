@@ -872,6 +872,13 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
     await send({ command: 'createProfile' });
     expect(createProfileSpy).toHaveBeenCalled();
 
+    // Test configure command
+    const configureSpy = vi
+      .spyOn(provider, 'promptConfigureConnection')
+      .mockResolvedValue(undefined as any);
+    await send({ command: 'configure' });
+    expect(configureSpy).toHaveBeenCalled();
+
     // Test openFile command
     const openFileSpy = vi
       .spyOn((provider as any).fileNavigator, 'openFileAtLine')
@@ -887,9 +894,15 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
       .spyOn((provider as any).agentDispatcher, 'dispatchBatch')
       .mockResolvedValue(true as any);
     await send({ command: 'sendToAgent', item: { id: '1' }, targetAgentId: 'copilot' });
-    expect(sendAgentSpy).toHaveBeenCalledWith({ id: '1' }, { targetAgentId: 'copilot' });
+    expect(sendAgentSpy).toHaveBeenCalledWith(
+      { id: '1' },
+      { targetAgentId: 'copilot', codePeriod: 'overall' },
+    );
     await send({ command: 'sendBatchToAgent', items: [{ id: '1' }], targetAgentId: 'copilot' });
-    expect(sendBatchSpy).toHaveBeenCalledWith([{ id: '1' }], { targetAgentId: 'copilot' });
+    expect(sendBatchSpy).toHaveBeenCalledWith([{ id: '1' }], {
+      targetAgentId: 'copilot',
+      codePeriod: 'overall',
+    });
 
     // Test fetchDetails for hotspots, coverage, and duplications
     stubFetch(async (url) => {
@@ -935,5 +948,177 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
     const scanRes = await provider.handleRunCliScan();
     expect(scanRes.ok).toBe(false);
     expect(scanRes.errorMessage).toBe('Scan already in progress.');
+  });
+
+  it('should render code period switcher and empty notice in HTML template', () => {
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    const html = mockWebviewView.webview.html;
+    expect(html).toContain('id="code-period-switcher"');
+    expect(html).toContain('id="period-btn-overall"');
+    expect(html).toContain('id="period-btn-new"');
+    expect(html).toContain('id="new-code-empty-notice"');
+  });
+
+  it('should handle switchCodePeriod message, persist state, and post updated measures', async () => {
+    const mockState: Record<string, any> = {};
+    const mockMemento: vscode.Memento = {
+      keys: () => Object.keys(mockState),
+      get: (key: string, def?: any) => mockState[key] ?? def,
+      update: vi.fn(async (key: string, val: any) => {
+        mockState[key] = val;
+      }),
+    };
+
+    const clientMock = {
+      getOverview: vi.fn(async (_key: string, period?: string) => ({
+        security: { count: period === 'new' ? 0 : 2, rating: 'A' },
+        reliability: { count: period === 'new' ? 1 : 4, rating: 'B' },
+        maintainability: { count: period === 'new' ? 2 : 10, rating: 'A' },
+        acceptedIssues: { count: 0 },
+        coverage: { percentage: 90, linesToCover: 100 },
+        duplications: { percentage: 0, duplicatedLines: 0 },
+        securityHotspots: { count: 0, rating: 'A' },
+        period: period || 'overall',
+        hasNewCode: period === 'new',
+      })),
+      fetchProjects: vi.fn(async () => []),
+      getQualityGateStatus: vi.fn(async (_key: string, period?: string) => ({
+        status: period === 'new' ? 'OK' : 'ERROR',
+        period: period || 'overall',
+        conditions: [],
+      })),
+    };
+
+    const customProvider = new SonarOverviewViewProvider(
+      { fsPath: '/extension' } as any,
+      mockProjectDetector as unknown as ProjectDetector,
+      { workspaceState: mockMemento },
+    );
+    (customProvider as any).getClient = vi.fn(async () => clientMock);
+
+    customProvider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    expect(customProvider.getCodePeriod()).toBe('overall');
+
+    await messageCallback!({ command: 'switchCodePeriod', period: 'new' });
+
+    expect(customProvider.getCodePeriod()).toBe('new');
+    expect(mockMemento.update).toHaveBeenCalledWith('sonarAgent.activeCodePeriod', 'new');
+    expect(clientMock.getOverview).toHaveBeenCalledWith(expect.any(String), 'new');
+    expect(clientMock.getQualityGateStatus).toHaveBeenCalledWith(expect.any(String), 'new');
+    expect(postedMessages.some((m) => m.type === 'overviewUpdated' && m.period === 'new')).toBe(
+      true,
+    );
+    expect(postedMessages.some((m) => m.type === 'qualityGate' && m.status?.period === 'new')).toBe(
+      true,
+    );
+
+    // Switch back to overall
+    await messageCallback!({ command: 'switchCodePeriod', period: 'overall' });
+    expect(customProvider.getCodePeriod()).toBe('overall');
+    expect(mockMemento.update).toHaveBeenCalledWith('sonarAgent.activeCodePeriod', 'overall');
+    expect(clientMock.getOverview).toHaveBeenCalledWith(expect.any(String), 'overall');
+    expect(clientMock.getQualityGateStatus).toHaveBeenCalledWith(expect.any(String), 'overall');
+  });
+
+  it('queries New Code issues and hotspots when active code period is new', async () => {
+    let messageCallback: ((msg: any) => Promise<void>) | undefined;
+    const postedMessages: any[] = [];
+    const mockWebviewView = {
+      webview: {
+        options: {},
+        html: '',
+        onDidReceiveMessage: vi.fn((cb) => {
+          messageCallback = cb;
+        }),
+        postMessage: vi.fn(async (msg) => {
+          postedMessages.push(msg);
+          return true;
+        }),
+      },
+      show: vi.fn(),
+      onDidChangeVisibility: vi.fn(),
+      onDidDispose: vi.fn(),
+      visible: true,
+    } as unknown as vscode.WebviewView;
+
+    const mockProjectDetector = {
+      getConfig: vi.fn(async () => ({
+        serverUrl: 'http://localhost:9000',
+        projectKey: 'test-project',
+      })),
+      getToken: vi.fn(async () => 'valid-token'),
+      onConfigChanged: vi.fn(() => ({ dispose: vi.fn() })),
+    };
+
+    const mockMemento: vscode.Memento = {
+      get: vi.fn((key: string, defaultValue?: any) => {
+        if (key === 'sonarAgent.activeCodePeriod') return 'new';
+        return defaultValue;
+      }),
+      update: vi.fn(async () => {}),
+      keys: vi.fn(() => ['sonarAgent.activeCodePeriod']),
+    };
+
+    const provider = new SonarOverviewViewProvider(
+      { fsPath: '/extension' } as any,
+      mockProjectDetector as unknown as ProjectDetector,
+      { workspaceState: mockMemento },
+    );
+
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    expect(provider.getCodePeriod()).toBe('new');
+
+    const issuesSpy = vi.fn(async () => [
+      {
+        id: 'new-issue-1',
+        ruleKey: 'typescript:S2259',
+        message: 'Null pointer dereference',
+        component: 'test-project:src/app.ts',
+        filePath: 'src/app.ts',
+        line: 12,
+        type: 'BUG',
+        severity: 'CRITICAL',
+        status: 'OPEN',
+        tags: [],
+        creationDate: '2026-10-10T00:00:00Z',
+        inNewCodePeriod: true,
+      },
+    ]);
+
+    const hotspotsSpy = vi.fn(async () => [
+      {
+        id: 'new-hotspot-1',
+        ruleKey: 'javascript:S4790',
+        message: 'Weak hash',
+        component: 'test-project:src/hash.ts',
+        filePath: 'src/hash.ts',
+        line: 8,
+        type: 'HOTSPOT',
+        severity: 'MAJOR',
+        status: 'TO_REVIEW',
+        tags: [],
+        creationDate: '2026-10-10T00:00:00Z',
+        inNewCodePeriod: true,
+      },
+    ]);
+
+    // Override SonarClient creation via prototype / method stubbing
+    (provider as any).getClient = vi.fn(async () => ({
+      getIssues: issuesSpy,
+      getHotspots: hotspotsSpy,
+      getCoverageFiles: vi.fn(async () => []),
+      getDuplicationFiles: vi.fn(async () => []),
+      getOverview: vi.fn(async () => null),
+      getQualityGateStatus: vi.fn(async () => null),
+    }));
+
+    // Trigger details fetch for reliability
+    await (provider as any)._handleFetchDetails('reliability');
+    expect(postedMessages.some((m) => m.type === 'details' && m.period === 'new')).toBe(true);
+
+    // Trigger switchCodePeriod while drawer is open: verifies it reloads details
+    await messageCallback!({ command: 'switchCodePeriod', period: 'overall' });
+    expect(provider.getCodePeriod()).toBe('overall');
+    expect(postedMessages.some((m) => m.type === 'details' && m.period === 'overall')).toBe(true);
   });
 });

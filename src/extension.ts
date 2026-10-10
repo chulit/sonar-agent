@@ -23,7 +23,9 @@ export function activate(context: vscode.ExtensionContext) {
     workspaceRoot,
   });
 
-  const overviewProvider = new SonarOverviewViewProvider(context.extensionUri, projectDetector);
+  const overviewProvider = new SonarOverviewViewProvider(context.extensionUri, projectDetector, {
+    workspaceState: context.workspaceState,
+  });
 
   const codeActionProvider = new SonarCodeActionProvider({
     projectDetector,

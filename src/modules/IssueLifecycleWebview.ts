@@ -209,7 +209,7 @@ export const ISSUE_LIFECYCLE_CSS = `      position: relative;
       border: none;
       border-radius: 4px;
       color: var(--vscode-menu-foreground, var(--vscode-foreground));
-      font-size: 12px;
+      font-size: 11px;
       padding: 6px 8px;
       cursor: pointer;
       font-family: inherit;
@@ -231,7 +231,7 @@ export const ISSUE_LIFECYCLE_CSS = `      position: relative;
     .issue-menu-loading,
     .issue-menu-empty {
       padding: 8px;
-      font-size: 12px;
+      font-size: 11px;
       color: var(--vscode-descriptionForeground);
     }
 
@@ -243,7 +243,7 @@ export const ISSUE_LIFECYCLE_CSS = `      position: relative;
       border: 1px solid var(--vscode-input-border, var(--vscode-widget-border));
       border-radius: 4px;
       padding: 6px;
-      font-size: 12px;
+      font-size: 11px;
       font-family: inherit;
       resize: vertical;
     }

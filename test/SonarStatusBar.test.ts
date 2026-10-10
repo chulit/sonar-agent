@@ -128,6 +128,79 @@ describe('SonarStatusBar', () => {
     expect(tooltipText).toContain('Demo Mode');
   });
 
+  it('displays New Code passing state when codePeriod is new and gate is OK', () => {
+    statusBar.update({
+      projectKey: 'my-project',
+      overview: { ...sampleOverview, period: 'new' },
+      qualityGate: { ...samplePassingGate, period: 'new' },
+      codePeriod: 'new',
+    });
+
+    expect(mockItem.text).toBe('$(pass) Sonar (New): Passed');
+    expect(mockItem.show).toHaveBeenCalled();
+  });
+
+  it('displays New Code failing state when codePeriod is new and gate is ERROR', () => {
+    statusBar.update({
+      projectKey: 'my-project',
+      overview: { ...sampleOverview, period: 'new' },
+      qualityGate: { ...sampleFailingGate, period: 'new' },
+      codePeriod: 'new',
+    });
+
+    expect(mockItem.text).toBe('$(error) Sonar (New): Failed');
+    expect(mockItem.show).toHaveBeenCalled();
+  });
+
+  it('displays New Code demo state when demo is active in new code period', () => {
+    statusBar.update({
+      projectKey: 'demo-sample-project',
+      overview: { ...sampleOverview, period: 'new' },
+      qualityGate: { ...samplePassingGate, period: 'new' },
+      isDemoMode: true,
+      codePeriod: 'new',
+    });
+
+    expect(mockItem.text).toBe('$(beaker) Sonar (New): Demo (Passed)');
+    expect(mockItem.show).toHaveBeenCalled();
+  });
+
+  it('renders conditions table in tooltip with actual values and thresholds', () => {
+    statusBar.update({
+      projectKey: 'my-project',
+      overview: { ...sampleOverview, period: 'new' },
+      qualityGate: {
+        status: 'ERROR',
+        period: 'new',
+        conditions: [
+          {
+            metricKey: 'new_coverage',
+            status: 'ERROR',
+            comparator: 'LT',
+            actualValue: '72.0',
+            errorThreshold: '80.0',
+          },
+          {
+            metricKey: 'new_duplicated_lines_density',
+            status: 'OK',
+            comparator: 'GT',
+            actualValue: '1.2',
+            errorThreshold: '3.0',
+          },
+        ],
+      },
+      codePeriod: 'new',
+    });
+
+    const tooltipText = (mockItem.tooltip as vscode.MarkdownString).value;
+    expect(tooltipText).toContain('Quality Gate Conditions (New Code)');
+    expect(tooltipText).toContain('`new_coverage`');
+    expect(tooltipText).toContain('72.0');
+    expect(tooltipText).toContain('LT 80.0');
+    expect(tooltipText).toContain('`new_duplicated_lines_density`');
+    expect(tooltipText).toContain('1.2');
+  });
+
   it('hides the item on clear()', () => {
     statusBar.update({
       projectKey: 'my-project',
