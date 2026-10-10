@@ -80,6 +80,7 @@ export const window = {
     debug: () => {},
     trace: () => {},
   }),
+  registerWebviewViewProvider: (_viewType: string, _provider: any) => ({ dispose: () => {} }),
 };
 
 export const Uri = {

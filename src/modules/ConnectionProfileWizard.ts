@@ -57,7 +57,7 @@ export class ConnectionProfileWizard {
       return undefined;
     }
     const trimmed = organization.trim();
-    return trimmed ? trimmed : undefined;
+    return trimmed || undefined;
   }
 
   private get showQuickPickFn(): typeof vscode.window.showQuickPick {

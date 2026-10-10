@@ -339,6 +339,43 @@ describe('ProjectDetector - SonarQube Cloud organization', () => {
     const config = await detector.getConfig();
     expect(config.organization).toBe('my-org');
   });
+
+  it('delegates setters and deleteToken to active profile when profiles exist', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    const profile = await detector.createProfile({
+      name: 'Prod',
+      serverUrl: 'https://sonar.prod',
+      token: 'tok-prod',
+      projectKey: 'proj-prod',
+      organization: 'org-prod',
+    });
+
+    await detector.setToken('tok-new');
+    expect(await detector.getToken()).toBe('tok-new');
+
+    await detector.setServerUrl('https://sonar.new');
+    await detector.setProjectKey('proj-new');
+    await detector.setOrganization('org-new');
+
+    const config = await detector.getConfig();
+    expect(config.serverUrl).toBe('https://sonar.new');
+    expect(config.projectKey).toBe('proj-new');
+    expect(config.organization).toBe('org-new');
+
+    await detector.deleteToken();
+    expect(await detector.getToken()).toBeUndefined();
+  });
+
+  it('getConfig returns empty config when profiles exist but no active profile is found', async () => {
+    const detector = new ProjectDetector({ secretStorage, workspaceConfig });
+    mockConfig['profiles'] = [{ id: 'p1', name: 'P1', serverUrl: 'http://sonar', projectKey: 'k' }];
+    mockConfig['activeProfileId'] = 'unknown-id';
+
+    const config = await detector.getConfig();
+    expect(config.serverUrl).toBe('');
+    expect(config.projectKey).toBe('');
+    expect(config.hasToken).toBe(false);
+  });
 });
 
 describe('isSonarCloudUrl', () => {

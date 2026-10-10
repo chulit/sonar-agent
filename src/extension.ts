@@ -69,22 +69,23 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  void projectDetector.migrateResetIfLegacy().then((migrated) => {
-    if (!migrated) {
-      return;
-    }
-    Logger.info('Legacy single connection removed; directing user to create a profile.');
-    vscode.window
-      .showInformationMessage(
+  void projectDetector
+    .migrateResetIfLegacy()
+    .then((migrated) => {
+      if (!migrated) {
+        return;
+      }
+      Logger.info('Legacy single connection removed; directing user to create a profile.');
+      return vscode.window.showInformationMessage(
         'Single connection removed — create a profile to reconnect.',
         'New Profile',
-      )
-      .then((selection) => {
-        if (selection === 'New Profile') {
-          void overviewProvider.promptCreateProfile();
-        }
-      });
-  });
+      );
+    })
+    .then((selection) => {
+      if (selection === 'New Profile') {
+        void overviewProvider.promptCreateProfile();
+      }
+    });
 }
 
 export function deactivate() {

@@ -224,13 +224,15 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     });
 
     // Proactively sync state when view is created or becomes visible
-    this._syncState();
+    void this._syncState();
 
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
-        this._syncState();
+        void this._syncState();
         if (this._currentCodeEnabled && this._activeTab === 'currentCode') {
-          this.subscribeCurrentCode();
+          void this.subscribeCurrentCode().catch((err: unknown) => {
+            Logger.error('Failed to subscribe to current code:', err);
+          });
         }
       } else {
         this.unsubscribeCurrentCode();
@@ -649,10 +651,21 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     this.diagnosticCollection.clear();
     const map = new Map<string, { uri: vscode.Uri; diagnostics: vscode.Diagnostic[] }>();
 
-    for (const item of items) {
-      if (!item.filePath) continue;
-      const resolved = await this.fileNavigator.resolveFilePath(item.filePath);
-      if (!resolved) continue;
+    const resolvedEntries = await Promise.all(
+      items.map(async (item) => {
+        if (!item.filePath) {
+          return null;
+        }
+        const resolved = await this.fileNavigator.resolveFilePath(item.filePath);
+        return resolved ? { item, resolved } : null;
+      }),
+    );
+
+    for (const entry of resolvedEntries) {
+      if (!entry) {
+        continue;
+      }
+      const { item, resolved } = entry;
 
       const uri = vscode.Uri.file(resolved);
       const line = item.line && item.line > 0 ? item.line - 1 : 0;
@@ -669,9 +682,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       diagnostic.code = item.ruleKey;
       diagnostic.source = 'SonarQube';
 
-      const entry = map.get(uri.toString()) || { uri, diagnostics: [] };
-      entry.diagnostics.push(diagnostic);
-      map.set(uri.toString(), entry);
+      const mapEntry = map.get(uri.toString()) || { uri, diagnostics: [] };
+      mapEntry.diagnostics.push(diagnostic);
+      map.set(uri.toString(), mapEntry);
     }
 
     for (const { uri, diagnostics } of map.values()) {
@@ -1063,7 +1076,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     currentCodeEnabled: boolean = true,
   ): string {
     const nonce = getNonce();
-    return `<!DOCTYPE html>
+    return String.raw`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -2564,7 +2577,7 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
       return String(metricKey || "condition")
         .replace(/^new_/, "New ")
         .replace(/_/g, " ")
-        .replace(/\\b\\w/g, (ch) => ch.toUpperCase());
+        .replace(/\b\w/g, (ch) => ch.toUpperCase());
     }
 
     function formatGateCondition(condition) {

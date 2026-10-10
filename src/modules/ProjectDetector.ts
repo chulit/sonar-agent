@@ -184,16 +184,16 @@ export class ProjectDetector {
     await this.config.update(ACTIVE_PROFILE_CONFIG_KEY, activeProfileId ?? '', true);
   }
 
-  async listProfiles(): Promise<ConnectionProfileMeta[]> {
-    return this.readProfiles().map((p) => ({ ...p }));
+  listProfiles(): Promise<ConnectionProfileMeta[]> {
+    return Promise.resolve(this.readProfiles().map((p) => ({ ...p })));
   }
 
-  async getActiveProfile(): Promise<ConnectionProfileMeta | null> {
+  getActiveProfile(): Promise<ConnectionProfileMeta | null> {
     const id = this.readActiveId();
     if (!id) {
-      return null;
+      return Promise.resolve(null);
     }
-    return this.readProfiles().find((p) => p.id === id) ?? null;
+    return Promise.resolve(this.readProfiles().find((p) => p.id === id) ?? null);
   }
 
   async createProfile(input: CreateProfileInput): Promise<ConnectionProfileMeta> {

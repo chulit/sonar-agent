@@ -50,4 +50,43 @@ describe('Logger module', () => {
       'Connection failed to [SERVER] - Timeout at [SERVER]',
     );
   });
+
+  it('formats non-Error error details in Logger.error', () => {
+    Logger.error('Failed with string', 'Server unavailable');
+    expect(mockChannel.error).toHaveBeenCalledWith('Failed with string - Server unavailable');
+
+    Logger.error('Failed with number', 503);
+    expect(mockChannel.error).toHaveBeenCalledWith('Failed with number - 503');
+
+    Logger.error('Failed with boolean', false);
+    expect(mockChannel.error).toHaveBeenCalledWith('Failed with boolean - false');
+
+    Logger.error('Failed with object', { status: 500, reason: 'down' });
+    expect(mockChannel.error).toHaveBeenCalledWith(
+      'Failed with object - {"status":500,"reason":"down"}',
+    );
+
+    // Circular object triggering catch
+    const circular: any = {};
+    circular.self = circular;
+    Logger.error('Failed with circular', circular);
+    expect(mockChannel.error).toHaveBeenCalledWith('Failed with circular - [Object]');
+  });
+
+  it('supports debug, show, dispose, and auto-initialization', () => {
+    Logger.debug('Debug log message');
+    expect(mockChannel.debug).toHaveBeenCalledWith('Debug log message');
+
+    Logger.show();
+    expect(mockChannel.show).toHaveBeenCalledWith(true);
+
+    Logger.dispose();
+    expect(mockChannel.dispose).toHaveBeenCalled();
+
+    // After dispose, calling info/warn/error/debug should re-initialize automatically
+    Logger.info('Auto initialized');
+    Logger.warn('Auto warned');
+    Logger.debug('Auto debugged');
+    Logger.error('Auto error');
+  });
 });

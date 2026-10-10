@@ -419,13 +419,24 @@ export class AgentDispatcher {
       fileGroups.set(item.filePath, group);
     }
 
-    for (const [filePath, fileItems] of fileGroups) {
-      prompt += `## 📁 File: \`${filePath}\` (${fileItems.length} issues)\n\n`;
+    const enrichedGroups = await Promise.all(
+      Array.from(fileGroups.entries()).map(async ([filePath, fileItems]) => {
+        const enrichedItems = await Promise.all(
+          fileItems.map(async (item) => {
+            const rule = await this.getRule(item.ruleKey);
+            const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
+            return { item, rule, snippetContext };
+          }),
+        );
+        return { filePath, enrichedItems };
+      }),
+    );
 
-      for (let idx = 0; idx < fileItems.length; idx++) {
-        const item = fileItems[idx];
-        const rule = await this.getRule(item.ruleKey);
-        const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
+    for (const { filePath, enrichedItems } of enrichedGroups) {
+      prompt += `## 📁 File: \`${filePath}\` (${enrichedItems.length} issues)\n\n`;
+
+      for (let idx = 0; idx < enrichedItems.length; idx++) {
+        const { item, rule, snippetContext } = enrichedItems[idx];
 
         prompt += `### Issue #${idx + 1}: Line ${item.line || 'File level'} [${item.severity}] ${rule.name}\n`;
         prompt += `- Message: "${item.message}"\n`;
@@ -479,10 +490,22 @@ export class AgentDispatcher {
     const files: Array<{ uri: vscode.Uri; startLine?: number; endLine?: number }> = [];
     const seenUris = new Set<string>();
 
-    for (const it of items) {
-      if (!it.filePath) continue;
-      const resolvedPath = await this.fileNavigator.resolveFilePath(it.filePath);
-      if (resolvedPath && !seenUris.has(resolvedPath)) {
+    const resolvedEntries = await Promise.all(
+      items.map(async (it) => {
+        if (!it.filePath) {
+          return null;
+        }
+        const resolvedPath = await this.fileNavigator.resolveFilePath(it.filePath);
+        return resolvedPath ? { it, resolvedPath } : null;
+      }),
+    );
+
+    for (const entry of resolvedEntries) {
+      if (!entry) {
+        continue;
+      }
+      const { it, resolvedPath } = entry;
+      if (!seenUris.has(resolvedPath)) {
         seenUris.add(resolvedPath);
         const line = it.line && it.line > 0 ? it.line - 1 : 0;
         files.push({
@@ -785,19 +808,19 @@ export class AgentDispatcher {
   /**
    * Resolves target agent using requested ID or active configuration fallback.
    */
-  async resolveTargetAgent(requestedAgentId?: string): Promise<string> {
+  resolveTargetAgent(requestedAgentId?: string): Promise<string> {
     const available = this.getAvailableAgents();
     if (requestedAgentId && available.some((a) => a.id === requestedAgentId)) {
-      return requestedAgentId;
+      return Promise.resolve(requestedAgentId);
     }
     if (requestedAgentId === 'clipboard') {
-      return 'clipboard';
+      return Promise.resolve('clipboard');
     }
     const defaultAgent = this.getDefaultAgentFn();
     if (defaultAgent && available.some((a) => a.id === defaultAgent)) {
-      return defaultAgent;
+      return Promise.resolve(defaultAgent);
     }
-    return available[0]?.id || 'clipboard';
+    return Promise.resolve(available[0]?.id || 'clipboard');
   }
 
   /**

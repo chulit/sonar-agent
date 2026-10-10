@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as vscode from 'vscode';
 import { ConnectionProfileWizard } from '../src/modules/ConnectionProfileWizard.js';
 import { ProjectDetector } from '../src/modules/ProjectDetector.js';
+import { Logger } from '../src/modules/Logger.js';
 
 describe('ConnectionProfileWizard', () => {
   let mockProjectDetector: any;
@@ -403,6 +404,122 @@ describe('ConnectionProfileWizard', () => {
         token: mockToken,
         organization: 'my-org',
       });
+    });
+
+    it('handles verification failure and retry/cancel in profile creation', async () => {
+      let errorAction = 'Retry';
+      const showErrorMessageFn = vi.fn().mockImplementation(async () => errorAction);
+      let verifyOk = false;
+      const clientFactory = vi.fn().mockReturnValue({
+        verifyConnection: vi.fn(async () => ({ ok: verifyOk, message: 'Invalid token' })),
+      });
+
+      const inputs = [
+        'Custom Server', // name
+        'http://localhost:9000', // url
+        'bad-token', // token
+        'PROJ', // project
+        // on retry:
+        'Custom Server 2',
+        'http://localhost:9000',
+        'good-token',
+        'PROJ',
+      ];
+      const showInputBoxFn = vi.fn().mockImplementation(async () => inputs.shift());
+
+      const wizard = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector as unknown as ProjectDetector,
+        showInputBoxFn,
+        showErrorMessageFn,
+        showInformationMessageFn: vi.fn(),
+        sonarClientFactory: clientFactory,
+      });
+
+      // First run: Retry, then succeed
+      verifyOk = false;
+      setTimeout(() => {
+        verifyOk = true;
+      }, 10);
+      await wizard.promptCreateProfile();
+      expect(showErrorMessageFn).toHaveBeenCalled();
+
+      // Second run: Cancel on verification error
+      errorAction = 'Cancel';
+      verifyOk = false;
+      const failInputs = ['Fail Profile', 'http://localhost:9000', 'token', 'PROJ'];
+      const showInputBoxFn2 = vi.fn().mockImplementation(async () => failInputs.shift());
+      const wizard2 = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector as unknown as ProjectDetector,
+        showInputBoxFn: showInputBoxFn2,
+        showErrorMessageFn,
+        showInformationMessageFn: vi.fn(),
+        sonarClientFactory: clientFactory,
+      });
+      await wizard2.promptCreateProfile();
+    });
+
+    it('validates empty token input in promptToken and handles showLogs in configure menu', async () => {
+      const showLogsSpy = vi.spyOn(Logger, 'show');
+      const showQuickPickFn = vi.fn().mockResolvedValue({ action: 'showLogs' });
+      const wizard = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector as unknown as ProjectDetector,
+        showQuickPickFn,
+      });
+      await wizard.promptConfigureConnection();
+      expect(showLogsSpy).toHaveBeenCalled();
+
+      // Test token validation function
+      let validateFn: any;
+      let callNum = 0;
+      const showInputBoxFn = vi.fn().mockImplementation(async (opts: any) => {
+        callNum++;
+        if (callNum === 1) {
+          return 'http://localhost:9000';
+        }
+        validateFn = opts.validateInput;
+        return undefined; // user cancels token
+      });
+      const wizard2 = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector as unknown as ProjectDetector,
+        showInputBoxFn,
+      });
+      await wizard2.promptUpdateCredentials('http://localhost:9000');
+      expect(validateFn).toBeDefined();
+      expect(validateFn('   ')).toBe('User Token is required');
+      expect(validateFn('valid_token')).toBeNull();
+    });
+
+    it('triggers promptProjectSelection if newly created profile has no projectKey', async () => {
+      mockProjectDetector.getCreationSuggestion = vi.fn().mockResolvedValue(null);
+      mockProjectDetector.createProfile = vi.fn().mockResolvedValue({
+        id: 'p-new',
+        name: 'No Proj Profile',
+        serverUrl: 'http://localhost:9000',
+        projectKey: '',
+      });
+      const clientFactory = vi.fn().mockReturnValue({
+        verifyConnection: vi.fn(async () => ({ ok: true })),
+        fetchProjects: vi.fn(async () => [{ key: 'p1', name: 'Project 1' }]),
+      });
+      const inputs = [
+        'No Proj Profile',
+        'http://localhost:9000',
+        'tok',
+        '', // empty projectKey
+      ];
+      const showInputBoxFn = vi.fn().mockImplementation(async () => inputs.shift());
+      const showQuickPickFn = vi.fn().mockResolvedValue({ projectKey: 'p1' });
+
+      const wizard = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector as unknown as ProjectDetector,
+        showInputBoxFn,
+        showQuickPickFn,
+        showInformationMessageFn: vi.fn(),
+        showWarningMessageFn: vi.fn(),
+        sonarClientFactory: clientFactory,
+      });
+      await wizard.promptCreateProfile();
+      expect(showQuickPickFn).toHaveBeenCalled();
     });
   });
 });
