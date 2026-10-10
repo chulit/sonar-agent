@@ -853,13 +853,12 @@ export class AgentDispatcher {
   }
 
   /**
-   * Dispatches an editor diagnostic (e.g. from SonarLint / CodeAction) to the Target Agent.
+   * Maps an editor diagnostic to a SonarDetailItem representation.
    */
-  async dispatchDiagnostic(
+  mapDiagnosticToItem(
     diagnostic: vscode.Diagnostic,
     document: vscode.TextDocument,
-    options?: DispatchOptions,
-  ): Promise<{ ok: boolean; message: string }> {
+  ): SonarDetailItem {
     let severity: SonarDetailItem['severity'] = 'MAJOR';
     if (diagnostic.severity === vscode.DiagnosticSeverity.Error) {
       severity = 'CRITICAL';
@@ -883,7 +882,7 @@ export class AgentDispatcher {
       codeVal = code.value !== undefined && code.value !== null ? String(code.value) : '';
     }
 
-    const item: SonarDetailItem = {
+    return {
       id: codeVal || 'sonar-issue',
       ruleKey: codeVal,
       message: diagnostic.message,
@@ -896,7 +895,79 @@ export class AgentDispatcher {
       tags: [],
       creationDate: new Date().toISOString(),
     };
+  }
 
+  /**
+   * Assembles an educational Sonar Explain Prompt for an issue.
+   */
+  async assembleExplainPrompt(item: SonarDetailItem): Promise<string> {
+    const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
+    const rule = await this.getRule(item.ruleKey);
+
+    let prompt = `@workspace Please explain the following SonarQube rule and issue in simple, beginner-friendly terms:\n\n`;
+    prompt += `### 📍 Location\n`;
+    prompt += `- File: \`${item.filePath}\`\n`;
+    prompt += `- Line: ${item.line || 'File level'}\n\n`;
+
+    prompt += `### ⚠️ Issue Details\n`;
+    prompt += `- Message: "${item.message}"\n`;
+    prompt += `- Severity: ${item.severity}\n`;
+    prompt += `- Sonar Rule: \`${rule.key}\` - ${rule.name}\n\n`;
+
+    prompt += `### 📖 SonarQube Rule Context\n`;
+    prompt += `${rule.cleanDesc}\n`;
+    if (rule.recommendation) {
+      prompt += `> Sonar Recommendation: ${rule.recommendation}\n`;
+    }
+    prompt += `\n`;
+
+    if (snippetContext) {
+      prompt += `### 💻 Local Code Snippet (\`${item.filePath}\` L${snippetContext.startLine}-L${snippetContext.endLine})\n`;
+      prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
+    }
+
+    prompt += `### 🎯 Instructions for Agent\n`;
+    prompt += `1. Explain why this pattern is problematic and what risks or bugs it can cause in plain, beginner-friendly terms.\n`;
+    prompt += `2. Break down why Sonar flagged this specific line.\n`;
+    prompt += `3. Provide clean refactoring patterns with before-and-after code examples.\n`;
+    prompt += `4. Suggest best practices to avoid similar issues in the future.\n`;
+
+    return prompt;
+  }
+
+  /**
+   * Dispatches an educational Sonar Explain prompt for an issue.
+   */
+  async dispatchExplain(
+    item: SonarDetailItem,
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    const targetAgentId = await this.resolveTargetAgent(options?.targetAgentId);
+    const prompt = await this.assembleExplainPrompt(item);
+    return this.dispatch(prompt, targetAgentId, item);
+  }
+
+  /**
+   * Dispatches an educational Sonar Explain prompt for an editor diagnostic.
+   */
+  async dispatchDiagnosticExplain(
+    diagnostic: vscode.Diagnostic,
+    document: vscode.TextDocument,
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    const item = this.mapDiagnosticToItem(diagnostic, document);
+    return this.dispatchExplain(item, options);
+  }
+
+  /**
+   * Dispatches an editor diagnostic (e.g. from SonarLint / CodeAction) to the Target Agent.
+   */
+  async dispatchDiagnostic(
+    diagnostic: vscode.Diagnostic,
+    document: vscode.TextDocument,
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    const item = this.mapDiagnosticToItem(diagnostic, document);
     return this.dispatchIssue(item, options);
   }
 }

@@ -87,6 +87,10 @@
         "title": "Fix Sonar Issue with AI Agent"
       },
       {
+        "command": "sonarAgent.explainRuleWithAgent",
+        "title": "Explain Sonar Rule with AI Agent"
+      },
+      {
         "command": "sonarAgent.cleanCurrentFile",
         "title": "Clean Current File with AI",
         "icon": "$(sparkle)"
@@ -192,6 +196,11 @@
             "Results from a sonar-scanner CLI run"
           ],
           "description": "Source of Current Code issues"
+        },
+        "sonarAgent.editor.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline Sonar CodeLens annotations above lines with detected issues."
         }
       }
     }

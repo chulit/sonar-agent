@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AgentDispatcher } from './AgentDispatcher.js';
 import { ProjectDetector } from './ProjectDetector.js';
 import { FileNavigator } from './FileNavigator.js';
+import { SonarDetailItem } from './SonarClient.js';
 
 export interface SonarCodeActionProviderOptions {
   projectDetector: ProjectDetector;
@@ -56,10 +57,30 @@ export class SonarCodeActionProvider implements vscode.CodeActionProvider {
     return actions;
   }
 
+  get dispatcherInstance(): AgentDispatcher {
+    return this.dispatcher;
+  }
+
   async executeFixWithAgent(
-    diagnostic: vscode.Diagnostic,
-    document: vscode.TextDocument,
+    diagnosticOrItem: vscode.Diagnostic | SonarDetailItem,
+    document?: vscode.TextDocument,
   ): Promise<{ ok: boolean; message: string }> {
-    return this.dispatcher.dispatchDiagnostic(diagnostic, document);
+    if ('ruleKey' in diagnosticOrItem && 'component' in diagnosticOrItem) {
+      return this.dispatcher.dispatchIssue(diagnosticOrItem as SonarDetailItem);
+    }
+    return this.dispatcher.dispatchDiagnostic(diagnosticOrItem as vscode.Diagnostic, document!);
+  }
+
+  async executeExplainWithAgent(
+    diagnosticOrItem: vscode.Diagnostic | SonarDetailItem,
+    document?: vscode.TextDocument,
+  ): Promise<{ ok: boolean; message: string }> {
+    if ('ruleKey' in diagnosticOrItem && 'component' in diagnosticOrItem) {
+      return this.dispatcher.dispatchExplain(diagnosticOrItem as SonarDetailItem);
+    }
+    return this.dispatcher.dispatchDiagnosticExplain(
+      diagnosticOrItem as vscode.Diagnostic,
+      document!,
+    );
   }
 }

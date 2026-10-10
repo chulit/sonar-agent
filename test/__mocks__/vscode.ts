@@ -40,6 +40,7 @@ export const languages = {
     dispose: () => {},
   }),
   registerCodeActionsProvider: () => ({ dispose: () => {} }),
+  registerCodeLensProvider: () => ({ dispose: () => {} }),
   getDiagnostics: (): Array<readonly [unknown, any[]]> => [],
   onDidChangeDiagnostics: (_listener: (e: any) => void) => ({ dispose: () => {} }),
 };
@@ -193,4 +194,31 @@ export class CodeAction {
     public title: string,
     public kind?: CodeActionKind,
   ) {}
+}
+
+export class CodeLens {
+  constructor(
+    public range: Range,
+    public command?: { command: string; title: string; arguments?: any[] },
+  ) {}
+}
+
+export class EventEmitter<T = any> {
+  private listeners: Array<(e: T) => any> = [];
+  event = (listener: (e: T) => any) => {
+    this.listeners.push(listener);
+    return {
+      dispose: () => {
+        this.listeners = this.listeners.filter((l) => l !== listener);
+      },
+    };
+  };
+  fire(data: T): void {
+    for (const listener of this.listeners) {
+      listener(data);
+    }
+  }
+  dispose(): void {
+    this.listeners = [];
+  }
 }

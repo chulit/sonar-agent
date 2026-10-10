@@ -48,7 +48,11 @@ describe('extension entrypoint', () => {
     expect(registeredCommands.has('sonarAgent.resetConnection')).toBe(true);
     expect(registeredCommands.has('sonarAgent.showLogs')).toBe(true);
     expect(registeredCommands.has('sonarAgent.fixWithAgent')).toBe(true);
+    expect(registeredCommands.has('sonarAgent.explainRuleWithAgent')).toBe(true);
     expect(registeredCommands.has('sonarAgent.cleanCurrentFile')).toBe(true);
+
+    // Test explainRuleWithAgent with no arguments
+    await registeredCommands.get('sonarAgent.explainRuleWithAgent')!(null, null);
 
     // Test cleanCurrentFile
     await registeredCommands.get('sonarAgent.cleanCurrentFile')!();
