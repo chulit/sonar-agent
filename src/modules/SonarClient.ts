@@ -67,6 +67,65 @@ export interface QualityGateStatus {
   conditions: QualityGateCondition[];
 }
 
+function mapImpactToType(item: any): SonarDetailItem['type'] {
+  const impact = item?.impacts?.[0];
+  if (impact?.softwareQuality) {
+    switch (impact.softwareQuality) {
+      case 'RELIABILITY':
+        return 'BUG';
+      case 'SECURITY':
+        return 'VULNERABILITY';
+      case 'MAINTAINABILITY':
+        return 'CODE_SMELL';
+    }
+  }
+  if (item?.type === 'BUG' || item?.type === 'VULNERABILITY' || item?.type === 'CODE_SMELL') {
+    return item.type;
+  }
+  return 'CODE_SMELL';
+}
+
+/**
+ * Maps a SonarQube 10.x impact severity to the legacy severity scale.
+ * Falls back to the legacy flat `severity` field when present (older servers).
+ */
+function mapImpactToSeverity(item: any): SonarDetailItem['severity'] {
+  const impact = item?.impacts?.[0];
+  if (impact?.severity) {
+    switch (impact.severity) {
+      case 'BLOCKER':
+        return 'BLOCKER';
+      case 'HIGH':
+        return 'CRITICAL';
+      case 'MEDIUM':
+        return 'MAJOR';
+      case 'LOW':
+        return 'MINOR';
+      case 'INFO':
+        return 'INFO';
+    }
+  }
+  const legacy = item?.severity;
+  if (
+    legacy === 'BLOCKER' ||
+    legacy === 'CRITICAL' ||
+    legacy === 'MAJOR' ||
+    legacy === 'MINOR' ||
+    legacy === 'INFO'
+  ) {
+    return legacy;
+  }
+  return 'MAJOR';
+}
+
+/**
+ * Prefers the SonarQube 10.x `issueStatus` field, falling back to the
+ * legacy flat `status` field (older servers).
+ */
+function mapIssueStatus(item: any): string {
+  return item?.issueStatus || item?.status || 'OPEN';
+}
+
 export class SonarClient {
   private readonly serverUrl: string;
   private readonly token?: string;
@@ -435,9 +494,9 @@ export class SonarClient {
       component: item.component || '',
       filePath: this.extractFilePath(item.component || ''),
       line: item.line,
-      type: item.type || 'CODE_SMELL',
-      severity: item.severity || 'MAJOR',
-      status: item.status || 'OPEN',
+      type: mapImpactToType(item),
+      severity: mapImpactToSeverity(item),
+      status: mapIssueStatus(item),
       effort: item.effort,
       tags: item.tags || [],
       creationDate: item.creationDate || '',
