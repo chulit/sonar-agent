@@ -4,11 +4,11 @@
 
 **Blocked by:** 33
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Update `SonarClient.getQualityGateStatus(projectKey, codePeriod)` to evaluate only `new_*` conditions when `codePeriod === 'new'`.
-- [ ] Update sidebar Quality Gate badge in `SonarOverviewViewProvider` to show New Code gate status when New Code mode is active.
-- [ ] Update `SonarStatusBar` item text, tooltip, and icon to reflect active `codePeriod` (e.g. `$(pass) Sonar (New): Passed`).
-- [ ] Markdown tooltip in `SonarStatusBar` lists individual New Code conditions and actual vs threshold values.
-- [ ] Unit tests for `SonarClient.getQualityGateStatus` new code evaluation and `SonarStatusBar` period-aware formatting.
-- [ ] Build, typecheck, lint, and tests all pass.
+- [x] Update `SonarClient.getQualityGateStatus(projectKey, codePeriod)` to evaluate only `new_*` conditions when `codePeriod === 'new'`.
+- [x] Update sidebar Quality Gate badge in `SonarOverviewViewProvider` to show New Code gate status when New Code mode is active.
+- [x] Update `SonarStatusBar` item text, tooltip, and icon to reflect active `codePeriod` (e.g. `$(pass) Sonar (New): Passed`).
+- [x] Markdown tooltip in `SonarStatusBar` lists individual New Code conditions and actual vs threshold values.
+- [x] Unit tests for `SonarClient.getQualityGateStatus` new code evaluation and `SonarStatusBar` period-aware formatting.
+- [x] Build, typecheck, lint, and tests all pass.

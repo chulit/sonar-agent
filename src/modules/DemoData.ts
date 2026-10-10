@@ -48,34 +48,71 @@ export class DemoData {
     };
   }
 
-  static getQualityGate(): QualityGateStatus {
+  static getQualityGate(period: SonarCodePeriod = 'overall'): QualityGateStatus {
+    if (period === 'new') {
+      return {
+        status: 'ERROR',
+        period: 'new',
+        conditions: [
+          {
+            status: 'ERROR',
+            metricKey: 'new_coverage',
+            comparator: 'LT',
+            errorThreshold: '80.0',
+            actualValue: '78.5',
+          },
+          {
+            status: 'OK',
+            metricKey: 'new_reliability_rating',
+            comparator: 'GT',
+            errorThreshold: '1',
+            actualValue: '1',
+          },
+          {
+            status: 'OK',
+            metricKey: 'new_security_rating',
+            comparator: 'GT',
+            errorThreshold: '1',
+            actualValue: '1',
+          },
+          {
+            status: 'OK',
+            metricKey: 'new_duplicated_lines_density',
+            comparator: 'GT',
+            errorThreshold: '3.0',
+            actualValue: '0.0',
+          },
+        ],
+      };
+    }
     return {
       status: 'ERROR',
+      period: 'overall',
       conditions: [
         {
           status: 'ERROR',
-          metricKey: 'new_coverage',
+          metricKey: 'coverage',
           comparator: 'LT',
           errorThreshold: '80.0',
           actualValue: '64.2',
         },
         {
           status: 'ERROR',
-          metricKey: 'new_reliability_rating',
+          metricKey: 'reliability_rating',
           comparator: 'GT',
           errorThreshold: '1',
           actualValue: '3',
         },
         {
           status: 'ERROR',
-          metricKey: 'new_security_rating',
+          metricKey: 'security_rating',
           comparator: 'GT',
           errorThreshold: '1',
           actualValue: '4',
         },
         {
           status: 'OK',
-          metricKey: 'new_duplicated_lines_density',
+          metricKey: 'duplicated_lines_density',
           comparator: 'GT',
           errorThreshold: '10.0',
           actualValue: '8.4',

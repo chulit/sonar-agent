@@ -354,7 +354,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
   public async enableDemoMode(): Promise<void> {
     this._isDemoMode = true;
     const demoOverview = DemoData.getOverview(this._codePeriod);
-    const demoGate = DemoData.getQualityGate();
+    const demoGate = DemoData.getQualityGate(this._codePeriod);
     const demoProjects = DemoData.getProjects();
     const effectiveDefaultAgent = this._getEffectiveDefaultAgent();
     const availableAgents = this.agentDispatcher.getAvailableAgents();
@@ -384,6 +384,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       overview: demoOverview,
       qualityGate: demoGate,
       isDemoMode: true,
+      codePeriod: this._codePeriod,
     });
   }
 
@@ -583,11 +584,23 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
     if (this._isDemoMode) {
       const demoOverview = DemoData.getOverview(period);
+      const demoGate = DemoData.getQualityGate(period);
       await this._view?.webview.postMessage({
         type: 'overviewUpdated',
         overview: demoOverview,
         period: this._codePeriod,
         hasNewCode: demoOverview.hasNewCode,
+      });
+      await this._view?.webview.postMessage({
+        type: 'qualityGate',
+        status: demoGate,
+      });
+      this.statusBar.update({
+        projectKey: 'demo-sample-project',
+        overview: demoOverview,
+        qualityGate: demoGate,
+        isDemoMode: true,
+        codePeriod: this._codePeriod,
       });
       if (this._currentDetailCategory) {
         await this._handleFetchDetails(this._currentDetailCategory);
@@ -614,11 +627,18 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       text: `Fetching ${period === 'new' ? 'New' : 'Overall'} Code measures...`,
     });
 
-    const { overview, overviewError } = await this.fetchProjectOverview(
-      client,
-      projectKey,
-      this._codePeriod,
-    );
+    const [overviewData, qualityGate] = await Promise.all([
+      this.fetchProjectOverview(client, projectKey, this._codePeriod),
+      (typeof client.getQualityGateStatus === 'function'
+        ? client.getQualityGateStatus(projectKey, this._codePeriod)
+        : Promise.resolve(null)
+      ).catch((err) => {
+        console.error('[SonarAgent] getQualityGateStatus error on switchCodePeriod:', err);
+        return null;
+      }),
+    ]);
+
+    const { overview, overviewError } = overviewData;
 
     await this._view?.webview.postMessage({
       type: 'loading',
@@ -631,6 +651,21 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       overviewError,
       period: this._codePeriod,
       hasNewCode: overview?.hasNewCode,
+    });
+
+    if (qualityGate) {
+      await this._view?.webview.postMessage({
+        type: 'qualityGate',
+        status: qualityGate,
+      });
+    }
+
+    this.statusBar.update({
+      projectKey,
+      overview,
+      qualityGate,
+      isDemoMode: false,
+      codePeriod: this._codePeriod,
     });
 
     if (this._currentDetailCategory) {
@@ -1238,7 +1273,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         ? client.getOverview(effectiveProjectKey, this._codePeriod)
         : Promise.resolve(null),
       effectiveProjectKey
-        ? client.getQualityGateStatus(effectiveProjectKey)
+        ? client.getQualityGateStatus(effectiveProjectKey, this._codePeriod)
         : Promise.resolve(null),
     ]);
 
@@ -1271,7 +1306,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     }
     if (resolvedProjectKey && resolvedProjectKey !== effectiveProjectKey) {
       try {
-        qualityGate = await client.getQualityGateStatus(resolvedProjectKey);
+        qualityGate = await client.getQualityGateStatus(resolvedProjectKey, this._codePeriod);
       } catch (err) {
         console.error('[SonarAgent] getQualityGateStatus (resolved key) error:', err);
         qualityGate = null;
@@ -1306,6 +1341,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       overview,
       qualityGate,
       isDemoMode: false,
+      codePeriod: this._codePeriod,
     });
 
     if (!this._webviewReady && this._view) {
@@ -3193,6 +3229,7 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
     const celebrationBadge = document.getElementById("celebration-badge");
     const celebrationCanvas = document.getElementById("celebration-canvas");
     let lastGateStatus = null;
+    let currentGateStatus = null;
 
     const CIRCUMFERENCE_R14 = 87.96;
 
@@ -3397,11 +3434,13 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
         triggerCelebration("Quality Gate Passed! Clean Code streak maintained");
       }
       lastGateStatus = status.status;
+      currentGateStatus = status;
 
       const variant = QUALITY_GATE_CLASSES[status.status];
       qualityGateBanner.className = "quality-gate " + variant;
+      const isNew = status.period === "new" || currentDetailPeriod === "new";
       if (qualityGateLabel) {
-        qualityGateLabel.textContent = "Quality Gate: " + QUALITY_GATE_LABELS[status.status];
+        qualityGateLabel.textContent = (isNew ? "Quality Gate (New): " : "Quality Gate: ") + QUALITY_GATE_LABELS[status.status];
       }
 
       const failing = (status.conditions || []).filter(
@@ -3927,6 +3966,10 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       const isNew = period === "new";
       if (measuresTitle) {
         measuresTitle.textContent = isNew ? "New Code Measures" : "Overall Code Measures";
+      }
+      if (currentGateStatus && qualityGateLabel && QUALITY_GATE_LABELS[currentGateStatus.status]) {
+        const isGateNew = currentGateStatus.period === "new" || isNew;
+        qualityGateLabel.textContent = (isGateNew ? "Quality Gate (New): " : "Quality Gate: ") + QUALITY_GATE_LABELS[currentGateStatus.status];
       }
       if (periodBtnOverall && periodBtnNew) {
         periodBtnOverall.classList.toggle("active", !isNew);

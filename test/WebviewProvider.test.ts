@@ -975,7 +975,11 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
         hasNewCode: period === 'new',
       })),
       fetchProjects: vi.fn(async () => []),
-      getQualityGateStatus: vi.fn(async () => null),
+      getQualityGateStatus: vi.fn(async (_key: string, period?: string) => ({
+        status: period === 'new' ? 'OK' : 'ERROR',
+        period: period || 'overall',
+        conditions: [],
+      })),
     };
 
     const customProvider = new SonarOverviewViewProvider(
@@ -993,7 +997,11 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
     expect(customProvider.getCodePeriod()).toBe('new');
     expect(mockMemento.update).toHaveBeenCalledWith('sonarAgent.activeCodePeriod', 'new');
     expect(clientMock.getOverview).toHaveBeenCalledWith(expect.any(String), 'new');
+    expect(clientMock.getQualityGateStatus).toHaveBeenCalledWith(expect.any(String), 'new');
     expect(postedMessages.some((m) => m.type === 'overviewUpdated' && m.period === 'new')).toBe(
+      true,
+    );
+    expect(postedMessages.some((m) => m.type === 'qualityGate' && m.status?.period === 'new')).toBe(
       true,
     );
 
@@ -1002,6 +1010,7 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
     expect(customProvider.getCodePeriod()).toBe('overall');
     expect(mockMemento.update).toHaveBeenCalledWith('sonarAgent.activeCodePeriod', 'overall');
     expect(clientMock.getOverview).toHaveBeenCalledWith(expect.any(String), 'overall');
+    expect(clientMock.getQualityGateStatus).toHaveBeenCalledWith(expect.any(String), 'overall');
   });
 
   it('queries New Code issues and hotspots when active code period is new', async () => {
@@ -1092,6 +1101,8 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
       getHotspots: hotspotsSpy,
       getCoverageFiles: vi.fn(async () => []),
       getDuplicationFiles: vi.fn(async () => []),
+      getOverview: vi.fn(async () => null),
+      getQualityGateStatus: vi.fn(async () => null),
     }));
 
     // Trigger details fetch for reliability

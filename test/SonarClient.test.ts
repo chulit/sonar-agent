@@ -559,6 +559,99 @@ describe('SonarClient - Quality Gate Status', () => {
 
     await expect(client.getQualityGateStatus('my-project')).rejects.toThrow('HTTP 500');
   });
+
+  it('should evaluate only new_* conditions when codePeriod is new and return OK when all new conditions pass', async () => {
+    const { client } = gateClient({
+      projectStatus: {
+        status: 'ERROR',
+        conditions: [
+          {
+            status: 'ERROR',
+            metricKey: 'coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '62.4',
+          },
+          {
+            status: 'OK',
+            metricKey: 'new_coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '85.0',
+          },
+          {
+            status: 'OK',
+            metricKey: 'new_reliability_rating',
+            comparator: 'GT',
+            errorThreshold: '1',
+            actualValue: '1',
+          },
+        ],
+      },
+    });
+
+    const gate = await client.getQualityGateStatus('my-project', 'new');
+
+    expect(gate).not.toBeNull();
+    expect(gate?.period).toBe('new');
+    expect(gate?.status).toBe('OK');
+    expect(gate?.conditions).toHaveLength(2);
+    expect(gate?.conditions.every((c) => c.metricKey.startsWith('new_'))).toBe(true);
+  });
+
+  it('should evaluate ERROR when a new_* condition fails in new code period', async () => {
+    const { client } = gateClient({
+      projectStatus: {
+        status: 'ERROR',
+        conditions: [
+          {
+            status: 'OK',
+            metricKey: 'coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '90.0',
+          },
+          {
+            status: 'ERROR',
+            metricKey: 'new_coverage',
+            comparator: 'LT',
+            errorThreshold: '80',
+            actualValue: '75.0',
+          },
+        ],
+      },
+    });
+
+    const gate = await client.getQualityGateStatus('my-project', 'new');
+
+    expect(gate?.period).toBe('new');
+    expect(gate?.status).toBe('ERROR');
+    expect(gate?.conditions).toHaveLength(1);
+    expect(gate?.conditions[0].metricKey).toBe('new_coverage');
+  });
+
+  it('should evaluate WARN when a new_* condition warns in new code period', async () => {
+    const { client } = gateClient({
+      projectStatus: {
+        status: 'WARN',
+        conditions: [
+          {
+            status: 'WARN',
+            metricKey: 'new_duplicated_lines_density',
+            comparator: 'GT',
+            warnThreshold: '3',
+            actualValue: '4.5',
+          },
+        ],
+      },
+    });
+
+    const gate = await client.getQualityGateStatus('my-project', 'new');
+
+    expect(gate?.period).toBe('new');
+    expect(gate?.status).toBe('WARN');
+    expect(gate?.conditions[0].metricKey).toBe('new_duplicated_lines_density');
+  });
 });
 
 describe('SonarClient - Issue Lifecycle Actions', () => {

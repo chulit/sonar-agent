@@ -69,6 +69,7 @@ export interface QualityGateCondition {
 export interface QualityGateStatus {
   status: 'OK' | 'WARN' | 'ERROR';
   conditions: QualityGateCondition[];
+  period?: SonarCodePeriod;
 }
 
 function mapImpactToType(item: any): SonarDetailItem['type'] {
@@ -543,9 +544,13 @@ export class SonarClient {
    * Returns null when no quality gate is configured (NONE), the endpoint is
    * unavailable on older servers (404), or the token lacks Browse permission
    * (403) — the widget hides silently in all these cases and must never
-   * break the existing overview.
+   * break the existing overview. When codePeriod is 'new', evaluates only
+   * conditions with metricKey starting with 'new_'.
    */
-  async getQualityGateStatus(projectKey: string): Promise<QualityGateStatus | null> {
+  async getQualityGateStatus(
+    projectKey: string,
+    codePeriod: SonarCodePeriod = 'overall',
+  ): Promise<QualityGateStatus | null> {
     const url = `${this.serverUrl}/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}`;
     const response = await this.authenticatedFetch(url);
 
@@ -579,16 +584,34 @@ export class SonarClient {
       return null;
     }
 
+    const allConditions: QualityGateCondition[] = (projectStatus.conditions || []).map((c) => ({
+      status: c.status || 'OK',
+      metricKey: c.metricKey || '',
+      comparator: c.comparator || '',
+      errorThreshold: c.errorThreshold,
+      warnThreshold: c.warnThreshold,
+      actualValue: c.actualValue,
+    }));
+
+    if (codePeriod === 'new') {
+      const newConditions = allConditions.filter((c) => c.metricKey.startsWith('new_'));
+      let derivedStatus: 'OK' | 'WARN' | 'ERROR' = 'OK';
+      if (newConditions.some((c) => c.status === 'ERROR')) {
+        derivedStatus = 'ERROR';
+      } else if (newConditions.some((c) => c.status === 'WARN')) {
+        derivedStatus = 'WARN';
+      }
+      return {
+        status: derivedStatus,
+        conditions: newConditions,
+        period: 'new',
+      };
+    }
+
     return {
       status,
-      conditions: (projectStatus.conditions || []).map((c) => ({
-        status: c.status || 'OK',
-        metricKey: c.metricKey || '',
-        comparator: c.comparator || '',
-        errorThreshold: c.errorThreshold,
-        warnThreshold: c.warnThreshold,
-        actualValue: c.actualValue,
-      })),
+      conditions: allConditions,
+      period: 'overall',
     };
   }
 
