@@ -18,7 +18,7 @@ export class SonarStatusBar implements vscode.Disposable {
   }
 
   public update(params: SonarStatusBarUpdateParams): void {
-    const { projectKey, overview, qualityGate, isDemoMode } = params;
+    const { qualityGate, isDemoMode } = params;
 
     const gateStatus = qualityGate?.status;
     let icon = '$(shield)';

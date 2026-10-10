@@ -54,11 +54,13 @@ export class TestFrameworkDetector {
    */
   getTestFileName(targetFilePath?: string, frameworkName = 'Vitest'): string {
     if (!targetFilePath) {
-      return frameworkName === 'Go test'
-        ? 'main_test.go'
-        : frameworkName === 'Pytest'
-          ? 'test_main.py'
-          : 'example.test.ts';
+      if (frameworkName === 'Go test') {
+        return 'main_test.go';
+      }
+      if (frameworkName === 'Pytest') {
+        return 'test_main.py';
+      }
+      return 'example.test.ts';
     }
 
     const base = path.basename(targetFilePath);
@@ -109,9 +111,9 @@ export class TestFrameworkDetector {
     if (pkgContent) {
       try {
         const pkg = JSON.parse(pkgContent);
-        const allDeps = {
-          ...(pkg.dependencies || {}),
-          ...(pkg.devDependencies || {}),
+        const allDeps: Record<string, unknown> = {
+          ...pkg.dependencies,
+          ...pkg.devDependencies,
         };
 
         if ('vitest' in allDeps) {

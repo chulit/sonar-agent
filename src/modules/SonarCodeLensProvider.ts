@@ -47,26 +47,18 @@ export class SonarCodeLensProvider implements vscode.CodeLensProvider {
 
       const title = item.message.length > 50 ? `${item.message.slice(0, 47)}...` : item.message;
 
-      // 1. Header / title lens
+      // Push Header, Fix, and Explain lenses together
       codeLenses.push(
         new vscode.CodeLens(range, {
           title: `⚡ Sonar: ${title}`,
           command: 'sonarAgent.fixWithAgent',
           arguments: [item, document],
         }),
-      );
-
-      // 2. Fix with AI action lens
-      codeLenses.push(
         new vscode.CodeLens(range, {
           title: '[Fix with AI]',
           command: 'sonarAgent.fixWithAgent',
           arguments: [item, document],
         }),
-      );
-
-      // 3. Explain action lens
-      codeLenses.push(
         new vscode.CodeLens(range, {
           title: '[Explain]',
           command: 'sonarAgent.explainRuleWithAgent',

@@ -111,7 +111,9 @@ describe('extension entrypoint', () => {
   });
 
   it('triggers create profile prompt when legacy single connection is migrated', async () => {
-    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValueOnce('New Profile' as any);
+    const showInfoSpy = vi
+      .spyOn(vscode.window, 'showInformationMessage')
+      .mockResolvedValueOnce('New Profile' as any);
 
     // Simulate legacy token in config/storage to trigger migration
     mockSecrets['sonarAgent.token'] = 'legacy-token';
@@ -125,5 +127,10 @@ describe('extension entrypoint', () => {
 
     // Allow promise microtasks to run
     await new Promise((r) => setTimeout(r, 50));
+    expect(mockContext.subscriptions.length).toBeGreaterThan(0);
+    expect(showInfoSpy).toHaveBeenCalledWith(
+      'Single connection removed — create a profile to reconnect.',
+      'New Profile',
+    );
   });
 });

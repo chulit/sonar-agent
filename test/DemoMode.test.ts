@@ -137,7 +137,7 @@ describe('SonarOverviewViewProvider - Demo Mode', () => {
       targetAgentId: 'copilot',
     });
 
-    expect(dispatchedIssues.length).toBe(1);
+    expect(dispatchedIssues).toHaveLength(1);
     expect(dispatchedIssues[0].item.id).toBe(sampleIssue.id);
     expect(dispatchedIssues[0].opts.targetAgentId).toBe('copilot');
   });

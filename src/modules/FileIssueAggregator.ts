@@ -34,7 +34,7 @@ function mapDiagnosticSeverity(severity?: vscode.DiagnosticSeverity): SonarDetai
 
 export function normalizeFilePath(p?: string): string {
   if (!p) return '';
-  let normalized = p.replace(/\\/g, '/').replace(/^\.\//, '').trim();
+  let normalized = p.replaceAll('\\', '/').replace(/^\.\//, '').trim();
 
   // Strip project key prefix in SonarQube component keys, e.g. "my-project:src/index.ts"
   // Avoid stripping Windows drive letter (e.g. "C:/path")
@@ -77,6 +77,16 @@ export class FileIssueAggregator {
       });
   }
 
+  private resolveUri(documentOrUri: vscode.TextDocument | vscode.Uri | string): vscode.Uri {
+    if (typeof documentOrUri === 'string') {
+      return vscode.Uri.file(documentOrUri);
+    }
+    if ('uri' in documentOrUri) {
+      return documentOrUri.uri;
+    }
+    return documentOrUri;
+  }
+
   /**
    * Aggregates all Sonar issues for the given text document or URI.
    * Performs a hybrid lookup:
@@ -87,12 +97,7 @@ export class FileIssueAggregator {
   aggregateIssuesForDocument(
     documentOrUri: vscode.TextDocument | vscode.Uri | string,
   ): SonarDetailItem[] {
-    const uri =
-      typeof documentOrUri === 'object' && 'uri' in documentOrUri
-        ? documentOrUri.uri
-        : typeof documentOrUri === 'string'
-          ? vscode.Uri.file(documentOrUri)
-          : documentOrUri;
+    const uri = this.resolveUri(documentOrUri);
 
     const relativePath = this.asRelativePathFn(uri);
     const normalizedTarget = normalizeFilePath(relativePath);

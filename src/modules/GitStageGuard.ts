@@ -84,12 +84,12 @@ export class GitStageGuard implements vscode.Disposable {
 
   public async initialize(): Promise<void> {
     const git = await this.gitApiAccessor();
-    if (!git || !git.repositories) {
+    if (!git?.repositories) {
       return;
     }
 
     const bindRepository = (repo: any) => {
-      if (!repo || !repo.state) {
+      if (!repo?.state) {
         return;
       }
       const sub = repo.state.onDidChange(() => {
@@ -124,7 +124,7 @@ export class GitStageGuard implements vscode.Disposable {
    */
   public async getStagedFilePaths(): Promise<string[]> {
     const git = await this.gitApiAccessor();
-    if (!git || !git.repositories) {
+    if (!git?.repositories) {
       return [];
     }
 
@@ -138,6 +138,35 @@ export class GitStageGuard implements vscode.Disposable {
       }
     }
     return stagedPaths;
+  }
+
+  private matchStagedIssues(
+    stagedFiles: string[],
+    cachedIssues: SonarDetailItem[],
+  ): SonarDetailItem[] {
+    const matchedIssues: SonarDetailItem[] = [];
+
+    for (const issue of cachedIssues) {
+      if (!issue.filePath) {
+        continue;
+      }
+      const normalizedIssuePath = path.normalize(issue.filePath);
+      const matches = stagedFiles.some((staged) => {
+        const normalizedStaged = path.normalize(staged);
+        return (
+          normalizedStaged === normalizedIssuePath ||
+          normalizedStaged.endsWith(normalizedIssuePath) ||
+          (this.workspaceRoot &&
+            normalizedStaged === path.normalize(path.join(this.workspaceRoot, issue.filePath)))
+        );
+      });
+
+      if (matches) {
+        matchedIssues.push(issue);
+      }
+    }
+
+    return matchedIssues;
   }
 
   /**
@@ -166,34 +195,17 @@ export class GitStageGuard implements vscode.Disposable {
         return { stagedFileCount: 0, issueCount: 0, issues: [] };
       }
 
-      const filesKey = stagedFiles.slice().sort().join(';');
+      const filesKey = stagedFiles
+        .slice()
+        .sort((a, b) => a.localeCompare(b))
+        .join(';');
       if (!interactive && filesKey === this.lastCheckedStagedFilesKey) {
         return { stagedFileCount: stagedFiles.length, issueCount: 0, issues: [] };
       }
       this.lastCheckedStagedFilesKey = filesKey;
 
       const cachedIssues = this.getCachedIssuesFn();
-      const matchedIssues: SonarDetailItem[] = [];
-
-      for (const issue of cachedIssues) {
-        if (!issue.filePath) {
-          continue;
-        }
-        const normalizedIssuePath = path.normalize(issue.filePath);
-        const matches = stagedFiles.some((staged) => {
-          const normalizedStaged = path.normalize(staged);
-          return (
-            normalizedStaged === normalizedIssuePath ||
-            normalizedStaged.endsWith(normalizedIssuePath) ||
-            (this.workspaceRoot &&
-              normalizedStaged === path.normalize(path.join(this.workspaceRoot, issue.filePath)))
-          );
-        });
-
-        if (matches) {
-          matchedIssues.push(issue);
-        }
-      }
+      const matchedIssues = this.matchStagedIssues(stagedFiles, cachedIssues);
 
       if (matchedIssues.length === 0) {
         if (interactive) {

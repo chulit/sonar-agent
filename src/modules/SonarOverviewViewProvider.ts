@@ -27,6 +27,17 @@ import {
 
 export type CurrentCodeTab = 'overallCode' | 'currentCode';
 
+export interface SonarOverviewViewProviderOptions {
+  fileNavigator?: FileNavigator;
+  agentDispatcher?: AgentDispatcher;
+  diagnosticCollection?: vscode.DiagnosticCollection;
+  connectionWizard?: ConnectionProfileWizard;
+  localScanner?: SonarLocalScanner;
+  workspaceRoot?: string;
+  statusBar?: SonarStatusBar;
+  gitStageGuard?: GitStageGuard;
+}
+
 export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'sonarAgent.overviewView';
   /**
@@ -37,6 +48,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
   private _view?: vscode.WebviewView;
   private _webviewReady = false;
   private _lastStateMessage?: any;
+  private readonly projectDetector: ProjectDetector;
   private readonly fileNavigator: FileNavigator;
   private readonly agentDispatcher: AgentDispatcher;
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
@@ -60,23 +72,37 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly projectDetector: ProjectDetector,
-    fileNavigator?: FileNavigator,
+    projectDetector: ProjectDetector,
+    fileNavigatorOrOptions?: FileNavigator | SonarOverviewViewProviderOptions,
     agentDispatcher?: AgentDispatcher,
     diagnosticCollection?: vscode.DiagnosticCollection,
     connectionWizard?: ConnectionProfileWizard,
     localScanner?: SonarLocalScanner,
-    workspaceRoot?: string,
-    statusBar?: SonarStatusBar,
-    gitStageGuard?: GitStageGuard,
   ) {
-    this.workspaceRoot = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    this.fileNavigator = fileNavigator ?? new FileNavigator();
-    this.statusBar = statusBar ?? new SonarStatusBar();
+    this.projectDetector = projectDetector;
+
+    const isOptionsObject =
+      fileNavigatorOrOptions &&
+      !(fileNavigatorOrOptions instanceof FileNavigator) &&
+      !('navigateToFile' in fileNavigatorOrOptions);
+
+    const opts: SonarOverviewViewProviderOptions = isOptionsObject
+      ? (fileNavigatorOrOptions as SonarOverviewViewProviderOptions)
+      : {
+          fileNavigator: fileNavigatorOrOptions as FileNavigator | undefined,
+          agentDispatcher,
+          diagnosticCollection,
+          connectionWizard,
+          localScanner,
+        };
+
+    this.workspaceRoot = opts.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    this.fileNavigator = opts.fileNavigator ?? new FileNavigator();
+    this.statusBar = opts.statusBar ?? new SonarStatusBar();
     this.localScanner =
-      localScanner ?? new SonarLocalScanner({ workspaceRoot: this.workspaceRoot });
+      opts.localScanner ?? new SonarLocalScanner({ workspaceRoot: this.workspaceRoot });
     this.agentDispatcher =
-      agentDispatcher ??
+      opts.agentDispatcher ??
       new AgentDispatcher({
         fileNavigator: this.fileNavigator,
         projectDetector: this.projectDetector,
@@ -85,16 +111,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       getCachedIssuesFn: () => this.getAllCachedIssues(),
     });
     this.diagnosticCollection =
-      diagnosticCollection ?? vscode.languages.createDiagnosticCollection('SonarQube');
+      opts.diagnosticCollection ?? vscode.languages.createDiagnosticCollection('SonarQube');
     this.connectionWizard =
-      connectionWizard ??
+      opts.connectionWizard ??
       new ConnectionProfileWizard({
         projectDetector: this.projectDetector,
         onConfigChanged: () => this.refresh(),
         promptProjectSelectionFn: () => this.promptProjectSelection(),
       });
     this.gitStageGuard =
-      gitStageGuard ??
+      opts.gitStageGuard ??
       new GitStageGuard({
         workspaceRoot: this.workspaceRoot,
         getCachedIssuesFn: () => this.getAllCachedIssues(),
@@ -103,7 +129,6 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
           return await this.agentDispatcher.dispatchBatch(issues, { targetAgentId: agent });
         },
       });
-    void this.gitStageGuard.initialize();
   }
 
   public resolveWebviewView(
@@ -111,6 +136,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken,
   ): void {
+    void this.gitStageGuard.initialize();
     this._view = webviewView;
     this._webviewReady = false;
     this._currentCodeEnabled = this.readCurrentCodeEnabled();
@@ -390,71 +416,51 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     return { ok: result.ok, count: issues.length, message: result.message };
   }
 
+  private createSyntheticCoverageItem(filePathOrUri: string): SonarDetailItem {
+    const relPath = this.workspaceRoot
+      ? path.relative(this.workspaceRoot, filePathOrUri)
+      : filePathOrUri;
+    return {
+      id: `cov-${Date.now()}`,
+      ruleKey: 'coverage:uncovered_lines',
+      message: `Coverage gap for ${path.basename(relPath)}`,
+      component: relPath,
+      filePath: relPath,
+      line: 1,
+      type: 'COVERAGE',
+      severity: 'MAJOR',
+      status: 'OPEN',
+      tags: ['test-coverage', 'unit-test'],
+      creationDate: new Date().toISOString(),
+    };
+  }
+
+  private resolveCoverageItem(
+    itemOrDoc?: SonarDetailItem | vscode.TextDocument | vscode.Uri,
+  ): SonarDetailItem | undefined {
+    if (itemOrDoc) {
+      if ('type' in itemOrDoc && 'ruleKey' in itemOrDoc) {
+        return itemOrDoc as SonarDetailItem;
+      }
+      if ('uri' in itemOrDoc && 'fileName' in itemOrDoc) {
+        return this.createSyntheticCoverageItem((itemOrDoc as vscode.TextDocument).uri.fsPath);
+      }
+      if ('fsPath' in itemOrDoc && 'scheme' in itemOrDoc) {
+        return this.createSyntheticCoverageItem((itemOrDoc as vscode.Uri).fsPath);
+      }
+    }
+    const activeDoc = vscode.window.activeTextEditor?.document;
+    if (activeDoc) {
+      return this.createSyntheticCoverageItem(activeDoc.uri.fsPath);
+    }
+    return undefined;
+  }
+
   public async generateMissingTests(
     itemOrDoc?: SonarDetailItem | vscode.TextDocument | vscode.Uri,
     targetAgentId?: string,
   ): Promise<{ ok: boolean; message: string }> {
-    let item: SonarDetailItem | undefined;
-
-    if (itemOrDoc) {
-      if ('type' in itemOrDoc && 'ruleKey' in itemOrDoc) {
-        item = itemOrDoc as SonarDetailItem;
-      } else if ('uri' in itemOrDoc && 'fileName' in itemOrDoc) {
-        const doc = itemOrDoc as vscode.TextDocument;
-        const relPath = this.workspaceRoot
-          ? path.relative(this.workspaceRoot, doc.uri.fsPath)
-          : doc.uri.fsPath;
-        item = {
-          id: `cov-${Date.now()}`,
-          ruleKey: 'coverage:uncovered_lines',
-          message: `Coverage gap for ${path.basename(relPath)}`,
-          component: relPath,
-          filePath: relPath,
-          line: 1,
-          type: 'COVERAGE',
-          severity: 'MAJOR',
-          status: 'OPEN',
-          tags: ['test-coverage', 'unit-test'],
-          creationDate: new Date().toISOString(),
-        };
-      } else if ('fsPath' in itemOrDoc && 'scheme' in itemOrDoc) {
-        const uri = itemOrDoc as vscode.Uri;
-        const relPath = this.workspaceRoot
-          ? path.relative(this.workspaceRoot, uri.fsPath)
-          : uri.fsPath;
-        item = {
-          id: `cov-${Date.now()}`,
-          ruleKey: 'coverage:uncovered_lines',
-          message: `Coverage gap for ${path.basename(relPath)}`,
-          component: relPath,
-          filePath: relPath,
-          line: 1,
-          type: 'COVERAGE',
-          severity: 'MAJOR',
-          status: 'OPEN',
-          tags: ['test-coverage', 'unit-test'],
-          creationDate: new Date().toISOString(),
-        };
-      }
-    } else if (vscode.window.activeTextEditor?.document) {
-      const doc = vscode.window.activeTextEditor.document;
-      const relPath = this.workspaceRoot
-        ? path.relative(this.workspaceRoot, doc.uri.fsPath)
-        : doc.uri.fsPath;
-      item = {
-        id: `cov-${Date.now()}`,
-        ruleKey: 'coverage:uncovered_lines',
-        message: `Coverage gap for ${path.basename(relPath)}`,
-        component: relPath,
-        filePath: relPath,
-        line: 1,
-        type: 'COVERAGE',
-        severity: 'MAJOR',
-        status: 'OPEN',
-        tags: ['test-coverage', 'unit-test'],
-        creationDate: new Date().toISOString(),
-      };
-    }
+    const item = this.resolveCoverageItem(itemOrDoc);
 
     if (!item) {
       const msg =

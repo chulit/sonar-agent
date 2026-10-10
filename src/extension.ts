@@ -95,7 +95,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('sonarAgent.generateMissingTests', async (target?: any) => {
       let doc: vscode.TextDocument | undefined;
-      if (target && target.scheme && target.fsPath) {
+      if (target?.scheme && target?.fsPath) {
         try {
           doc = await vscode.workspace.openTextDocument(target);
         } catch {
