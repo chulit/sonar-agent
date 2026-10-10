@@ -585,3 +585,104 @@ describe('SonarClient - SonarQube Cloud organization', () => {
     );
   });
 });
+describe('SonarClient - SonarQube 10.x Clean Code Taxonomy mapping', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function getFirstIssue(rawIssue: Record<string, unknown>) {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ issues: [rawIssue] }),
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const items = await client.getIssues('my-project', 'reliability');
+    expect(items).toHaveLength(1);
+    return items[0];
+  }
+
+  function baseIssue(overrides: Record<string, unknown> = {}) {
+    return {
+      key: 'ISSUE-10X-1',
+      rule: 'typescript:S123',
+      component: 'my-project:src/app.ts',
+      line: 10,
+      message: 'Some issue',
+      ...overrides,
+    };
+  }
+
+  it('maps RELIABILITY/HIGH impact to BUG/CRITICAL', async () => {
+    const item = await getFirstIssue(
+      baseIssue({ impacts: [{ softwareQuality: 'RELIABILITY', severity: 'HIGH' }] }),
+    );
+    expect(item.type).toBe('BUG');
+    expect(item.severity).toBe('CRITICAL');
+  });
+
+  it('maps SECURITY/BLOCKER impact to VULNERABILITY/BLOCKER', async () => {
+    const item = await getFirstIssue(
+      baseIssue({ impacts: [{ softwareQuality: 'SECURITY', severity: 'BLOCKER' }] }),
+    );
+    expect(item.type).toBe('VULNERABILITY');
+    expect(item.severity).toBe('BLOCKER');
+  });
+
+  it('maps MAINTAINABILITY/MEDIUM impact to CODE_SMELL/MAJOR', async () => {
+    const item = await getFirstIssue(
+      baseIssue({ impacts: [{ softwareQuality: 'MAINTAINABILITY', severity: 'MEDIUM' }] }),
+    );
+    expect(item.type).toBe('CODE_SMELL');
+    expect(item.severity).toBe('MAJOR');
+  });
+
+  it('maps MAINTAINABILITY/LOW impact to CODE_SMELL/MINOR', async () => {
+    const item = await getFirstIssue(
+      baseIssue({ impacts: [{ softwareQuality: 'MAINTAINABILITY', severity: 'LOW' }] }),
+    );
+    expect(item.type).toBe('CODE_SMELL');
+    expect(item.severity).toBe('MINOR');
+  });
+
+  it('maps SECURITY/INFO impact to VULNERABILITY/INFO', async () => {
+    const item = await getFirstIssue(
+      baseIssue({ impacts: [{ softwareQuality: 'SECURITY', severity: 'INFO' }] }),
+    );
+    expect(item.type).toBe('VULNERABILITY');
+    expect(item.severity).toBe('INFO');
+  });
+
+  it('prefers issueStatus over legacy status', async () => {
+    const item = await getFirstIssue(
+      baseIssue({
+        impacts: [{ softwareQuality: 'RELIABILITY', severity: 'HIGH' }],
+        issueStatus: 'CONFIRMED',
+        status: 'OPEN',
+      }),
+    );
+    expect(item.status).toBe('CONFIRMED');
+  });
+
+  it('falls back to legacy flat fields when impacts are absent (older servers)', async () => {
+    const item = await getFirstIssue(
+      baseIssue({ type: 'BUG', severity: 'MINOR', status: 'CONFIRMED' }),
+    );
+    expect(item.type).toBe('BUG');
+    expect(item.severity).toBe('MINOR');
+    expect(item.status).toBe('CONFIRMED');
+  });
+
+  it('uses CODE_SMELL/MAJOR/OPEN defaults when no taxonomy data at all', async () => {
+    const item = await getFirstIssue(baseIssue());
+    expect(item.type).toBe('CODE_SMELL');
+    expect(item.severity).toBe('MAJOR');
+    expect(item.status).toBe('OPEN');
+  });
+});
