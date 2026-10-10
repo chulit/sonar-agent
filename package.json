@@ -1,7 +1,7 @@
 {
   "name": "sonar-agent",
   "displayName": "Sonar Agent - SonarQube AI Fix & Quality Metrics",
-  "description": "SonarQube and SonarCloud metrics dashboard with fix prompt dispatcher for GitHub Copilot, Antigravity, and Claude.",
+  "description": "Turn SonarQube Quality Gate Failures into Instant 1-Click AI Fixes (Copilot, Claude, Antigravity, Roo, Cline, Codex).",
   "version": "1.7.0",
   "icon": "media/icon.png",
   "publisher": "chulit",

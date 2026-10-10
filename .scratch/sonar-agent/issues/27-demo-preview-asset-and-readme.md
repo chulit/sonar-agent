@@ -4,9 +4,9 @@
 
 **Blocked by:** 25: Try Demo Mode Onboarding, 26: Status Bar Quality Gate Item
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Visual demo asset is added under `media/` illustrating the Status Bar, dashboard metrics, and AI Fix prompt dispatching.
-- [ ] `README.md` header updated with problem-solution tagline ("Turn SonarQube Quality Gate Failures into Instant 1-Click AI Fixes") and badges for supported AI assistants (GitHub Copilot, Claude Code, Google Antigravity, Roo Code, Cline, Codex).
-- [ ] `README.md` is updated with the preview asset, feature descriptions for Demo Mode and Status Bar, and Quick Start instructions.
-- [ ] Extension packaging, linter, formatting checks, and test suites pass with zero errors.
+- [x] Visual demo asset is added under `media/` illustrating the Status Bar, dashboard metrics, and AI Fix prompt dispatching.
+- [x] `README.md` header updated with problem-solution tagline ("Turn SonarQube Quality Gate Failures into Instant 1-Click AI Fixes") and badges for supported AI assistants (GitHub Copilot, Claude Code, Google Antigravity, Roo Code, Cline, Codex).
+- [x] `README.md` is updated with the preview asset, feature descriptions for Demo Mode and Status Bar, and Quick Start instructions.
+- [x] Extension packaging, linter, formatting checks, and test suites pass with zero errors.
