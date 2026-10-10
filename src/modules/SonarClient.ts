@@ -1,6 +1,12 @@
 export interface SonarClientConfig {
   serverUrl: string;
   token?: string;
+  /**
+   * SonarQube Cloud organization key. Required by several SonarCloud-only
+   * endpoints (project search, rule details). Leave empty for self-hosted
+   * SonarQube, where the parameter does not exist.
+   */
+  organization?: string;
   fetchFn?: typeof fetch;
 }
 
@@ -61,6 +67,65 @@ export interface QualityGateStatus {
   conditions: QualityGateCondition[];
 }
 
+function mapImpactToType(item: any): SonarDetailItem['type'] {
+  const impact = item?.impacts?.[0];
+  if (impact?.softwareQuality) {
+    switch (impact.softwareQuality) {
+      case 'RELIABILITY':
+        return 'BUG';
+      case 'SECURITY':
+        return 'VULNERABILITY';
+      case 'MAINTAINABILITY':
+        return 'CODE_SMELL';
+    }
+  }
+  if (item?.type === 'BUG' || item?.type === 'VULNERABILITY' || item?.type === 'CODE_SMELL') {
+    return item.type;
+  }
+  return 'CODE_SMELL';
+}
+
+/**
+ * Maps a SonarQube 10.x impact severity to the legacy severity scale.
+ * Falls back to the legacy flat `severity` field when present (older servers).
+ */
+function mapImpactToSeverity(item: any): SonarDetailItem['severity'] {
+  const impact = item?.impacts?.[0];
+  if (impact?.severity) {
+    switch (impact.severity) {
+      case 'BLOCKER':
+        return 'BLOCKER';
+      case 'HIGH':
+        return 'CRITICAL';
+      case 'MEDIUM':
+        return 'MAJOR';
+      case 'LOW':
+        return 'MINOR';
+      case 'INFO':
+        return 'INFO';
+    }
+  }
+  const legacy = item?.severity;
+  if (
+    legacy === 'BLOCKER' ||
+    legacy === 'CRITICAL' ||
+    legacy === 'MAJOR' ||
+    legacy === 'MINOR' ||
+    legacy === 'INFO'
+  ) {
+    return legacy;
+  }
+  return 'MAJOR';
+}
+
+/**
+ * Prefers the SonarQube 10.x `issueStatus` field, falling back to the
+ * legacy flat `status` field (older servers).
+ */
+function mapIssueStatus(item: any): string {
+  return item?.issueStatus || item?.status || 'OPEN';
+}
+
 /**
  * Thrown when the server rejects a write operation because the token lacks
  * the required permission (HTTP 403). The UI catches this to render a
@@ -76,6 +141,7 @@ export class InsufficientPermissionError extends Error {
 export class SonarClient {
   private readonly serverUrl: string;
   private readonly token?: string;
+  private readonly organization?: string;
   private readonly fetchFn: typeof fetch;
 
   constructor(config: SonarClientConfig) {
@@ -85,6 +151,8 @@ export class SonarClient {
     }
     this.serverUrl = url;
     this.token = config.token ? config.token.trim() : undefined;
+    const org = config.organization ? config.organization.trim() : '';
+    this.organization = org ? org : undefined;
     this.fetchFn = config.fetchFn ?? globalThis.fetch;
   }
 
@@ -96,6 +164,15 @@ export class SonarClient {
     return {
       Authorization: `Basic ${encoded}`,
     };
+  }
+
+  /**
+   * SonarQube Cloud requires an `organization` query parameter on several
+   * endpoints (project search, rule details). Returns '' when no organization
+   * is configured so self-hosted SonarQube URLs stay untouched.
+   */
+  private orgParam(): string {
+    return this.organization ? `&organization=${encodeURIComponent(this.organization)}` : '';
   }
 
   private parseRating(val?: string | number): SonarRating {
@@ -258,11 +335,12 @@ export class SonarClient {
    * Supports /api/components/search?qualifiers=TRK, /api/components/search_projects, /api/projects/search
    */
   async fetchProjects(): Promise<{ key: string; name: string }[]> {
+    const org = this.orgParam();
     const endpoints = [
-      `${this.serverUrl}/api/components/search?qualifiers=TRK&ps=100`,
-      `${this.serverUrl}/api/projects/search?ps=100`,
-      `${this.serverUrl}/api/components/search_projects?ps=100`,
-      `${this.serverUrl}/api/projects/search?ps=100&qualifiers=TRK`,
+      `${this.serverUrl}/api/components/search?qualifiers=TRK&ps=100${org}`,
+      `${this.serverUrl}/api/projects/search?ps=100${org}`,
+      `${this.serverUrl}/api/components/search_projects?ps=100${org}`,
+      `${this.serverUrl}/api/projects/search?ps=100&qualifiers=TRK${org}`,
     ];
 
     for (const url of endpoints) {
@@ -551,9 +629,9 @@ export class SonarClient {
       component: item.component || '',
       filePath: this.extractFilePath(item.component || ''),
       line: item.line,
-      type: item.type || 'CODE_SMELL',
-      severity: item.severity || 'MAJOR',
-      status: item.status || 'OPEN',
+      type: mapImpactToType(item),
+      severity: mapImpactToSeverity(item),
+      status: mapIssueStatus(item),
       effort: item.effort,
       tags: item.tags || [],
       creationDate: item.creationDate || '',
@@ -594,7 +672,7 @@ export class SonarClient {
    */
   async getEnrichedRule(ruleKey: string): Promise<SonarRuleDoc> {
     try {
-      const url = `${this.serverUrl}/api/rules/show?key=${encodeURIComponent(ruleKey)}`;
+      const url = `${this.serverUrl}/api/rules/show?key=${encodeURIComponent(ruleKey)}${this.orgParam()}`;
       const response = await this.authenticatedFetch(url);
 
       if (!response.ok) {
