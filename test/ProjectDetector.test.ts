@@ -5,6 +5,29 @@ import {
   WorkspaceConfigLike,
 } from '../src/modules/ProjectDetector.js';
 
+function createMocks() {
+  const mockSecrets: Record<string, string> = {};
+  const secretStorage: SecretStorageLike = {
+    get: vi.fn(async (key: string) => mockSecrets[key]),
+    store: vi.fn(async (key: string, value: string) => {
+      mockSecrets[key] = value;
+    }),
+    delete: vi.fn(async (key: string) => {
+      delete mockSecrets[key];
+    }),
+  };
+
+  const mockConfig: Record<string, any> = {};
+  const workspaceConfig: WorkspaceConfigLike = {
+    get: vi.fn((key: string, defaultValue?: any) => mockConfig[key] ?? defaultValue),
+    update: vi.fn(async (key: string, value: any) => {
+      mockConfig[key] = value;
+    }),
+  };
+
+  return { mockSecrets, secretStorage, mockConfig, workspaceConfig };
+}
+
 describe('ProjectDetector - Configuration and Secrets', () => {
   let mockSecrets: Record<string, string>;
   let secretStorage: SecretStorageLike;
@@ -12,24 +35,7 @@ describe('ProjectDetector - Configuration and Secrets', () => {
   let workspaceConfig: WorkspaceConfigLike;
 
   beforeEach(() => {
-    mockSecrets = {};
-    secretStorage = {
-      get: vi.fn(async (key: string) => mockSecrets[key]),
-      store: vi.fn(async (key: string, value: string) => {
-        mockSecrets[key] = value;
-      }),
-      delete: vi.fn(async (key: string) => {
-        delete mockSecrets[key];
-      }),
-    };
-
-    mockConfig = {};
-    workspaceConfig = {
-      get: vi.fn((key: string, defaultValue?: any) => mockConfig[key] ?? defaultValue),
-      update: vi.fn(async (key: string, value: any) => {
-        mockConfig[key] = value;
-      }),
-    };
+    ({ mockSecrets, secretStorage, mockConfig, workspaceConfig } = createMocks());
   });
 
   it('should detect when no serverUrl or token are configured', async () => {
@@ -128,23 +134,7 @@ describe('ProjectDetector - Connection Profiles', () => {
   let workspaceConfig: WorkspaceConfigLike;
 
   beforeEach(() => {
-    mockSecrets = {};
-    secretStorage = {
-      get: vi.fn(async (key: string) => mockSecrets[key]),
-      store: vi.fn(async (key: string, value: string) => {
-        mockSecrets[key] = value;
-      }),
-      delete: vi.fn(async (key: string) => {
-        delete mockSecrets[key];
-      }),
-    };
-    mockConfig = {};
-    workspaceConfig = {
-      get: vi.fn((key: string, defaultValue?: any) => mockConfig[key] ?? defaultValue),
-      update: vi.fn(async (key: string, value: any) => {
-        mockConfig[key] = value;
-      }),
-    };
+    ({ mockSecrets, secretStorage, mockConfig, workspaceConfig } = createMocks());
   });
 
   it('should create profiles with slugified ids and round-trip list/activate/rename/delete', async () => {
@@ -225,23 +215,7 @@ describe('ProjectDetector - Reset Migration and Properties-as-Suggestion', () =>
   let workspaceConfig: WorkspaceConfigLike;
 
   beforeEach(() => {
-    mockSecrets = {};
-    secretStorage = {
-      get: vi.fn(async (key: string) => mockSecrets[key]),
-      store: vi.fn(async (key: string, value: string) => {
-        mockSecrets[key] = value;
-      }),
-      delete: vi.fn(async (key: string) => {
-        delete mockSecrets[key];
-      }),
-    };
-    mockConfig = {};
-    workspaceConfig = {
-      get: vi.fn((key: string, defaultValue?: any) => mockConfig[key] ?? defaultValue),
-      update: vi.fn(async (key: string, value: any) => {
-        mockConfig[key] = value;
-      }),
-    };
+    ({ mockSecrets, secretStorage, mockConfig, workspaceConfig } = createMocks());
   });
 
   it('should delete the legacy token and clear legacy settings once, then report false', async () => {
@@ -309,23 +283,7 @@ describe('ProjectDetector - SonarQube Cloud organization', () => {
   let workspaceConfig: WorkspaceConfigLike;
 
   beforeEach(() => {
-    mockSecrets = {};
-    secretStorage = {
-      get: vi.fn(async (key: string) => mockSecrets[key]),
-      store: vi.fn(async (key: string, value: string) => {
-        mockSecrets[key] = value;
-      }),
-      delete: vi.fn(async (key: string) => {
-        delete mockSecrets[key];
-      }),
-    };
-    mockConfig = {};
-    workspaceConfig = {
-      get: vi.fn((key: string, defaultValue?: any) => mockConfig[key] ?? defaultValue),
-      update: vi.fn(async (key: string, value: any) => {
-        mockConfig[key] = value;
-      }),
-    };
+    ({ mockSecrets, secretStorage, mockConfig, workspaceConfig } = createMocks());
   });
 
   it('should parse sonar.organization from sonar-project.properties', () => {
