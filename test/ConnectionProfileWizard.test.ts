@@ -291,4 +291,151 @@ describe('ConnectionProfileWizard', () => {
       expect(onConfigChangedMock).toHaveBeenCalled();
     });
   });
+
+  describe('SonarQube Cloud organization', () => {
+    beforeEach(() => {
+      mockProjectDetector.setOrganization = vi.fn(async (org: string) => {
+        mockConfig.organization = org;
+      });
+      mockConfig.organization = undefined;
+    });
+
+    it('should prompt for organization on sonarcloud.io and pass it to the client factory', async () => {
+      const clientFactory = vi.fn().mockReturnValue({
+        verifyConnection: vi.fn().mockResolvedValue({ ok: true }),
+      });
+
+      const customWizard = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector,
+        sonarClientFactory: clientFactory,
+        onConfigChanged: onConfigChangedMock,
+      });
+
+      vi.spyOn(vscode.window, 'showInputBox')
+        .mockResolvedValueOnce('https://sonarcloud.io') // Server URL
+        .mockResolvedValueOnce('sqp_cloud_token') // User Token
+        .mockResolvedValueOnce('my-org'); // Organization key
+
+      await customWizard.promptUpdateCredentials();
+
+      expect(clientFactory).toHaveBeenCalledWith({
+        serverUrl: 'https://sonarcloud.io',
+        token: 'sqp_cloud_token',
+        organization: 'my-org',
+      });
+      expect(mockProjectDetector.setOrganization).toHaveBeenCalledWith('my-org');
+      expect(onConfigChangedMock).toHaveBeenCalled();
+    });
+
+    it('should keep the existing organization when the input is left empty', async () => {
+      mockConfig.organization = 'existing-org';
+      const clientFactory = vi.fn().mockReturnValue({
+        verifyConnection: vi.fn().mockResolvedValue({ ok: true }),
+      });
+
+      const customWizard = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector,
+        sonarClientFactory: clientFactory,
+        onConfigChanged: onConfigChangedMock,
+      });
+
+      vi.spyOn(vscode.window, 'showInputBox')
+        .mockResolvedValueOnce('https://sonarcloud.io')
+        .mockResolvedValueOnce('sqp_cloud_token')
+        .mockResolvedValueOnce('   '); // empty -> keep existing
+
+      await customWizard.promptUpdateCredentials();
+
+      expect(clientFactory).toHaveBeenCalledWith({
+        serverUrl: 'https://sonarcloud.io',
+        token: 'sqp_cloud_token',
+        organization: 'existing-org',
+      });
+      expect(mockProjectDetector.setOrganization).toHaveBeenCalledWith('existing-org');
+    });
+
+    it('should not prompt for organization on self-hosted SonarQube', async () => {
+      const clientFactory = vi.fn().mockReturnValue({
+        verifyConnection: vi.fn().mockResolvedValue({ ok: true }),
+      });
+
+      const customWizard = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector,
+        sonarClientFactory: clientFactory,
+        onConfigChanged: onConfigChangedMock,
+      });
+
+      const inputSpy = vi
+        .spyOn(vscode.window, 'showInputBox')
+        .mockResolvedValueOnce('https://sonar.company.com')
+        .mockResolvedValueOnce('sqp_new_secret_token');
+
+      await customWizard.promptUpdateCredentials();
+
+      expect(inputSpy).toHaveBeenCalledTimes(2);
+      expect(clientFactory).toHaveBeenCalledWith({
+        serverUrl: 'https://sonar.company.com',
+        token: 'sqp_new_secret_token',
+        organization: undefined,
+      });
+      expect(mockProjectDetector.setOrganization).not.toHaveBeenCalled();
+    });
+
+    it('should include organization when creating a profile on sonarcloud.io', async () => {
+      const clientFactory = vi.fn().mockReturnValue({
+        verifyConnection: vi.fn().mockResolvedValue({ ok: true }),
+      });
+
+      const customWizard = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector,
+        sonarClientFactory: clientFactory,
+        onConfigChanged: onConfigChangedMock,
+      });
+
+      vi.spyOn(vscode.window, 'showInputBox')
+        .mockResolvedValueOnce('cloud-profile') // name
+        .mockResolvedValueOnce('https://sonarcloud.io') // server URL
+        .mockResolvedValueOnce('sqp_profile_token') // token
+        .mockResolvedValueOnce('my-org_my-app') // project key
+        .mockResolvedValueOnce('my-org'); // organization key
+
+      await customWizard.promptCreateProfile();
+
+      expect(mockProjectDetector.createProfile).toHaveBeenCalledWith({
+        name: 'cloud-profile',
+        serverUrl: 'https://sonarcloud.io',
+        projectKey: 'my-org_my-app',
+        token: 'sqp_profile_token',
+        organization: 'my-org',
+      });
+      expect(clientFactory).toHaveBeenCalledWith({
+        serverUrl: 'https://sonarcloud.io',
+        token: 'sqp_profile_token',
+        organization: 'my-org',
+      });
+    });
+
+    it('should pass organization to fetchProjects for project discovery', async () => {
+      mockConfig.organization = 'my-org';
+      const mockFetchProjects = vi.fn().mockResolvedValue([]);
+      const clientFactory = vi.fn().mockReturnValue({ fetchProjects: mockFetchProjects });
+
+      const customWizard = new ConnectionProfileWizard({
+        projectDetector: mockProjectDetector,
+        sonarClientFactory: clientFactory,
+        onConfigChanged: onConfigChangedMock,
+      });
+
+      vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(async (items: any) => items[0]);
+      vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('my-org_my-app');
+
+      await customWizard.promptProjectSelection();
+
+      expect(clientFactory).toHaveBeenCalledWith({
+        serverUrl: mockConfig.serverUrl,
+        token: mockToken,
+        organization: 'my-org',
+      });
+    });
+  });
 });
