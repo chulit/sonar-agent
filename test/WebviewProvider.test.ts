@@ -936,4 +936,64 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
     expect(scanRes.ok).toBe(false);
     expect(scanRes.errorMessage).toBe('Scan already in progress.');
   });
+
+  it('should render code period switcher and empty notice in HTML template', () => {
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    const html = mockWebviewView.webview.html;
+    expect(html).toContain('id="code-period-switcher"');
+    expect(html).toContain('id="period-btn-overall"');
+    expect(html).toContain('id="period-btn-new"');
+    expect(html).toContain('id="new-code-empty-notice"');
+  });
+
+  it('should handle switchCodePeriod message, persist state, and post updated measures', async () => {
+    const mockState: Record<string, any> = {};
+    const mockMemento: vscode.Memento = {
+      keys: () => Object.keys(mockState),
+      get: (key: string, def?: any) => mockState[key] ?? def,
+      update: vi.fn(async (key: string, val: any) => {
+        mockState[key] = val;
+      }),
+    };
+
+    const clientMock = {
+      getOverview: vi.fn(async (_key: string, period?: string) => ({
+        security: { count: period === 'new' ? 0 : 2, rating: 'A' },
+        reliability: { count: period === 'new' ? 1 : 4, rating: 'B' },
+        maintainability: { count: period === 'new' ? 2 : 10, rating: 'A' },
+        acceptedIssues: { count: 0 },
+        coverage: { percentage: 90, linesToCover: 100 },
+        duplications: { percentage: 0, duplicatedLines: 0 },
+        securityHotspots: { count: 0, rating: 'A' },
+        period: period || 'overall',
+        hasNewCode: period === 'new',
+      })),
+      fetchProjects: vi.fn(async () => []),
+      getQualityGateStatus: vi.fn(async () => null),
+    };
+
+    const customProvider = new SonarOverviewViewProvider(
+      { fsPath: '/extension' } as any,
+      mockProjectDetector as unknown as ProjectDetector,
+      { workspaceState: mockMemento },
+    );
+    (customProvider as any).getClient = vi.fn(async () => clientMock);
+
+    customProvider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    expect(customProvider.getCodePeriod()).toBe('overall');
+
+    await messageCallback!({ command: 'switchCodePeriod', period: 'new' });
+
+    expect(customProvider.getCodePeriod()).toBe('new');
+    expect(mockMemento.update).toHaveBeenCalledWith('sonarAgent.activeCodePeriod', 'new');
+    expect(clientMock.getOverview).toHaveBeenCalledWith(expect.any(String), 'new');
+    expect(postedMessages.some((m) => m.type === 'overviewUpdated' && m.period === 'new')).toBe(true);
+
+    // Switch back to overall
+    await messageCallback!({ command: 'switchCodePeriod', period: 'overall' });
+    expect(customProvider.getCodePeriod()).toBe('overall');
+    expect(mockMemento.update).toHaveBeenCalledWith('sonarAgent.activeCodePeriod', 'overall');
+    expect(clientMock.getOverview).toHaveBeenCalledWith(expect.any(String), 'overall');
+  });
 });
+

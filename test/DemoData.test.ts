@@ -21,6 +21,16 @@ describe('DemoData', () => {
     expect(['A', 'B', 'C', 'D', 'E']).toContain(overview.security.rating);
   });
 
+  it('returns valid SonarOverview for new code period', () => {
+    const overview = DemoData.getOverview('new');
+    expect(overview.period).toBe('new');
+    expect(overview.hasNewCode).toBe(true);
+    expect(overview.security.count).toBe(1);
+    expect(overview.reliability.count).toBe(2);
+    expect(overview.maintainability.count).toBe(4);
+    expect(overview.coverage.percentage).toBe(78.5);
+  });
+
   it('returns failing QualityGateStatus with failed conditions', () => {
     const gate = DemoData.getQualityGate();
     expect(gate).toBeDefined();

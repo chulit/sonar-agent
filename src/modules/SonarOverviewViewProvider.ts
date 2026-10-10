@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { ProjectDetector } from './ProjectDetector.js';
 import {
   SonarClient,
+  SonarCodePeriod,
   SonarDetailItem,
   SonarOverview,
   QualityGateStatus,
@@ -34,6 +35,7 @@ export interface SonarOverviewViewProviderOptions {
   connectionWizard?: ConnectionProfileWizard;
   localScanner?: SonarLocalScanner;
   workspaceRoot?: string;
+  workspaceState?: vscode.Memento;
   statusBar?: SonarStatusBar;
   gitStageGuard?: GitStageGuard;
 }
@@ -69,6 +71,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
   private _cachedServerIssues: SonarDetailItem[] = [];
   private readonly fileIssueAggregator: FileIssueAggregator;
   private readonly gitStageGuard: GitStageGuard;
+  private readonly _workspaceState: vscode.Memento;
+  private _codePeriod: SonarCodePeriod = 'overall';
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -95,6 +99,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
           connectionWizard,
           localScanner,
         };
+
+    const defaultMemento: vscode.Memento = {
+      keys: () => [],
+      get: <T>(_key: string, defaultValue?: T) => defaultValue as T,
+      update: (_key: string, _value: any) => Promise.resolve(),
+    };
+    this._workspaceState = opts.workspaceState ?? defaultMemento;
+    this._codePeriod =
+      this._workspaceState.get<SonarCodePeriod>('sonarAgent.activeCodePeriod', 'overall') ||
+      'overall';
 
     this.workspaceRoot = opts.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     this.fileNavigator = opts.fileNavigator ?? new FileNavigator();
@@ -131,6 +145,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       });
   }
 
+  public getCodePeriod(): SonarCodePeriod {
+    return this._codePeriod;
+  }
+
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
@@ -154,6 +172,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       webviewView.webview,
       isConfigured,
       this._currentCodeEnabled,
+      this._codePeriod,
     );
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
@@ -268,6 +287,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
             );
             break;
           }
+          case 'switchCodePeriod': {
+            const period: SonarCodePeriod = message.period === 'new' ? 'new' : 'overall';
+            await this.handleSwitchCodePeriod(period);
+            break;
+          }
           case 'runCliScan': {
             await this.handleRunCliScan();
             break;
@@ -329,7 +353,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
   public async enableDemoMode(): Promise<void> {
     this._isDemoMode = true;
-    const demoOverview = DemoData.getOverview();
+    const demoOverview = DemoData.getOverview(this._codePeriod);
     const demoGate = DemoData.getQualityGate();
     const demoProjects = DemoData.getProjects();
     const effectiveDefaultAgent = this._getEffectiveDefaultAgent();
@@ -348,6 +372,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       activeProfileId: undefined,
       defaultAgent: effectiveDefaultAgent,
       availableAgents,
+      codePeriod: this._codePeriod,
     };
     this._lastStateMessage = demoState;
     await this._view?.webview.postMessage(demoState);
@@ -526,6 +551,70 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     } else {
       this.unsubscribeCurrentCode();
     }
+  }
+
+  public async getClient(): Promise<SonarClient | null> {
+    return await this.getLifecycleClient();
+  }
+
+  public async getEffectiveProjectKey(): Promise<string | undefined> {
+    const config = await this.projectDetector.getConfig();
+    return config.projectKey;
+  }
+
+  public async handleSwitchCodePeriod(period: SonarCodePeriod): Promise<void> {
+    this._codePeriod = period;
+    try {
+      await this._workspaceState.update('sonarAgent.activeCodePeriod', period);
+    } catch {
+      // best-effort persistence
+    }
+
+    if (this._isDemoMode) {
+      const demoOverview = DemoData.getOverview(period);
+      await this._view?.webview.postMessage({
+        type: 'overviewUpdated',
+        overview: demoOverview,
+        period: this._codePeriod,
+        hasNewCode: demoOverview.hasNewCode,
+      });
+      return;
+    }
+
+    const client = await this.getClient();
+    const projectKey = await this.getEffectiveProjectKey();
+    if (!client || !projectKey) {
+      await this._view?.webview.postMessage({
+        type: 'codePeriodState',
+        period: this._codePeriod,
+      });
+      return;
+    }
+
+    await this._view?.webview.postMessage({
+      type: 'loading',
+      loading: true,
+      text: `Fetching ${period === 'new' ? 'New' : 'Overall'} Code measures...`,
+    });
+
+    const { overview, overviewError } = await this.fetchProjectOverview(
+      client,
+      projectKey,
+      this._codePeriod,
+    );
+
+    await this._view?.webview.postMessage({
+      type: 'loading',
+      loading: false,
+    });
+
+    await this._view?.webview.postMessage({
+      type: 'overviewUpdated',
+      overview,
+      overviewError,
+      period: this._codePeriod,
+      hasNewCode: overview?.hasNewCode,
+    });
   }
 
   private async subscribeCurrentCode(): Promise<void> {
@@ -1016,24 +1105,36 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     Logger.info(`[Host] postMessage(onboarding) delivered=${delivered}`);
   }
 
+  public async fetchProjectOverview(
+    client: SonarClient,
+    projectKey?: string,
+    codePeriod: SonarCodePeriod = this._codePeriod,
+  ): Promise<{ overview: SonarOverview | null; overviewError?: string }> {
+    return this._fetchOverviewForProject(client, projectKey, codePeriod);
+  }
+
   private async _fetchOverviewForProject(
     client: SonarClient,
     projectKey?: string,
+    codePeriod: SonarCodePeriod = this._codePeriod,
   ): Promise<{ overview: SonarOverview | null; overviewError?: string }> {
     if (!projectKey) {
       return { overview: null };
     }
     try {
-      const overview = await client.getOverview(projectKey);
+      const overview = await client.getOverview(projectKey, codePeriod);
       if (overview) {
         Logger.info(
-          `Measures updated for [${projectKey}]: ${overview.security.count} vulnerabilities, ${overview.reliability.count} bugs, ${overview.maintainability.count} smells, ${overview.coverage.percentage.toFixed(1)}% coverage.`,
+          `Measures updated for [${projectKey}] (${codePeriod} code): ${overview.security.count} vulnerabilities, ${overview.reliability.count} bugs, ${overview.maintainability.count} smells, ${overview.coverage.percentage.toFixed(1)}% coverage.`,
         );
       }
       return { overview };
     } catch (err: any) {
       const overviewError = err.message || 'Failed to fetch project measures.';
-      Logger.error(`Failed to fetch project measures for [${projectKey}]`, overviewError);
+      Logger.error(
+        `Failed to fetch project measures for [${projectKey}] (${codePeriod} code)`,
+        overviewError,
+      );
       return { overview: null, overviewError };
     }
   }
@@ -1048,7 +1149,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       return { overview: null };
     }
 
-    if (resolvedProjectKey === effectiveProjectKey && initialOverview) {
+    if (
+      resolvedProjectKey === effectiveProjectKey &&
+      initialOverview &&
+      this._codePeriod === 'overall'
+    ) {
       if (initialOverview.status === 'fulfilled') {
         const overview = initialOverview.value;
         if (overview) {
@@ -1063,7 +1168,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       return { overview: null, overviewError };
     }
 
-    return this._fetchOverviewForProject(client, resolvedProjectKey);
+    return this._fetchOverviewForProject(client, resolvedProjectKey, this._codePeriod);
   }
 
   private async _syncConnectedState(params: {
@@ -1086,6 +1191,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       activeProfileId,
       defaultAgent: effectiveDefaultAgent,
       availableAgents,
+      codePeriod: this._codePeriod,
     };
     this._lastStateMessage = immediateState;
     const deliveredImmediate = await this._view?.webview.postMessage(immediateState);
@@ -1098,7 +1204,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
     const [projectsResult, initialOverview, initialGate] = await Promise.allSettled([
       client.fetchProjects(),
-      effectiveProjectKey ? client.getOverview(effectiveProjectKey) : Promise.resolve(null),
+      effectiveProjectKey
+        ? client.getOverview(effectiveProjectKey, this._codePeriod)
+        : Promise.resolve(null),
       effectiveProjectKey
         ? client.getQualityGateStatus(effectiveProjectKey)
         : Promise.resolve(null),
@@ -1153,6 +1261,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       activeProfileId,
       defaultAgent: effectiveDefaultAgent,
       availableAgents,
+      codePeriod: this._codePeriod,
     };
     this._lastStateMessage = fullState;
     const deliveredFull = await this._view?.webview.postMessage(fullState);
@@ -1348,6 +1457,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     webview: vscode.Webview,
     isConfigured: boolean = false,
     currentCodeEnabled: boolean = true,
+    codePeriod: SonarCodePeriod = this._codePeriod,
   ): string {
     const nonce = getNonce();
     return String.raw`<!DOCTYPE html>
@@ -2334,6 +2444,58 @@ ${ISSUE_LIFECYCLE_CSS}
       outline-offset: 1px;
     }
 
+    /* Code Period Switcher */
+    .code-period-switcher {
+      display: inline-flex;
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+      border-radius: 4px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .period-btn {
+      background: none;
+      border: none;
+      border-radius: 3px;
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .period-btn:hover {
+      background: var(--vscode-toolbar-hoverBackground);
+      color: var(--vscode-foreground);
+    }
+
+    .period-btn.active {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      font-weight: 600;
+    }
+
+    .period-btn:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder) !important;
+      outline-offset: 1px;
+    }
+
+    .new-code-empty-notice {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
+      border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+      border-left: 3px solid var(--vscode-editorInfo-foreground, #3794ff);
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      margin-bottom: 4px;
+    }
+
     .current-subbar {
       display: flex;
       align-items: center;
@@ -2483,14 +2645,25 @@ ${ISSUE_LIFECYCLE_CSS}
       }
 
       <div id="overall-tab-panel" style="display: flex; flex-direction: column; gap: 10px;">
-      <div class="section-title" style="margin-top: 4px; margin-bottom: 2px;">
-        <span>Overall Code Measures</span>
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px; margin-bottom: 2px;">
+        <div class="section-title">
+          <span id="measures-title">${codePeriod === 'new' ? 'New Code Measures' : 'Overall Code Measures'}</span>
+        </div>
+        <div id="code-period-switcher" class="code-period-switcher" role="radiogroup" aria-label="Code Period">
+          <button id="period-btn-overall" class="period-btn ${codePeriod === 'overall' ? 'active' : ''}" role="radio" aria-checked="${codePeriod === 'overall' ? 'true' : 'false'}" data-period="overall">Overall Code</button>
+          <button id="period-btn-new" class="period-btn ${codePeriod === 'new' ? 'active' : ''}" role="radio" aria-checked="${codePeriod === 'new' ? 'true' : 'false'}" data-period="new">New Code</button>
+        </div>
+      </div>
+
+      <div id="new-code-empty-notice" class="new-code-empty-notice ${codePeriod === 'new' ? '' : 'hidden'}" role="status" title="No changes detected in new code period or 0 new lines analyzed on this branch.">
+        <span style="font-size: 13px;">ℹ</span>
+        <span>No new code activity on this branch</span>
       </div>
 
       <!-- Loading State -->
       <div id="loading-indicator" class="loading-overlay ${isConfigured ? '' : 'hidden'}">
         <div class="spinner"></div>
-        <span>Fetching Overall Code measures...</span>
+        <span id="loading-text">Fetching ${codePeriod === 'new' ? 'New' : 'Overall'} Code measures...</span>
       </div>
 
       <div id="overview-error" class="alert error hidden"></div>
@@ -3706,6 +3879,38 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       }
     }
 
+    const measuresTitle = document.getElementById("measures-title");
+    const periodBtnOverall = document.getElementById("period-btn-overall");
+    const periodBtnNew = document.getElementById("period-btn-new");
+    const newCodeEmptyNotice = document.getElementById("new-code-empty-notice");
+
+    function setCodePeriodUI(period, hasNewCode) {
+      const isNew = period === "new";
+      if (measuresTitle) {
+        measuresTitle.textContent = isNew ? "New Code Measures" : "Overall Code Measures";
+      }
+      if (periodBtnOverall && periodBtnNew) {
+        periodBtnOverall.classList.toggle("active", !isNew);
+        periodBtnOverall.setAttribute("aria-checked", !isNew ? "true" : "false");
+        periodBtnNew.classList.toggle("active", isNew);
+        periodBtnNew.setAttribute("aria-checked", isNew ? "true" : "false");
+      }
+      if (newCodeEmptyNotice) {
+        newCodeEmptyNotice.classList.toggle("hidden", !isNew || hasNewCode !== false);
+      }
+    }
+
+    if (periodBtnOverall) {
+      periodBtnOverall.addEventListener("click", () => {
+        vscode.postMessage({ command: "switchCodePeriod", period: "overall" });
+      });
+    }
+    if (periodBtnNew) {
+      periodBtnNew.addEventListener("click", () => {
+        vscode.postMessage({ command: "switchCodePeriod", period: "new" });
+      });
+    }
+
     if (tabOverall) {
       tabOverall.addEventListener("click", () => {
         vscode.postMessage({ command: "switchTab", tab: "overallCode" });
@@ -4051,6 +4256,27 @@ ${ISSUE_LIFECYCLE_MESSAGE_SCRIPT}
             runFullScanBtn.disabled = !!message.scanning;
             runFullScanBtn.textContent = message.scanning ? "Scanning…" : "Run Full Scan";
           }
+          break;
+        }
+        case "codePeriodState": {
+          setCodePeriodUI(message.period, message.hasNewCode);
+          break;
+        }
+        case "overviewUpdated": {
+          if (message.overviewError) {
+            overviewError.textContent = message.overviewError;
+            overviewError.className = "alert error";
+          } else {
+            overviewError.className = "alert error hidden";
+            overviewError.textContent = "";
+            if (message.overview) {
+              renderOverview(message.overview);
+            }
+          }
+          setCodePeriodUI(
+            message.period || message.overview?.period || "overall",
+            message.hasNewCode ?? message.overview?.hasNewCode,
+          );
           break;
         }
       }

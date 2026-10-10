@@ -168,6 +168,115 @@ describe('SonarClient - Connection Verification', () => {
     expect(overview.securityHotspots).toEqual({ count: 4, rating: 'C' });
   });
 
+  it('should fetch and map New Code measures when codePeriod is new', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'new_bugs', value: '1' },
+          { metric: 'new_reliability_rating', value: '2.0' },
+          { metric: 'new_vulnerabilities', value: '0' },
+          { metric: 'new_security_rating', value: '1.0' },
+          { metric: 'new_code_smells', value: '3' },
+          { metric: 'new_maintainability_rating', value: '1.0' },
+          { metric: 'new_coverage', value: '88.5' },
+          { metric: 'new_lines_to_cover', value: '120' },
+          { metric: 'new_duplicated_lines_density', value: '0.0' },
+          { metric: 'new_duplicated_lines', value: '0' },
+          { metric: 'new_security_hotspots', value: '0' },
+          { metric: 'new_security_review_rating', value: '1.0' },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project', 'new');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('metricKeys=new_bugs'),
+      expect.any(Object),
+    );
+    expect(overview.period).toBe('new');
+    expect(overview.hasNewCode).toBe(true);
+    expect(overview.reliability).toEqual({ count: 1, rating: 'B' });
+    expect(overview.security).toEqual({ count: 0, rating: 'A' });
+    expect(overview.maintainability).toEqual({ count: 3, rating: 'A' });
+    expect(overview.coverage).toEqual({ percentage: 88.5, linesToCover: 120 });
+    expect(overview.duplications).toEqual({ percentage: 0.0, duplicatedLines: 0 });
+  });
+
+  it('should flag hasNewCode as false when New Code measures indicate 0 new lines and 0 issues', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'new_bugs', value: '0' },
+          { metric: 'new_vulnerabilities', value: '0' },
+          { metric: 'new_code_smells', value: '0' },
+          { metric: 'new_lines_to_cover', value: '0' },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project', 'new');
+    expect(overview.period).toBe('new');
+    expect(overview.hasNewCode).toBe(false);
+  });
+
+  it('should support period object response format from legacy SonarQube versions', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'new_bugs', period: { value: '2' } },
+          { metric: 'new_coverage', period: { value: '95.0' } },
+          { metric: 'new_lines_to_cover', period: { value: '50' } },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project', 'new');
+    expect(overview.reliability.count).toBe(2);
+    expect(overview.coverage.percentage).toBe(95.0);
+    expect(overview.coverage.linesToCover).toBe(50);
+    expect(overview.hasNewCode).toBe(true);
+  });
+
   it('should fetch issues and extract clean relative file paths', async () => {
     const mockIssuesResponse = {
       issues: [

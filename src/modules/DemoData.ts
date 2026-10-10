@@ -1,4 +1,4 @@
-import { SonarOverview, QualityGateStatus, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
+import { SonarOverview, SonarCodePeriod, QualityGateStatus, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
 
 export interface DemoProject {
   key: string;
@@ -15,7 +15,20 @@ export class DemoData {
     ];
   }
 
-  static getOverview(): SonarOverview {
+  static getOverview(period: SonarCodePeriod = 'overall'): SonarOverview {
+    if (period === 'new') {
+      return {
+        security: { count: 1, rating: 'B' },
+        reliability: { count: 2, rating: 'B' },
+        maintainability: { count: 4, rating: 'A' },
+        acceptedIssues: { count: 0 },
+        coverage: { percentage: 78.5, linesToCover: 140 },
+        duplications: { percentage: 0.0, duplicatedLines: 0 },
+        securityHotspots: { count: 1, rating: 'A' },
+        period: 'new',
+        hasNewCode: true,
+      };
+    }
     return {
       security: { count: 3, rating: 'D' },
       reliability: { count: 5, rating: 'C' },
@@ -24,6 +37,8 @@ export class DemoData {
       coverage: { percentage: 64.2, linesToCover: 850 },
       duplications: { percentage: 8.4, duplicatedLines: 120 },
       securityHotspots: { count: 4, rating: 'E' },
+      period: 'overall',
+      hasNewCode: true,
     };
   }
 

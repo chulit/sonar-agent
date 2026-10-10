@@ -16,6 +16,7 @@ export interface VerificationResult {
 }
 
 export type SonarRating = 'A' | 'B' | 'C' | 'D' | 'E';
+export type SonarCodePeriod = 'overall' | 'new';
 
 export interface SonarOverview {
   security: { count: number; rating: SonarRating };
@@ -25,6 +26,8 @@ export interface SonarOverview {
   coverage: { percentage: number; linesToCover: number };
   duplications: { percentage: number; duplicatedLines: number };
   securityHotspots: { count: number; rating: SonarRating };
+  period?: SonarCodePeriod;
+  hasNewCode?: boolean;
 }
 
 export interface SonarRuleDoc {
@@ -370,25 +373,47 @@ export class SonarClient {
   }
 
   /**
-   * Fetches Overall Code measures for the given project key
+   * Fetches Overall or New Code measures for the given project key
    */
-  async getOverview(projectKey: string): Promise<SonarOverview> {
-    const metricKeys = [
-      'bugs',
-      'reliability_rating',
-      'vulnerabilities',
-      'security_rating',
-      'code_smells',
-      'sqale_rating',
-      'accepted_issues',
-      'wont_fix_issues',
-      'coverage',
-      'lines_to_cover',
-      'duplicated_lines_density',
-      'duplicated_lines',
-      'security_hotspots',
-      'security_review_rating',
-    ].join(',');
+  async getOverview(
+    projectKey: string,
+    codePeriod: SonarCodePeriod = 'overall',
+  ): Promise<SonarOverview> {
+    const isNewCode = codePeriod === 'new';
+    const metricKeys = isNewCode
+      ? [
+          'new_bugs',
+          'new_reliability_rating',
+          'new_vulnerabilities',
+          'new_security_rating',
+          'new_code_smells',
+          'new_maintainability_rating',
+          'new_sqale_rating',
+          'new_accepted_issues',
+          'new_wont_fix_issues',
+          'new_coverage',
+          'new_lines_to_cover',
+          'new_duplicated_lines_density',
+          'new_duplicated_lines',
+          'new_security_hotspots',
+          'new_security_review_rating',
+        ].join(',')
+      : [
+          'bugs',
+          'reliability_rating',
+          'vulnerabilities',
+          'security_rating',
+          'code_smells',
+          'sqale_rating',
+          'accepted_issues',
+          'wont_fix_issues',
+          'coverage',
+          'lines_to_cover',
+          'duplicated_lines_density',
+          'duplicated_lines',
+          'security_hotspots',
+          'security_review_rating',
+        ].join(',');
 
     const url = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
     let response = await this.authenticatedFetch(url);
@@ -421,45 +446,98 @@ export class SonarClient {
 
     const data = (await response.json()) as {
       component?: {
-        measures?: { metric: string; value?: string }[];
+        measures?: { metric: string; value?: string; period?: { value?: string } }[];
       };
     };
 
     const measureMap: Record<string, string> = {};
     for (const m of data.component?.measures || []) {
-      if (m.value !== undefined) {
-        measureMap[m.metric] = m.value;
+      const val = m.value !== undefined ? m.value : m.period?.value;
+      if (val !== undefined) {
+        measureMap[m.metric] = val;
       }
     }
 
+    const rawBugs = isNewCode ? measureMap.new_bugs : measureMap.bugs;
+    const rawReliabilityRating = isNewCode
+      ? measureMap.new_reliability_rating
+      : measureMap.reliability_rating;
+    const rawVulnerabilities = isNewCode
+      ? measureMap.new_vulnerabilities
+      : measureMap.vulnerabilities;
+    const rawSecurityRating = isNewCode
+      ? measureMap.new_security_rating
+      : measureMap.security_rating;
+    const rawCodeSmells = isNewCode ? measureMap.new_code_smells : measureMap.code_smells;
+    const rawMaintainabilityRating = isNewCode
+      ? measureMap.new_maintainability_rating || measureMap.new_sqale_rating
+      : measureMap.sqale_rating;
+    const rawAcceptedIssues = isNewCode
+      ? measureMap.new_accepted_issues || measureMap.new_wont_fix_issues
+      : measureMap.accepted_issues || measureMap.wont_fix_issues;
+    const rawCoverage = isNewCode ? measureMap.new_coverage : measureMap.coverage;
+    const rawLinesToCover = isNewCode
+      ? measureMap.new_lines_to_cover
+      : measureMap.lines_to_cover;
+    const rawDuplicatedDensity = isNewCode
+      ? measureMap.new_duplicated_lines_density
+      : measureMap.duplicated_lines_density;
+    const rawDuplicatedLines = isNewCode
+      ? measureMap.new_duplicated_lines
+      : measureMap.duplicated_lines;
+    const rawHotspots = isNewCode
+      ? measureMap.new_security_hotspots
+      : measureMap.security_hotspots;
+    const rawHotspotRating = isNewCode
+      ? measureMap.new_security_review_rating
+      : measureMap.security_review_rating;
+
+    const parsedLinesToCover = Number.parseInt(rawLinesToCover || '0', 10);
+    const parsedBugs = Number.parseInt(rawBugs || '0', 10);
+    const parsedVulns = Number.parseInt(rawVulnerabilities || '0', 10);
+    const parsedSmells = Number.parseInt(rawCodeSmells || '0', 10);
+    const parsedHotspots = Number.parseInt(rawHotspots || '0', 10);
+    const parsedDuplications = Number.parseInt(rawDuplicatedLines || '0', 10);
+
+    const hasNewCode = isNewCode
+      ? parsedLinesToCover > 0 ||
+        parsedBugs > 0 ||
+        parsedVulns > 0 ||
+        parsedSmells > 0 ||
+        parsedHotspots > 0 ||
+        parsedDuplications > 0
+      : true;
+
     return {
       security: {
-        count: Number.parseInt(measureMap.vulnerabilities || '0', 10),
-        rating: this.parseRating(measureMap.security_rating),
+        count: parsedVulns,
+        rating: this.parseRating(rawSecurityRating),
       },
       reliability: {
-        count: Number.parseInt(measureMap.bugs || '0', 10),
-        rating: this.parseRating(measureMap.reliability_rating),
+        count: parsedBugs,
+        rating: this.parseRating(rawReliabilityRating),
       },
       maintainability: {
-        count: Number.parseInt(measureMap.code_smells || '0', 10),
-        rating: this.parseRating(measureMap.sqale_rating),
+        count: parsedSmells,
+        rating: this.parseRating(rawMaintainabilityRating),
       },
       acceptedIssues: {
-        count: Number.parseInt(measureMap.accepted_issues || measureMap.wont_fix_issues || '0', 10),
+        count: Number.parseInt(rawAcceptedIssues || '0', 10),
       },
       coverage: {
-        percentage: Number.parseFloat(measureMap.coverage || '0'),
-        linesToCover: Number.parseInt(measureMap.lines_to_cover || '0', 10),
+        percentage: Number.parseFloat(rawCoverage || '0'),
+        linesToCover: parsedLinesToCover,
       },
       duplications: {
-        percentage: Number.parseFloat(measureMap.duplicated_lines_density || '0'),
-        duplicatedLines: Number.parseInt(measureMap.duplicated_lines || '0', 10),
+        percentage: Number.parseFloat(rawDuplicatedDensity || '0'),
+        duplicatedLines: parsedDuplications,
       },
       securityHotspots: {
-        count: Number.parseInt(measureMap.security_hotspots || '0', 10),
-        rating: this.parseRating(measureMap.security_review_rating || '1.0'),
+        count: parsedHotspots,
+        rating: this.parseRating(rawHotspotRating || '1.0'),
       },
+      period: codePeriod,
+      hasNewCode,
     };
   }
 
