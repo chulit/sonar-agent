@@ -656,6 +656,8 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
       getActiveProfile: vi.fn(async () => null),
     };
 
+    let visCb: (() => void) | undefined;
+    let dispCb: (() => void) | undefined;
     mockWebviewView = {
       visible: true,
       webview: {
@@ -671,8 +673,17 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
           return { dispose: vi.fn() };
         }),
       },
-      onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidChangeVisibility: vi.fn((cb: any) => {
+        visCb = cb;
+        return { dispose: vi.fn() };
+      }),
+      onDidDispose: vi.fn((cb: any) => {
+        dispCb = cb;
+        return { dispose: vi.fn() };
+      }),
     };
+    (mockWebviewView as any)._triggerVis = () => visCb?.();
+    (mockWebviewView as any)._triggerDisp = () => dispCb?.();
 
     provider = new SonarOverviewViewProvider(
       { fsPath: '/extension' } as any,
@@ -713,7 +724,7 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
       c.url.includes('/api/issues/transitions'),
     ).length;
     await send({ command: 'fetchIssueTransitions', issueKey: 'ISSUE-1' });
-    expect(fetchCalls.filter((c) => c.url.includes('/api/issues/transitions')).length).toBe(
+    expect(fetchCalls.filter((c) => c.url.includes('/api/issues/transitions'))).toHaveLength(
       transitionsCallsBefore,
     );
     expect(postedMessages.filter((m) => m.type === 'issueTransitions')).toHaveLength(1);
@@ -835,5 +846,94 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
     expect(html).toContain('toggleIssueMenu(card, item)');
     expect(html).toContain('issue-menu-popover');
     expect(html).toContain('fetchIssueTransitions');
+  });
+
+  it('handles webview lifecycle and miscellaneous commands', async () => {
+    provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+
+    // Test log command
+    await send({ command: 'log', text: 'Diagnostic message' });
+
+    // Test selectProject command
+    await send({ command: 'selectProject', projectKey: 'new.project.key' });
+    expect(mockProjectDetector.setProjectKey).toHaveBeenCalledWith('new.project.key');
+
+    // Test openProjectPicker command
+    const promptPickerSpy = vi
+      .spyOn(provider, 'promptProjectSelection')
+      .mockResolvedValue(undefined as any);
+    await send({ command: 'openProjectPicker' });
+    expect(promptPickerSpy).toHaveBeenCalled();
+
+    // Test createProfile command
+    const createProfileSpy = vi
+      .spyOn(provider, 'promptCreateProfile')
+      .mockResolvedValue(undefined as any);
+    await send({ command: 'createProfile' });
+    expect(createProfileSpy).toHaveBeenCalled();
+
+    // Test openFile command
+    const openFileSpy = vi
+      .spyOn((provider as any).fileNavigator, 'openFileAtLine')
+      .mockResolvedValue(true);
+    await send({ command: 'openFile', filePath: 'src/app.ts', line: 42 });
+    expect(openFileSpy).toHaveBeenCalledWith('src/app.ts', 42);
+
+    // Test sendToAgent and sendBatchToAgent
+    const sendAgentSpy = vi
+      .spyOn((provider as any).agentDispatcher, 'dispatchIssue')
+      .mockResolvedValue(true as any);
+    const sendBatchSpy = vi
+      .spyOn((provider as any).agentDispatcher, 'dispatchBatch')
+      .mockResolvedValue(true as any);
+    await send({ command: 'sendToAgent', item: { id: '1' }, targetAgentId: 'copilot' });
+    expect(sendAgentSpy).toHaveBeenCalledWith({ id: '1' }, { targetAgentId: 'copilot' });
+    await send({ command: 'sendBatchToAgent', items: [{ id: '1' }], targetAgentId: 'copilot' });
+    expect(sendBatchSpy).toHaveBeenCalledWith([{ id: '1' }], { targetAgentId: 'copilot' });
+
+    // Test fetchDetails for hotspots, coverage, and duplications
+    stubFetch(async (url) => {
+      if (url.includes('/api/hotspots/search')) return okJson({ hotspots: [] });
+      if (url.includes('/api/measures/component_tree')) return okJson({ components: [] });
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    });
+    await send({ command: 'fetchDetails', category: 'hotspots' });
+    await send({ command: 'fetchDetails', category: 'coverage' });
+    await send({ command: 'fetchDetails', category: 'duplications' });
+
+    // Test setTargetAgent command
+    await send({ command: 'setTargetAgent', agentId: 'claude-code' });
+
+    // Test installSonarLint success and failure
+    const execCmdSpy = vi
+      .spyOn(vscode.commands, 'executeCommand')
+      .mockResolvedValue(undefined as any);
+    await send({ command: 'installSonarLint' });
+    expect(execCmdSpy).toHaveBeenCalledWith(
+      'workbench.extensions.installExtension',
+      'sonarsource.sonarlint-vscode',
+    );
+
+    execCmdSpy.mockRejectedValueOnce(new Error('Network error'));
+    await send({ command: 'installSonarLint' });
+    expect(postedMessages.some((m) => m.type === 'error' && m.message === 'Network error')).toBe(
+      true,
+    );
+
+    // Test message handler error posting
+    (mockProjectDetector.setProjectKey as any).mockRejectedValueOnce(new Error('Boom!'));
+    await send({ command: 'selectProject', projectKey: 'invalid' });
+    expect(postedMessages.some((m) => m.type === 'error' && m.message === 'Boom!')).toBe(true);
+
+    // Test visibility change to hidden and dispose
+    mockWebviewView.visible = false;
+    (mockWebviewView as any)._triggerVis();
+    (mockWebviewView as any)._triggerDisp();
+
+    // Test runCliScan already in progress
+    (provider as any)._scanInProgress = true;
+    const scanRes = await provider.handleRunCliScan();
+    expect(scanRes.ok).toBe(false);
+    expect(scanRes.errorMessage).toBe('Scan already in progress.');
   });
 });

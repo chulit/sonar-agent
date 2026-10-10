@@ -922,9 +922,15 @@ describe('AgentDispatcher - Five-Agent Routing Matrix', () => {
 
   function buildDispatcher(overrides?: ConstructorParameters<typeof AgentDispatcher>[0]) {
     const openFileAtLine = vi.fn().mockResolvedValue(true);
-    const mockNavigator = { openFileAtLine } as unknown as FileNavigator;
-    const dispatcher = new AgentDispatcher({ fileNavigator: mockNavigator, ...overrides });
-    return { dispatcher, openFileAtLine };
+    const resolveFilePath = vi.fn().mockResolvedValue('/abs/path/src/index.ts');
+    const mockNavigator = { openFileAtLine, resolveFilePath } as unknown as FileNavigator;
+    const dispatcher = new AgentDispatcher({
+      fileNavigator: mockNavigator,
+      readCodeSnippetFn: async () => null,
+      fetchRuleFn: async (key) => ({ key, name: key, cleanDesc: 'clean rule desc' }),
+      ...overrides,
+    });
+    return { dispatcher, openFileAtLine, resolveFilePath };
   }
 
   it('copilot: injects the prompt by prefilling Copilot Chat input', async () => {
@@ -1025,5 +1031,110 @@ describe('AgentDispatcher - Five-Agent Routing Matrix', () => {
     expect(executedCommands).toContain('claude-dev.focus');
     expect(clipboardWriteFn).toHaveBeenCalledWith('prompt content');
     expect(res.message).toContain('Cline');
+  });
+
+  it('assemblePrompt produces specialized prompts for COVERAGE and DUPLICATION', async () => {
+    const { dispatcher } = buildDispatcher({
+      readCodeSnippetFn: async () => ({
+        snippet: '1 | console.log("hi");',
+        startLine: 1,
+        endLine: 1,
+        language: 'javascript',
+      }),
+    });
+
+    const coverageItem: SonarDetailItem = {
+      id: 'c1',
+      ruleKey: 'coverage:uncovered_lines',
+      message: '10 uncovered lines (50% coverage)',
+      component: 'comp:src/app.js',
+      filePath: 'src/app.js',
+      type: 'COVERAGE',
+      severity: 'MAJOR',
+      status: 'UNCOVERED',
+    };
+    const coveragePrompt = await dispatcher.assemblePrompt(coverageItem);
+    expect(coveragePrompt).toContain('Please generate unit tests to improve test coverage');
+    expect(coveragePrompt).toContain('10 uncovered lines (50% coverage)');
+
+    const duplicationItem: SonarDetailItem = {
+      id: 'd1',
+      ruleKey: 'duplications:duplicated_code',
+      message: '25% duplicated lines (3 duplicated blocks)',
+      component: 'comp:src/app.js',
+      filePath: 'src/app.js',
+      type: 'DUPLICATION',
+      severity: 'MAJOR',
+      status: 'DUPLICATED',
+    };
+    const duplicationPrompt = await dispatcher.assemblePrompt(duplicationItem);
+    expect(duplicationPrompt).toContain('Please refactor duplicated code in the following file');
+    expect(duplicationPrompt).toContain('25% duplicated lines');
+  });
+
+  it('assembleBatchPrompt delegates to assemblePrompt when single item is provided', async () => {
+    const { dispatcher } = buildDispatcher();
+    const spy = vi.spyOn(dispatcher, 'assemblePrompt').mockResolvedValue('Single item prompt');
+    const res = await dispatcher.assembleBatchPrompt([sampleItem]);
+    expect(spy).toHaveBeenCalledWith(sampleItem);
+    expect(res).toBe('Single item prompt');
+  });
+
+  it('detectLanguage maps various extensions accurately', () => {
+    const { dispatcher } = buildDispatcher();
+    const detect = (p: string) => (dispatcher as any).detectLanguage(p);
+    expect(detect('file.ts')).toBe('typescript');
+    expect(detect('file.tsx')).toBe('typescript');
+    expect(detect('file.js')).toBe('javascript');
+    expect(detect('file.jsx')).toBe('javascript');
+    expect(detect('file.vue')).toBe('vue');
+    expect(detect('file.html')).toBe('html');
+    expect(detect('file.css')).toBe('css');
+    expect(detect('file.py')).toBe('python');
+    expect(detect('file.java')).toBe('java');
+    expect(detect('file.go')).toBe('go');
+    expect(detect('file.rs')).toBe('rust');
+    expect(detect('file.unknown')).toBe('');
+  });
+
+  it('supports default options and environment variable detection for Antigravity', () => {
+    const prevEnv = process.env.GEMINI_CLI;
+    try {
+      process.env.GEMINI_CLI = '1';
+      const d = new AgentDispatcher();
+      expect((d as any).isAntigravityEnvFn()).toBe(true);
+    } finally {
+      process.env.GEMINI_CLI = prevEnv;
+    }
+  });
+
+  it('dispatchBatch routes to cline, continue, codex, and claude-code', async () => {
+    const executedCommands: string[] = [];
+    const clipboardWriteFn = vi.fn().mockResolvedValue(undefined);
+    const { dispatcher } = buildDispatcher({
+      isExtensionInstalledFn: () => true,
+      clipboardWriteFn,
+      executeCommandFn: async (cmd) => {
+        executedCommands.push(cmd);
+        return undefined;
+      },
+    });
+
+    const resClaude = await dispatcher.dispatchBatch([sampleItem], {
+      targetAgentId: 'claude-code',
+    });
+    expect(resClaude.ok).toBe(true);
+
+    const resCline = await dispatcher.dispatchBatch([sampleItem], { targetAgentId: 'cline' });
+    expect(resCline.ok).toBe(true);
+
+    const resContinue = await dispatcher.dispatchBatch([sampleItem], { targetAgentId: 'continue' });
+    expect(resContinue.ok).toBe(true);
+
+    const resCodex = await dispatcher.dispatchBatch([sampleItem], { targetAgentId: 'codex' });
+    expect(resCodex.ok).toBe(true);
+
+    const resDefault = await dispatcher.dispatchBatch([sampleItem], { targetAgentId: 'clipboard' });
+    expect(resDefault.ok).toBe(true);
   });
 });

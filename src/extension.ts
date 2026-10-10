@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ProjectDetector } from './modules/ProjectDetector.js';
 import { SonarOverviewViewProvider } from './modules/SonarOverviewViewProvider.js';
 import { SonarCodeActionProvider } from './modules/SonarCodeActionProvider.js';
+import { SonarCodeLensProvider } from './modules/SonarCodeLensProvider.js';
 import { Logger } from './modules/Logger.js';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -28,10 +29,16 @@ export function activate(context: vscode.ExtensionContext) {
     projectDetector,
   });
 
+  const codeLensProvider = new SonarCodeLensProvider({
+    fileIssueAggregator: overviewProvider.getFileIssueAggregator(),
+  });
+
   context.subscriptions.push(
+    overviewProvider,
     vscode.window.registerWebviewViewProvider(SonarOverviewViewProvider.viewType, overviewProvider),
     vscode.commands.registerCommand('sonarAgent.refresh', async () => {
       await overviewProvider.refresh();
+      codeLensProvider.refresh();
     }),
     vscode.commands.registerCommand('sonarAgent.configure', async () => {
       await overviewProvider.promptConfigureConnection();
@@ -60,31 +67,65 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerCodeActionsProvider({ scheme: 'file' }, codeActionProvider, {
       providedCodeActionKinds: SonarCodeActionProvider.providedCodeActionKinds,
     }),
+    vscode.languages.registerCodeLensProvider({ scheme: 'file' }, codeLensProvider),
     vscode.commands.registerCommand(
       'sonarAgent.fixWithAgent',
-      async (diagnostic: vscode.Diagnostic, document: vscode.TextDocument) => {
-        if (!diagnostic || !document) return;
-        await codeActionProvider.executeFixWithAgent(diagnostic, document);
+      async (diagnosticOrItem: any, document?: vscode.TextDocument) => {
+        if (!diagnosticOrItem) return;
+        await codeActionProvider.executeFixWithAgent(diagnosticOrItem, document);
       },
     ),
+    vscode.commands.registerCommand(
+      'sonarAgent.explainRuleWithAgent',
+      async (diagnosticOrItem: any, document?: vscode.TextDocument) => {
+        if (!diagnosticOrItem) return;
+        await codeActionProvider.executeExplainWithAgent(diagnosticOrItem, document);
+      },
+    ),
+    vscode.commands.registerCommand('sonarAgent.cleanCurrentFile', async (uri?: vscode.Uri) => {
+      let doc: vscode.TextDocument | undefined;
+      if (uri) {
+        try {
+          doc = await vscode.workspace.openTextDocument(uri);
+        } catch {
+          // fallback to active editor
+        }
+      }
+      await overviewProvider.cleanCurrentFile(doc);
+    }),
+    vscode.commands.registerCommand('sonarAgent.generateMissingTests', async (target?: any) => {
+      let doc: vscode.TextDocument | undefined;
+      if (target?.scheme && target?.fsPath) {
+        try {
+          doc = await vscode.workspace.openTextDocument(target);
+        } catch {
+          // fallback
+        }
+      }
+      await overviewProvider.generateMissingTests(doc ?? target);
+    }),
+    vscode.commands.registerCommand('sonarAgent.checkStagedFiles', async () => {
+      await overviewProvider.checkStagedFiles(true);
+    }),
   );
 
-  void projectDetector.migrateResetIfLegacy().then((migrated) => {
-    if (!migrated) {
-      return;
-    }
-    Logger.info('Legacy single connection removed; directing user to create a profile.');
-    vscode.window
-      .showInformationMessage(
+  void projectDetector
+    .migrateResetIfLegacy()
+    .then((migrated) => {
+      if (!migrated) {
+        return;
+      }
+      Logger.info('Legacy single connection removed; directing user to create a profile.');
+      return vscode.window.showInformationMessage(
         'Single connection removed — create a profile to reconnect.',
         'New Profile',
-      )
-      .then((selection) => {
-        if (selection === 'New Profile') {
-          void overviewProvider.promptCreateProfile();
-        }
-      });
-  });
+      );
+    })
+    .then((selection) => {
+      if (selection === 'New Profile') {
+        void overviewProvider.promptCreateProfile();
+      }
+    });
 }
 
 export function deactivate() {

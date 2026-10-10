@@ -1,7 +1,7 @@
 {
   "name": "sonar-agent",
   "displayName": "Sonar Agent - SonarQube AI Fix & Quality Metrics",
-  "description": "SonarQube and SonarCloud metrics dashboard with fix prompt dispatcher for GitHub Copilot, Antigravity, and Claude.",
+  "description": "Turn SonarQube Quality Gate Failures into Instant 1-Click AI Fixes (Copilot, Claude, Antigravity, Roo, Cline, Codex).",
   "version": "1.7.0",
   "icon": "media/icon.png",
   "publisher": "chulit",
@@ -16,6 +16,8 @@
   "categories": [
     "Linters",
     "Testing",
+    "Programming Languages",
+    "AI",
     "Other"
   ],
   "keywords": [
@@ -85,11 +87,37 @@
         "title": "Fix Sonar Issue with AI Agent"
       },
       {
+        "command": "sonarAgent.explainRuleWithAgent",
+        "title": "Explain Sonar Rule with AI Agent"
+      },
+      {
+        "command": "sonarAgent.cleanCurrentFile",
+        "title": "Clean Current File with AI",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "sonarAgent.generateMissingTests",
+        "title": "Generate Missing Unit Tests with AI",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "sonarAgent.checkStagedFiles",
+        "title": "Check Staged Files for Sonar Issues",
+        "icon": "$(source-control)"
+      },
+      {
         "command": "sonarAgent.showLogs",
         "title": "Show Logs"
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "sonarAgent.cleanCurrentFile",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        }
+      ],
       "view/title": [
         {
           "command": "sonarAgent.refresh",
@@ -178,6 +206,16 @@
             "Results from a sonar-scanner CLI run"
           ],
           "description": "Source of Current Code issues"
+        },
+        "sonarAgent.editor.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline Sonar CodeLens annotations above lines with detected issues."
+        },
+        "sonarAgent.gitGuard.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Monitor git staged files and warn before committing if unresolved Sonar issues are detected."
         }
       }
     }

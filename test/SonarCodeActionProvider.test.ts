@@ -82,4 +82,41 @@ describe('SonarCodeActionProvider', () => {
     expect(result.ok).toBe(true);
     expect(mockDispatcher.dispatchDiagnostic).toHaveBeenCalledWith(sonarDiag, sampleDoc);
   });
+
+  it('handles diagnostic.code as an object with value, and undefined diagnostic.code', () => {
+    const provider = new SonarCodeActionProvider({
+      projectDetector: mockProjectDetector,
+    });
+
+    const objDiag = new vscode.Diagnostic(
+      new vscode.Range(10, 0, 10, 20),
+      'Object code diagnostic',
+      vscode.DiagnosticSeverity.Warning,
+    );
+    objDiag.source = 'SonarQube';
+    objDiag.code = { value: 'ts:S9999', target: vscode.Uri.file('/path') };
+
+    const noCodeDiag = new vscode.Diagnostic(
+      new vscode.Range(11, 0, 11, 20),
+      'No code diagnostic',
+      vscode.DiagnosticSeverity.Warning,
+    );
+    noCodeDiag.source = 'SonarQube';
+    noCodeDiag.code = undefined;
+
+    const actions = provider.provideCodeActions(
+      sampleDoc,
+      new vscode.Range(10, 0, 11, 20),
+      {
+        diagnostics: [objDiag, noCodeDiag],
+        only: undefined,
+        triggerKind: vscode.CodeActionTriggerKind.Invoke,
+      },
+      {} as vscode.CancellationToken,
+    );
+
+    expect(actions).toHaveLength(2);
+    expect(actions[0].title).toBe('⚡ Send to AI Agent (ts:S9999)');
+    expect(actions[1].title).toBe('⚡ Send to AI Agent (SonarQube)');
+  });
 });

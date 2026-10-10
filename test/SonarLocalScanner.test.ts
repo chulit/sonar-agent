@@ -285,4 +285,96 @@ describe('SonarLocalScanner', () => {
     expect(itemFromPlainObj.filePath).toBe('');
     expect(itemFromPlainObj.filePath).not.toBe('[object Object]');
   });
+
+  it('handles organization binding, stdout logging, synchronous spawn exceptions, and dispose', async () => {
+    // Test organization arg passing
+    const spawnFn = fakeSpawn(() => ({ exitCode: 0 }));
+    const scanner = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnFn as never,
+    });
+    await scanner.runCliScan('/workspace', {
+      projectKey: 'my-proj',
+      serverUrl: 'https://sonarcloud.io',
+      organization: 'my-org',
+    });
+    const [, args] = spawnFn.mock.calls[0];
+    expect(args).toContain('-Dsonar.projectKey=my-proj');
+    expect(args).toContain('-Dsonar.host.url=https://sonarcloud.io');
+
+    // Test stdout chunk logging and empty stderr fallback
+    type Callback = (...args: any[]) => void;
+    const spawnWithStdout = vi.fn().mockImplementation(() => {
+      const listeners: Record<string, Callback[]> = {};
+      const proc = {
+        stdout: {
+          on: (event: string, cb: Callback) => {
+            (listeners[event] = listeners[event] || []).push(cb);
+            if (event === 'data') cb(Buffer.from('Standard output log line'));
+          },
+        },
+        stderr: {
+          on: (event: string, cb: Callback) => {
+            (listeners[event] = listeners[event] || []).push(cb);
+            if (event === 'data') cb(Buffer.from('   '));
+          },
+        },
+        on: (event: string, cb: Callback) => {
+          if (event === 'close') setTimeout(() => cb(1), 1);
+        },
+      };
+      return proc;
+    });
+    const scanner2 = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnWithStdout as never,
+    });
+    const res2 = await scanner2.runCliScan('/workspace');
+    expect(res2.ok).toBe(false);
+    expect(res2.errorMessage).toContain('sonar-scanner failed with exit code 1.');
+
+    // Test spawnFn throwing synchronous error
+    const spawnThrow = vi.fn().mockImplementation(() => {
+      const err = new Error('spawn ENOENT');
+      (err as any).code = 'ENOENT';
+      throw err;
+    });
+    const scannerThrow = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnThrow as never,
+    });
+    const resThrow = await scannerThrow.runCliScan('/workspace');
+    expect(resThrow.ok).toBe(false);
+
+    // Test proc without .on
+    const spawnInvalidProc = vi.fn().mockReturnValue({});
+    const scannerInvalidProc = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnInvalidProc as never,
+    });
+    const resInvalid = await scannerInvalidProc.runCliScan('/workspace');
+    expect(resInvalid.ok).toBe(false);
+
+    // Test fallback command failure (direct notFound, fallback fails)
+    const spawnFallbackFail = vi.fn().mockImplementation((cmd) => {
+      if (cmd === 'sonar-scanner') {
+        const err = new Error('not found');
+        (err as any).code = 'ENOENT';
+        throw err;
+      }
+      return {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: (ev: string, cb: Callback) => {
+          if (ev === 'close') cb(1);
+        },
+      };
+    });
+    const scannerFallbackFail = new SonarLocalScanner({
+      workspaceRoot: '/workspace',
+      spawnFn: spawnFallbackFail as never,
+    });
+    const resFallbackFail = await scannerFallbackFail.runCliScan('/workspace');
+    expect(resFallbackFail.ok).toBe(false);
+  });
 });

@@ -152,7 +152,7 @@ export class SonarClient {
     this.serverUrl = url;
     this.token = config.token ? config.token.trim() : undefined;
     const org = config.organization ? config.organization.trim() : '';
-    this.organization = org ? org : undefined;
+    this.organization = org || undefined;
     this.fetchFn = config.fetchFn ?? globalThis.fetch;
   }
 

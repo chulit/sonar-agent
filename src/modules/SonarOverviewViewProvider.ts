@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ProjectDetector } from './ProjectDetector.js';
 import {
@@ -13,6 +14,10 @@ import { AgentDispatcher } from './AgentDispatcher.js';
 import { ConnectionProfileWizard } from './ConnectionProfileWizard.js';
 import { SonarLocalScanner } from './SonarLocalScanner.js';
 import { Logger } from './Logger.js';
+import { DemoData } from './DemoData.js';
+import { SonarStatusBar } from './SonarStatusBar.js';
+import { FileIssueAggregator } from './FileIssueAggregator.js';
+import { GitStageGuard } from './GitStageGuard.js';
 import {
   ISSUE_LIFECYCLE_CSS,
   ISSUE_LIFECYCLE_MENU_SCRIPT,
@@ -22,7 +27,18 @@ import {
 
 export type CurrentCodeTab = 'overallCode' | 'currentCode';
 
-export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
+export interface SonarOverviewViewProviderOptions {
+  fileNavigator?: FileNavigator;
+  agentDispatcher?: AgentDispatcher;
+  diagnosticCollection?: vscode.DiagnosticCollection;
+  connectionWizard?: ConnectionProfileWizard;
+  localScanner?: SonarLocalScanner;
+  workspaceRoot?: string;
+  statusBar?: SonarStatusBar;
+  gitStageGuard?: GitStageGuard;
+}
+
+export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'sonarAgent.overviewView';
   /**
    * Transitions that resolve an issue and change shared server state.
@@ -32,11 +48,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _webviewReady = false;
   private _lastStateMessage?: any;
+  private readonly projectDetector: ProjectDetector;
   private readonly fileNavigator: FileNavigator;
   private readonly agentDispatcher: AgentDispatcher;
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
   private readonly connectionWizard: ConnectionProfileWizard;
   private readonly localScanner: SonarLocalScanner;
+  private readonly statusBar: SonarStatusBar;
   private readonly workspaceRoot?: string;
   private _currentCodeEnabled = true;
   private _activeTab: CurrentCodeTab = 'overallCode';
@@ -47,35 +65,69 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private readonly issueTransitionsCache = new Map<string, string[]>();
   private currentUserLogin: string | null = null;
   private _currentDetailCategory: string | null = null;
+  private _isDemoMode = false;
+  private _cachedServerIssues: SonarDetailItem[] = [];
+  private readonly fileIssueAggregator: FileIssueAggregator;
+  private readonly gitStageGuard: GitStageGuard;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly projectDetector: ProjectDetector,
-    fileNavigator?: FileNavigator,
+    projectDetector: ProjectDetector,
+    fileNavigatorOrOptions?: FileNavigator | SonarOverviewViewProviderOptions,
     agentDispatcher?: AgentDispatcher,
     diagnosticCollection?: vscode.DiagnosticCollection,
     connectionWizard?: ConnectionProfileWizard,
     localScanner?: SonarLocalScanner,
-    workspaceRoot?: string,
   ) {
-    this.workspaceRoot = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    this.fileNavigator = fileNavigator ?? new FileNavigator();
+    this.projectDetector = projectDetector;
+
+    const isOptionsObject =
+      fileNavigatorOrOptions &&
+      !(fileNavigatorOrOptions instanceof FileNavigator) &&
+      !('navigateToFile' in fileNavigatorOrOptions);
+
+    const opts: SonarOverviewViewProviderOptions = isOptionsObject
+      ? (fileNavigatorOrOptions as SonarOverviewViewProviderOptions)
+      : {
+          fileNavigator: fileNavigatorOrOptions as FileNavigator | undefined,
+          agentDispatcher,
+          diagnosticCollection,
+          connectionWizard,
+          localScanner,
+        };
+
+    this.workspaceRoot = opts.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    this.fileNavigator = opts.fileNavigator ?? new FileNavigator();
+    this.statusBar = opts.statusBar ?? new SonarStatusBar();
     this.localScanner =
-      localScanner ?? new SonarLocalScanner({ workspaceRoot: this.workspaceRoot });
+      opts.localScanner ?? new SonarLocalScanner({ workspaceRoot: this.workspaceRoot });
     this.agentDispatcher =
-      agentDispatcher ??
+      opts.agentDispatcher ??
       new AgentDispatcher({
         fileNavigator: this.fileNavigator,
         projectDetector: this.projectDetector,
       });
+    this.fileIssueAggregator = new FileIssueAggregator({
+      getCachedIssuesFn: () => this.getAllCachedIssues(),
+    });
     this.diagnosticCollection =
-      diagnosticCollection ?? vscode.languages.createDiagnosticCollection('SonarQube');
+      opts.diagnosticCollection ?? vscode.languages.createDiagnosticCollection('SonarQube');
     this.connectionWizard =
-      connectionWizard ??
+      opts.connectionWizard ??
       new ConnectionProfileWizard({
         projectDetector: this.projectDetector,
         onConfigChanged: () => this.refresh(),
         promptProjectSelectionFn: () => this.promptProjectSelection(),
+      });
+    this.gitStageGuard =
+      opts.gitStageGuard ??
+      new GitStageGuard({
+        workspaceRoot: this.workspaceRoot,
+        getCachedIssuesFn: () => this.getAllCachedIssues(),
+        dispatchBatchFn: async (issues) => {
+          const agent = this._getEffectiveDefaultAgent();
+          return await this.agentDispatcher.dispatchBatch(issues, { targetAgentId: agent });
+        },
       });
   }
 
@@ -84,6 +136,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken,
   ): void {
+    void this.gitStageGuard.initialize();
     this._view = webviewView;
     this._webviewReady = false;
     this._currentCodeEnabled = this.readCurrentCodeEnabled();
@@ -164,6 +217,26 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
             await this._handleSendBatchToAgent(message.items, message.targetAgentId);
             break;
           }
+          case 'cleanCurrentFile': {
+            await this.cleanCurrentFile();
+            break;
+          }
+          case 'generateMissingTests': {
+            await this.generateMissingTests(message.item, message.targetAgentId);
+            break;
+          }
+          case 'checkStagedFiles': {
+            await this.checkStagedFiles(true);
+            break;
+          }
+          case 'enableDemoMode': {
+            await this.enableDemoMode();
+            break;
+          }
+          case 'disableDemoMode': {
+            await this.disableDemoMode();
+            break;
+          }
           case 'fetchIssueTransitions': {
             await this._handleFetchIssueTransitions(message.issueKey);
             break;
@@ -224,13 +297,15 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     });
 
     // Proactively sync state when view is created or becomes visible
-    this._syncState();
+    void this._syncState();
 
-    webviewView.onDidChangeVisibility(() => {
+    webviewView.onDidChangeVisibility?.(() => {
       if (webviewView.visible) {
-        this._syncState();
+        void this._syncState();
         if (this._currentCodeEnabled && this._activeTab === 'currentCode') {
-          this.subscribeCurrentCode();
+          void this.subscribeCurrentCode().catch((err: unknown) => {
+            Logger.error('Failed to subscribe to current code:', err);
+          });
         }
       } else {
         this.unsubscribeCurrentCode();
@@ -246,6 +321,169 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     if (this._view) {
       await this._syncState();
     }
+  }
+
+  public get isDemoMode(): boolean {
+    return this._isDemoMode;
+  }
+
+  public async enableDemoMode(): Promise<void> {
+    this._isDemoMode = true;
+    const demoOverview = DemoData.getOverview();
+    const demoGate = DemoData.getQualityGate();
+    const demoProjects = DemoData.getProjects();
+    const effectiveDefaultAgent = this._getEffectiveDefaultAgent();
+    const availableAgents = this.agentDispatcher.getAvailableAgents();
+
+    const demoState = {
+      type: 'state',
+      state: 'connected',
+      isDemoMode: true,
+      serverUrl: 'http://localhost:9000 (Demo)',
+      projectKey: 'demo-sample-project',
+      projects: demoProjects,
+      overview: demoOverview,
+      qualityGate: demoGate,
+      profiles: [],
+      activeProfileId: undefined,
+      defaultAgent: effectiveDefaultAgent,
+      availableAgents,
+    };
+    this._lastStateMessage = demoState;
+    await this._view?.webview.postMessage(demoState);
+    await this._view?.webview.postMessage({ type: 'qualityGate', status: demoGate });
+    await this._view?.webview.postMessage({ type: 'loading', loading: false });
+
+    this.statusBar.update({
+      projectKey: 'demo-sample-project',
+      overview: demoOverview,
+      qualityGate: demoGate,
+      isDemoMode: true,
+    });
+  }
+
+  public async disableDemoMode(): Promise<void> {
+    this._isDemoMode = false;
+    this.statusBar.clear();
+    await this._syncState();
+  }
+
+  public getStatusBar(): SonarStatusBar {
+    return this.statusBar;
+  }
+
+  public getFileIssueAggregator(): FileIssueAggregator {
+    return this.fileIssueAggregator;
+  }
+
+  public getAllCachedIssues(): SonarDetailItem[] {
+    if (this._isDemoMode) {
+      return DemoData.getDetails();
+    }
+    const set = new Map<string, SonarDetailItem>();
+    for (const item of this._currentCodeItems) {
+      set.set(item.id, item);
+    }
+    for (const item of this._cachedServerIssues) {
+      set.set(item.id, item);
+    }
+    return Array.from(set.values());
+  }
+
+  public async cleanCurrentFile(
+    targetDoc?: vscode.TextDocument,
+  ): Promise<{ ok: boolean; count: number; message: string }> {
+    const doc = targetDoc ?? vscode.window.activeTextEditor?.document;
+    if (!doc) {
+      const msg = 'No active editor found. Open a file to clean Sonar issues.';
+      vscode.window.showInformationMessage(msg);
+      return { ok: false, count: 0, message: msg };
+    }
+
+    const issues = this.fileIssueAggregator.aggregateIssuesForDocument(doc);
+    if (issues.length === 0) {
+      const fileName = path.basename(doc.fileName || doc.uri.fsPath);
+      const msg = `No Sonar issues detected in ${fileName}. File is clean!`;
+      vscode.window.showInformationMessage(msg);
+      return { ok: true, count: 0, message: msg };
+    }
+
+    const effectiveDefaultAgent = this._getEffectiveDefaultAgent();
+    const result = await this.agentDispatcher.dispatchBatch(issues, {
+      targetAgentId: effectiveDefaultAgent,
+    });
+
+    return { ok: result.ok, count: issues.length, message: result.message };
+  }
+
+  private createSyntheticCoverageItem(filePathOrUri: string): SonarDetailItem {
+    const relPath = this.workspaceRoot
+      ? path.relative(this.workspaceRoot, filePathOrUri)
+      : filePathOrUri;
+    return {
+      id: `cov-${Date.now()}`,
+      ruleKey: 'coverage:uncovered_lines',
+      message: `Coverage gap for ${path.basename(relPath)}`,
+      component: relPath,
+      filePath: relPath,
+      line: 1,
+      type: 'COVERAGE',
+      severity: 'MAJOR',
+      status: 'OPEN',
+      tags: ['test-coverage', 'unit-test'],
+      creationDate: new Date().toISOString(),
+    };
+  }
+
+  private resolveCoverageItem(
+    itemOrDoc?: SonarDetailItem | vscode.TextDocument | vscode.Uri,
+  ): SonarDetailItem | undefined {
+    if (itemOrDoc) {
+      if ('type' in itemOrDoc && 'ruleKey' in itemOrDoc) {
+        return itemOrDoc as SonarDetailItem;
+      }
+      if ('uri' in itemOrDoc && 'fileName' in itemOrDoc) {
+        return this.createSyntheticCoverageItem((itemOrDoc as vscode.TextDocument).uri.fsPath);
+      }
+      if ('fsPath' in itemOrDoc && 'scheme' in itemOrDoc) {
+        return this.createSyntheticCoverageItem((itemOrDoc as vscode.Uri).fsPath);
+      }
+    }
+    const activeDoc = vscode.window.activeTextEditor?.document;
+    if (activeDoc) {
+      return this.createSyntheticCoverageItem(activeDoc.uri.fsPath);
+    }
+    return undefined;
+  }
+
+  public async generateMissingTests(
+    itemOrDoc?: SonarDetailItem | vscode.TextDocument | vscode.Uri,
+    targetAgentId?: string,
+  ): Promise<{ ok: boolean; message: string }> {
+    const item = this.resolveCoverageItem(itemOrDoc);
+
+    if (!item) {
+      const msg =
+        'No active file open to generate tests for. Please open a file or select a coverage item.';
+      vscode.window.showInformationMessage(msg);
+      return { ok: false, message: msg };
+    }
+
+    const agent = targetAgentId ?? this._getEffectiveDefaultAgent();
+    return await this.agentDispatcher.dispatchIssue(item, { targetAgentId: agent });
+  }
+
+  public async checkStagedFiles(interactive = true): Promise<{
+    stagedFileCount: number;
+    issueCount: number;
+    issues: SonarDetailItem[];
+  }> {
+    return await this.gitStageGuard.checkStagedFiles(interactive);
+  }
+
+  public dispose(): void {
+    this.statusBar.dispose();
+    this.gitStageGuard.dispose();
   }
 
   public isCurrentCodeEnabled(): boolean {
@@ -459,6 +697,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     this._currentDetailCategory = category;
 
+    if (this._isDemoMode) {
+      const items = DemoData.getDetails(category);
+      this._view.webview.postMessage({
+        type: 'details',
+        category,
+        items,
+      });
+      return;
+    }
+
     const config = await this.projectDetector.getConfig();
     const token = await this.projectDetector.getToken();
     if (!config.serverUrl || !config.projectKey || !token) return;
@@ -486,6 +734,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
         items = await client.getIssues(config.projectKey);
       }
 
+      this._updateCachedServerIssues(items);
       this._view.webview.postMessage({
         type: 'details',
         category,
@@ -500,6 +749,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     } finally {
       this._view.webview.postMessage({ type: 'loadingDetails', loading: false });
     }
+  }
+
+  private _updateCachedServerIssues(items: SonarDetailItem[]): void {
+    const map = new Map<string, SonarDetailItem>();
+    for (const existing of this._cachedServerIssues) {
+      map.set(existing.id, existing);
+    }
+    for (const item of items) {
+      map.set(item.id, item);
+    }
+    this._cachedServerIssues = Array.from(map.values());
   }
 
   /**
@@ -649,10 +909,21 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     this.diagnosticCollection.clear();
     const map = new Map<string, { uri: vscode.Uri; diagnostics: vscode.Diagnostic[] }>();
 
-    for (const item of items) {
-      if (!item.filePath) continue;
-      const resolved = await this.fileNavigator.resolveFilePath(item.filePath);
-      if (!resolved) continue;
+    const resolvedEntries = await Promise.all(
+      items.map(async (item) => {
+        if (!item.filePath) {
+          return null;
+        }
+        const resolved = await this.fileNavigator.resolveFilePath(item.filePath);
+        return resolved ? { item, resolved } : null;
+      }),
+    );
+
+    for (const entry of resolvedEntries) {
+      if (!entry) {
+        continue;
+      }
+      const { item, resolved } = entry;
 
       const uri = vscode.Uri.file(resolved);
       const line = item.line && item.line > 0 ? item.line - 1 : 0;
@@ -669,9 +940,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       diagnostic.code = item.ruleKey;
       diagnostic.source = 'SonarQube';
 
-      const entry = map.get(uri.toString()) || { uri, diagnostics: [] };
-      entry.diagnostics.push(diagnostic);
-      map.set(uri.toString(), entry);
+      const mapEntry = map.get(uri.toString()) || { uri, diagnostics: [] };
+      mapEntry.diagnostics.push(diagnostic);
+      map.set(uri.toString(), mapEntry);
     }
 
     for (const { uri, diagnostics } of map.values()) {
@@ -719,6 +990,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       availableAgents,
     };
     this._lastStateMessage = noProfilesState;
+    this.statusBar.clear();
     await this._view?.webview.postMessage(noProfilesState);
   }
 
@@ -739,6 +1011,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       availableAgents,
     };
     this._lastStateMessage = onboardingState;
+    this.statusBar.clear();
     const delivered = await this._view?.webview.postMessage(onboardingState);
     Logger.info(`[Host] postMessage(onboarding) delivered=${delivered}`);
   }
@@ -889,6 +1162,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     await this._view?.webview.postMessage({ type: 'loading', loading: false });
 
+    this.statusBar.update({
+      projectKey: resolvedProjectKey,
+      overview,
+      qualityGate,
+      isDemoMode: false,
+    });
+
     if (!this._webviewReady && this._view) {
       setTimeout(async () => {
         if (!this._webviewReady && this._view && this._lastStateMessage) {
@@ -900,6 +1180,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
   private async _syncState(): Promise<void> {
     if (!this._view) {
+      return;
+    }
+
+    if (this._isDemoMode) {
+      await this.enableDemoMode();
       return;
     }
 
@@ -1031,6 +1316,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const isConnected = Boolean(config.serverUrl && token);
 
     if (!isConnected) {
+      this.statusBar.clear();
       this._view?.webview.postMessage({
         type: 'disconnected',
         message: 'Connection credentials cleared.',
@@ -1047,6 +1333,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     if (confirm === 'Disconnect') {
       await this.projectDetector.deleteToken();
+      this.statusBar.clear();
       Logger.info('SonarQube credentials removed and disconnected.');
       this._view?.webview.postMessage({
         type: 'disconnected',
@@ -1063,7 +1350,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     currentCodeEnabled: boolean = true,
   ): string {
     const nonce = getNonce();
-    return `<!DOCTYPE html>
+    return String.raw`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -1249,6 +1536,35 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     .btn-agent:hover {
       background: #0062a3;
+    }
+
+    .demo-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: var(--vscode-editorInfo-background, rgba(0, 122, 204, 0.12));
+      border: 1px solid var(--vscode-editorInfo-foreground, #3794ff);
+      border-radius: 4px;
+      gap: 8px;
+    }
+
+    .demo-banner-content {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .demo-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 2px 5px;
+      border-radius: 3px;
+      background: var(--vscode-badge-background, #007acc);
+      color: var(--vscode-badge-foreground, #ffffff);
     }
 
     .alert {
@@ -1612,6 +1928,122 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       flex-shrink: 0;
     }
 
+    /* Bento Health Rings & Container Queries */
+    .health-ring-container {
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .health-ring {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .health-ring-bg {
+      fill: none;
+      stroke: rgba(128, 128, 128, 0.2);
+      stroke-width: 3.5;
+    }
+
+    .health-ring-progress {
+      fill: none;
+      stroke-width: 3.5;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.6s ease, stroke 0.3s ease;
+    }
+
+    .rating-ring-container {
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .rating-ring-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .rating-ring-circle {
+      fill: none;
+      stroke-width: 2.5;
+      transition: stroke 0.3s ease;
+    }
+
+    @container (max-width: 260px) {
+      .health-ring-container,
+      .rating-ring-container {
+        width: 26px;
+        height: 26px;
+      }
+    }
+
+    /* Celebration & Streak Badge */
+    .celebration-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 8px 0;
+      padding: 6px 12px;
+      background: rgba(0, 170, 94, 0.15);
+      border: 1px solid var(--sonar-green);
+      border-radius: 6px;
+      color: var(--sonar-green);
+      font-size: 11px;
+      font-weight: 600;
+      animation: celebration-slide-in 0.5s ease-out;
+    }
+
+    @keyframes celebration-slide-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .quality-gate-celebrate {
+      animation: gate-pulse-glow 1.5s ease-in-out infinite alternate;
+    }
+
+    @keyframes gate-pulse-glow {
+      from { box-shadow: 0 0 4px rgba(0, 170, 94, 0.3); }
+      to { box-shadow: 0 0 16px rgba(0, 170, 94, 0.8); }
+    }
+
+    .confetti-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .celebration-badge {
+        animation: none;
+      }
+      .quality-gate-celebrate {
+        animation: none;
+        box-shadow: 0 0 8px rgba(0, 170, 94, 0.5);
+      }
+      .health-ring-progress {
+        transition: none;
+      }
+    }
+
     .source-badge {
       font-size: 10px;
       background: var(--vscode-badge-background);
@@ -1972,7 +2404,13 @@ ${ISSUE_LIFECYCLE_CSS}
         <input type="password" id="user-token" placeholder="Enter SonarQube User Token" spellcheck="false" autocomplete="off" />
       </div>
 
-      <button id="connect-btn" class="btn">Connect & Verify</button>
+      <button id="connect-btn" class="btn" style="width: 100%;">Connect & Verify</button>
+      <div style="display: flex; align-items: center; margin: 10px 0; gap: 8px;">
+        <hr style="flex: 1; border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));" />
+        <span style="font-size: 10px; color: var(--vscode-descriptionForeground); text-transform: uppercase;">or</span>
+        <hr style="flex: 1; border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));" />
+      </div>
+      <button id="try-demo-btn" class="btn btn-secondary" style="width: 100%;">⚡ Try Demo Mode (Instant Preview)</button>
     </div>
 
     <!-- No Profiles Empty State -->
@@ -1980,11 +2418,25 @@ ${ISSUE_LIFECYCLE_CSS}
       <p style="font-size: 12px; line-height: 1.4; color: var(--vscode-descriptionForeground);">
         No connection profiles yet. Create one to connect to SonarQube and monitor Overall Code quality.
       </p>
-      <button id="create-profile-btn" class="btn">New Connection Profile</button>
+      <button id="create-profile-btn" class="btn" style="width: 100%;">New Connection Profile</button>
+      <div style="display: flex; align-items: center; margin: 10px 0; gap: 8px;">
+        <hr style="flex: 1; border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));" />
+        <span style="font-size: 10px; color: var(--vscode-descriptionForeground); text-transform: uppercase;">or</span>
+        <hr style="flex: 1; border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));" />
+      </div>
+      <button id="no-profiles-demo-btn" class="btn btn-secondary" style="width: 100%;">⚡ Try Demo Mode (Instant Preview)</button>
     </div>
 
     <!-- Connected Dashboard View -->
     <div id="connected-view" class="${isConfigured ? '' : 'hidden'}" style="display: flex; flex-direction: column; gap: 10px;">
+      <!-- Demo Mode Accent Banner -->
+      <div id="demo-banner" class="demo-banner hidden">
+        <div class="demo-banner-content">
+          <span class="demo-badge">DEMO MODE</span>
+          <span style="font-size: 11px;">Viewing sample SonarQube data</span>
+        </div>
+        <button id="exit-demo-btn" class="btn btn-sm btn-secondary" title="Exit Demo Mode">Exit Demo Mode</button>
+      </div>
       <!-- Project & Target Agent Selector Bar -->
       <div class="card" style="padding: 8px 10px; gap: 8px;">
         <div>
@@ -2053,6 +2505,12 @@ ${ISSUE_LIFECYCLE_CSS}
         <ul id="quality-gate-conditions" class="quality-gate-conditions hidden"></ul>
       </div>
 
+      <!-- Celebration & Streak Badge -->
+      <div id="celebration-badge" class="celebration-badge hidden" role="status" aria-live="polite">
+        🎉 0 Issues Reached! Clean Code streak maintained
+      </div>
+      <canvas id="celebration-canvas" class="confetti-canvas"></canvas>
+
       <!-- Metric Cards Grid (Container Query Controlled) -->
       <div id="metrics-grid" class="metrics-grid">
         <!-- Security -->
@@ -2064,7 +2522,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <span class="metric-sublabel">Open issues</span>
             </div>
           </div>
-          <div id="badge-security" class="rating-badge rating-A">A</div>
+          <div class="rating-ring-container">
+            <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-security" class="rating-ring-circle" cx="18" cy="18" r="15" stroke="var(--sonar-green)" /></svg>
+            <div id="badge-security" class="rating-badge rating-A">A</div>
+          </div>
         </div>
 
         <!-- Reliability -->
@@ -2076,7 +2537,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <span class="metric-sublabel">Open issues</span>
             </div>
           </div>
-          <div id="badge-reliability" class="rating-badge rating-C">C</div>
+          <div class="rating-ring-container">
+            <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-reliability" class="rating-ring-circle" cx="18" cy="18" r="15" stroke="var(--sonar-yellow)" /></svg>
+            <div id="badge-reliability" class="rating-badge rating-C">C</div>
+          </div>
         </div>
 
         <!-- Maintainability -->
@@ -2088,7 +2552,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <span class="metric-sublabel">Open issues</span>
             </div>
           </div>
-          <div id="badge-maintainability" class="rating-badge rating-A">A</div>
+          <div class="rating-ring-container">
+            <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-maintainability" class="rating-ring-circle" cx="18" cy="18" r="15" stroke="var(--sonar-green)" /></svg>
+            <div id="badge-maintainability" class="rating-badge rating-A">A</div>
+          </div>
         </div>
 
         <!-- Security Hotspots -->
@@ -2100,7 +2567,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <span class="metric-sublabel">To review</span>
             </div>
           </div>
-          <div id="badge-hotspots" class="rating-badge rating-A">A</div>
+          <div class="rating-ring-container">
+            <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-hotspots" class="rating-ring-circle" cx="18" cy="18" r="15" stroke="var(--sonar-green)" /></svg>
+            <div id="badge-hotspots" class="rating-badge rating-A">A</div>
+          </div>
         </div>
 
         <!-- Coverage -->
@@ -2112,8 +2582,11 @@ ${ISSUE_LIFECYCLE_CSS}
             </div>
             <span id="metric-coverage-lines" class="metric-helper">On - lines to cover.</span>
           </div>
-          <div class="circle-icon">
-            <div class="dot-inner"></div>
+          <div class="health-ring-container" aria-hidden="true">
+            <svg class="health-ring" viewBox="0 0 36 36">
+              <circle class="health-ring-bg" cx="18" cy="18" r="14" />
+              <circle id="ring-coverage" class="health-ring-progress" cx="18" cy="18" r="14" stroke-dasharray="87.96" stroke-dashoffset="87.96" stroke="var(--sonar-green)" />
+            </svg>
           </div>
         </div>
 
@@ -2126,8 +2599,11 @@ ${ISSUE_LIFECYCLE_CSS}
             </div>
             <span id="metric-duplications-lines" class="metric-helper">On - lines.</span>
           </div>
-          <div class="circle-icon" style="border-color: var(--sonar-green);">
-            <div class="dot-inner" style="background: var(--sonar-green);"></div>
+          <div class="health-ring-container" aria-hidden="true">
+            <svg class="health-ring" viewBox="0 0 36 36">
+              <circle class="health-ring-bg" cx="18" cy="18" r="14" />
+              <circle id="ring-duplications" class="health-ring-progress" cx="18" cy="18" r="14" stroke-dasharray="87.96" stroke-dashoffset="87.96" stroke="var(--sonar-green)" />
+            </svg>
           </div>
         </div>
 
@@ -2230,6 +2706,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <input type="checkbox" id="current-select-all-checkbox" />
               <span>Select All</span>
             </label>
+            <button id="clean-file-btn" class="btn btn-agent btn-sm hidden" title="Clean Current File with AI">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>
+              Clean File with AI
+            </button>
             <button id="run-full-scan-btn" class="btn btn-secondary btn-sm">Run Full Scan</button>
           </div>
         </div>
@@ -2500,9 +2980,117 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
       return String(num);
     }
 
-    function updateRatingBadge(el, rating) {
+    const ringCoverage = document.getElementById("ring-coverage");
+    const ringDuplications = document.getElementById("ring-duplications");
+    const ringSecurity = document.getElementById("ring-security");
+    const ringReliability = document.getElementById("ring-reliability");
+    const ringMaintainability = document.getElementById("ring-maintainability");
+    const ringHotspots = document.getElementById("ring-hotspots");
+    const celebrationBadge = document.getElementById("celebration-badge");
+    const celebrationCanvas = document.getElementById("celebration-canvas");
+    let lastGateStatus = null;
+
+    const CIRCUMFERENCE_R14 = 87.96;
+
+    function updateDonutRing(circleEl, percent, isCoverage) {
+      if (!circleEl) return;
+      const clamped = Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0));
+      const dashOffset = Math.round((CIRCUMFERENCE_R14 - (clamped / 100) * CIRCUMFERENCE_R14) * 100) / 100;
+      circleEl.style.strokeDasharray = String(CIRCUMFERENCE_R14);
+      circleEl.style.strokeDashoffset = String(dashOffset);
+
+      if (isCoverage) {
+        circleEl.style.stroke = clamped >= 80 ? "var(--sonar-green)" : clamped >= 50 ? "var(--sonar-yellow)" : "var(--sonar-red)";
+      } else {
+        circleEl.style.stroke = clamped > 10 ? "var(--sonar-red)" : clamped > 3 ? "var(--sonar-yellow)" : "var(--sonar-green)";
+      }
+    }
+
+    function getRatingColorVar(rating) {
+      const r = String(rating || "A").toUpperCase().trim();
+      if (r === "A" || r === "1" || r === "1.0") return "var(--sonar-green)";
+      if (r === "B" || r === "2" || r === "2.0") return "var(--sonar-lime)";
+      if (r === "C" || r === "3" || r === "3.0") return "var(--sonar-yellow)";
+      if (r === "D" || r === "4" || r === "4.0") return "var(--sonar-orange)";
+      if (r === "E" || r === "5" || r === "5.0") return "var(--sonar-red)";
+      return "var(--sonar-green)";
+    }
+
+    function updateRatingBadge(el, rating, ringEl) {
       el.className = "rating-badge rating-" + rating;
       el.textContent = rating;
+      if (ringEl) {
+        ringEl.style.stroke = getRatingColorVar(rating);
+      }
+    }
+
+    function triggerCelebration(msg) {
+      if (celebrationBadge) {
+        celebrationBadge.textContent = "🎉 " + msg;
+        celebrationBadge.classList.remove("hidden");
+      }
+      if (qualityGateBanner) {
+        qualityGateBanner.classList.add("quality-gate-celebrate");
+        setTimeout(() => {
+          qualityGateBanner.classList.remove("quality-gate-celebrate");
+        }, 4000);
+      }
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        return;
+      }
+      launchConfetti();
+    }
+
+    function launchConfetti() {
+      if (!celebrationCanvas) return;
+      const ctx = celebrationCanvas.getContext("2d");
+      if (!ctx) return;
+      celebrationCanvas.width = window.innerWidth;
+      celebrationCanvas.height = window.innerHeight;
+
+      const colors = ["#00aa5e", "#81b300", "#eabe06", "#2563eb", "#9333ea", "#06b6d4"];
+      const particles = [];
+      for (let i = 0; i < 35; i++) {
+        particles.push({
+          x: celebrationCanvas.width * (0.2 + Math.random() * 0.6),
+          y: celebrationCanvas.height * 0.2,
+          vx: (Math.random() - 0.5) * 6,
+          vy: -Math.random() * 5 - 2,
+          size: Math.random() * 5 + 3,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          alpha: 1,
+          rot: Math.random() * 360,
+        });
+      }
+
+      let frame = 0;
+      function step() {
+        frame++;
+        ctx.clearRect(0, 0, celebrationCanvas.width, celebrationCanvas.height);
+        let alive = false;
+        for (const p of particles) {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.2;
+          p.alpha -= 0.015;
+          if (p.alpha > 0) {
+            alive = true;
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            ctx.fillStyle = p.color;
+            ctx.translate(p.x, p.y);
+            ctx.rotate((p.rot * Math.PI) / 180);
+            ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+            ctx.restore();
+          }
+        }
+        if (alive && frame < 90) {
+          requestAnimationFrame(step);
+        } else {
+          ctx.clearRect(0, 0, celebrationCanvas.width, celebrationCanvas.height);
+        }
+      }
+      requestAnimationFrame(step);
     }
 
     function updateBatchBar() {
@@ -2530,25 +3118,35 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
       if (!overview) return;
 
       securityCount.textContent = overview.security.count;
-      updateRatingBadge(badgeSecurity, overview.security.rating);
+      updateRatingBadge(badgeSecurity, overview.security.rating, ringSecurity);
 
       reliabilityCount.textContent = overview.reliability.count;
-      updateRatingBadge(badgeReliability, overview.reliability.rating);
+      updateRatingBadge(badgeReliability, overview.reliability.rating, ringReliability);
 
       maintainabilityCount.textContent = overview.maintainability.count;
-      updateRatingBadge(badgeMaintainability, overview.maintainability.rating);
+      updateRatingBadge(badgeMaintainability, overview.maintainability.rating, ringMaintainability);
 
       coveragePercent.textContent = overview.coverage.percentage.toFixed(1) + "%";
       coverageLines.textContent = "On " + formatNumber(overview.coverage.linesToCover) + " lines to cover.";
+      updateDonutRing(ringCoverage, overview.coverage.percentage, true);
 
       duplicationsPercent.textContent = overview.duplications.percentage.toFixed(1) + "%";
       duplicationsLines.textContent = "On " + formatNumber(overview.duplications.duplicatedLines) + " lines.";
+      updateDonutRing(ringDuplications, overview.duplications.percentage, false);
 
       hotspotsCount.textContent = overview.securityHotspots.count;
-      updateRatingBadge(badgeHotspots, overview.securityHotspots.rating);
+      updateRatingBadge(badgeHotspots, overview.securityHotspots.rating, ringHotspots);
 
       if (acceptedCount && overview.acceptedIssues) {
         acceptedCount.textContent = formatNumber(overview.acceptedIssues.count);
+      }
+
+      const totalIssues =
+        (overview.security.count || 0) +
+        (overview.reliability.count || 0) +
+        (overview.maintainability.count || 0);
+      if (totalIssues === 0) {
+        triggerCelebration("0 Issues Reached! Clean Code streak maintained");
       }
     }
 
@@ -2564,7 +3162,7 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
       return String(metricKey || "condition")
         .replace(/^new_/, "New ")
         .replace(/_/g, " ")
-        .replace(/\\b\\w/g, (ch) => ch.toUpperCase());
+        .replace(/\b\w/g, (ch) => ch.toUpperCase());
     }
 
     function formatGateCondition(condition) {
@@ -2590,6 +3188,11 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
         qualityGateBanner.className = "quality-gate hidden";
         return;
       }
+
+      if (lastGateStatus === "ERROR" && status.status === "OK") {
+        triggerCelebration("Quality Gate Passed! Clean Code streak maintained");
+      }
+      lastGateStatus = status.status;
 
       const variant = QUALITY_GATE_CLASSES[status.status];
       qualityGateBanner.className = "quality-gate " + variant;
@@ -2794,18 +3397,22 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
       agentBtn.className = "btn btn-agent btn-sm";
       let agentBtnLabel = "Send to Agent";
       if (item.type === "COVERAGE") {
-        agentBtnLabel = "Generate Tests";
+        agentBtnLabel = "⚡ Generate Unit Tests";
       } else if (item.type === "DUPLICATION") {
         agentBtnLabel = "Refactor";
       } else if (item.type === "HOTSPOT") {
         agentBtnLabel = "Review";
       }
       agentBtn.setAttribute("aria-label", agentBtnLabel + " for " + item.message);
-      agentBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>' + agentBtnLabel;
+      agentBtn.innerHTML = (item.type === "COVERAGE" ? "" : '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>') + agentBtnLabel;
       agentBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const targetAgentId = targetAgentDropdown.value;
-        vscode.postMessage({ command: "sendToAgent", item, targetAgentId });
+        if (item.type === "COVERAGE") {
+          vscode.postMessage({ command: "generateMissingTests", item, targetAgentId });
+        } else {
+          vscode.postMessage({ command: "sendToAgent", item, targetAgentId });
+        }
       });
 
       actionsDiv.appendChild(jumpBtn);
@@ -2925,6 +3532,7 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
     const currentEmptyClean = document.getElementById("current-empty-clean");
     const currentSourceLabel = document.getElementById("current-source-label");
     const runFullScanBtn = document.getElementById("run-full-scan-btn");
+    const cleanFileBtn = document.getElementById("clean-file-btn");
     const installSonarlintBtn = document.getElementById("install-sonarlint-btn");
     const runFullScanEmptyBtn = document.getElementById("run-full-scan-empty-btn");
 
@@ -3080,6 +3688,9 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       if (!currentIssuesContainer) return;
       currentIssuesContainer.innerHTML = "";
       const hasItems = currentCodeItems.length > 0;
+      if (cleanFileBtn) {
+        cleanFileBtn.classList.toggle("hidden", !hasItems);
+      }
       if (currentEmptySonarlint) {
         currentEmptySonarlint.classList.toggle("hidden", sonarLintInstalled !== false || hasItems);
       }
@@ -3103,6 +3714,11 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
     if (tabCurrent) {
       tabCurrent.addEventListener("click", () => {
         vscode.postMessage({ command: "switchTab", tab: "currentCode" });
+      });
+    }
+    if (cleanFileBtn) {
+      cleanFileBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "cleanCurrentFile" });
       });
     }
     if (runFullScanBtn) {
@@ -3241,6 +3857,29 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       vscode.postMessage({ command: "createProfile" });
     });
 
+    const tryDemoBtn = document.getElementById("try-demo-btn");
+    if (tryDemoBtn) {
+      tryDemoBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "enableDemoMode" });
+      });
+    }
+
+    const noProfilesDemoBtn = document.getElementById("no-profiles-demo-btn");
+    if (noProfilesDemoBtn) {
+      noProfilesDemoBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "enableDemoMode" });
+      });
+    }
+
+    const exitDemoBtn = document.getElementById("exit-demo-btn");
+    if (exitDemoBtn) {
+      exitDemoBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "disableDemoMode" });
+      });
+    }
+
+    const demoBanner = document.getElementById("demo-banner");
+
     function renderProfileSwitcher(profiles, activeProfileId) {
       if (!profiles || !Array.isArray(profiles) || profiles.length === 0) {
         profileSwitcher.classList.add("hidden");
@@ -3300,6 +3939,12 @@ ${ISSUE_LIFECYCLE_MESSAGE_SCRIPT}
             connectedView.classList.remove("hidden");
             renderProfileSwitcher(message.profiles, message.activeProfileId);
 
+            if (message.isDemoMode) {
+              demoBanner?.classList.remove("hidden");
+            } else {
+              demoBanner?.classList.add("hidden");
+            }
+
             if (message.availableAgents && Array.isArray(message.availableAgents)) {
               targetAgentDropdown.innerHTML = "";
               message.availableAgents.forEach((agent) => {
@@ -3339,11 +3984,13 @@ ${ISSUE_LIFECYCLE_MESSAGE_SCRIPT}
               }
             }
           } else if (message.state === "no-profiles") {
+            demoBanner?.classList.add("hidden");
             connectedView.classList.add("hidden");
             onboardingView.classList.add("hidden");
             noProfilesView.classList.remove("hidden");
             renderProfileSwitcher(message.profiles, message.activeProfileId);
           } else {
+            demoBanner?.classList.add("hidden");
             connectedView.classList.add("hidden");
             noProfilesView.classList.add("hidden");
             onboardingView.classList.remove("hidden");

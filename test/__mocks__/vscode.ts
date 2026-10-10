@@ -1,3 +1,5 @@
+import { vi } from 'vitest';
+
 export const workspace = {
   workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
   findFiles: async () => [],
@@ -38,6 +40,7 @@ export const languages = {
     dispose: () => {},
   }),
   registerCodeActionsProvider: () => ({ dispose: () => {} }),
+  registerCodeLensProvider: () => ({ dispose: () => {} }),
   getDiagnostics: (): Array<readonly [unknown, any[]]> => [],
   onDidChangeDiagnostics: (_listener: (e: any) => void) => ({ dispose: () => {} }),
 };
@@ -48,13 +51,37 @@ export enum ProgressLocation {
   Notification = 15,
 }
 
+export class MarkdownString {
+  public value: string;
+  public isTrusted?: boolean;
+  public supportThemeIcons?: boolean;
+  constructor(value = '') {
+    this.value = value;
+  }
+  appendMarkdown(value: string) {
+    this.value += value;
+    return this;
+  }
+  appendText(value: string) {
+    this.value += value;
+    return this;
+  }
+}
+
+export class ThemeColor {
+  constructor(public readonly id: string) {}
+}
+
 export const window = {
   createStatusBarItem: (_alignment?: number, _priority?: number) => ({
     text: '',
-    tooltip: '',
-    show: () => {},
-    hide: () => {},
-    dispose: () => {},
+    tooltip: '' as any,
+    command: '',
+    color: undefined as any,
+    backgroundColor: undefined as any,
+    show: vi.fn(),
+    hide: vi.fn(),
+    dispose: vi.fn(),
   }),
   showTextDocument: async () => ({
     selection: {},
@@ -80,6 +107,7 @@ export const window = {
     debug: () => {},
     trace: () => {},
   }),
+  registerWebviewViewProvider: (_viewType: string, _provider: any) => ({ dispose: () => {} }),
 };
 
 export const Uri = {
@@ -166,4 +194,31 @@ export class CodeAction {
     public title: string,
     public kind?: CodeActionKind,
   ) {}
+}
+
+export class CodeLens {
+  constructor(
+    public range: Range,
+    public command?: { command: string; title: string; arguments?: any[] },
+  ) {}
+}
+
+export class EventEmitter<T = any> {
+  private listeners: Array<(e: T) => any> = [];
+  event = (listener: (e: T) => any) => {
+    this.listeners.push(listener);
+    return {
+      dispose: () => {
+        this.listeners = this.listeners.filter((l) => l !== listener);
+      },
+    };
+  };
+  fire(data: T): void {
+    for (const listener of this.listeners) {
+      listener(data);
+    }
+  }
+  dispose(): void {
+    this.listeners = [];
+  }
 }

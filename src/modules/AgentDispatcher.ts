@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 import { SonarClient, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
 import { ProjectDetector } from './ProjectDetector.js';
+import { DemoData } from './DemoData.js';
+import { TestFrameworkDetector } from './TestFrameworkDetector.js';
 
 export interface CodeSnippetContext {
   snippet: string;
@@ -29,6 +31,7 @@ export interface AgentDispatcherOptions {
   clipboardWriteFn?: (text: string) => Thenable<void> | Promise<void>;
   sendToAgentPanelFn?: (options: SendToAgentPanelOptions) => Thenable<void> | Promise<void>;
   getDefaultAgentFn?: () => string;
+  testFrameworkDetector?: TestFrameworkDetector;
 }
 
 export interface SendToAgentPanelOptions {
@@ -69,6 +72,7 @@ export class AgentDispatcher {
   private readonly sendToAgentPanelFn: (
     options: SendToAgentPanelOptions,
   ) => Thenable<void> | Promise<void>;
+  private readonly testFrameworkDetector: TestFrameworkDetector;
 
   constructor(options?: AgentDispatcherOptions) {
     this.fileNavigator = options?.fileNavigator ?? new FileNavigator();
@@ -82,6 +86,7 @@ export class AgentDispatcher {
         vscode.workspace.getConfiguration('sonarAgent').get<string>('defaultAgent', 'copilot'));
     this.fetchRuleFn = options?.fetchRuleFn;
     this.readCodeSnippetFn = options?.readCodeSnippetFn;
+    this.testFrameworkDetector = options?.testFrameworkDetector ?? new TestFrameworkDetector();
     this.executeCommandFn =
       options?.executeCommandFn ??
       ((cmd: string, ...args: unknown[]) => vscode.commands.executeCommand(cmd, ...args));
@@ -253,6 +258,7 @@ export class AgentDispatcher {
       }
     }
 
+    doc ??= DemoData.getRuleDoc(ruleKey);
     doc ??= {
       key: ruleKey,
       name: ruleKey,
@@ -335,20 +341,30 @@ export class AgentDispatcher {
     const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
 
     if (item.type === 'COVERAGE') {
+      const framework = await this.testFrameworkDetector.detectFramework(item.filePath);
       let prompt = `@workspace Please generate unit tests to improve test coverage for the following file:\n\n`;
       prompt += `### 📍 Target File\n`;
       prompt += `- File: \`${item.filePath}\`\n`;
-      prompt += `- Status: ${item.message}\n\n`;
+      prompt += `- Coverage Status: ${item.message}\n\n`;
+
+      prompt += `### 🛠️ Detected Test Framework\n`;
+      prompt += `- Framework: ${framework.name}\n`;
+      prompt += `- Runner Command: \`${framework.runnerCommand}\`\n`;
+      prompt += `- File Convention: \`${framework.fileNamingConvention}\`\n`;
+      prompt += `- Mocking: ${framework.mockingConventions}\n`;
+      prompt += `- Assertions: ${framework.assertionSyntax}\n\n`;
 
       if (snippetContext) {
-        prompt += `### 💻 Local Code Snippet (\`${item.filePath}\`)\n`;
+        prompt += `### 💻 Target Code Snippet (\`${item.filePath}\`)\n`;
         prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
       }
 
       prompt += `### 🎯 Instructions for Agent\n`;
-      prompt += `1. Analyze the code in \`${item.filePath}\`.\n`;
-      prompt += `2. Generate comprehensive unit tests covering untested functions, branches, and lines.\n`;
-      prompt += `3. Use testing frameworks and conventions consistent with this project.\n`;
+      prompt += `1. Analyze the uncovered functions, branches, and edge cases in \`${item.filePath}\`.\n`;
+      prompt += `2. Generate a comprehensive unit test suite adhering to ${framework.name} idioms.\n`;
+      prompt += `3. ${framework.mockingConventions}\n`;
+      prompt += `4. Target at least 80%+ branch and statement coverage.\n`;
+      prompt += `5. Provide the complete runnable test file code with clear descriptions.\n`;
       return prompt;
     }
 
@@ -419,13 +435,24 @@ export class AgentDispatcher {
       fileGroups.set(item.filePath, group);
     }
 
-    for (const [filePath, fileItems] of fileGroups) {
-      prompt += `## 📁 File: \`${filePath}\` (${fileItems.length} issues)\n\n`;
+    const enrichedGroups = await Promise.all(
+      Array.from(fileGroups.entries()).map(async ([filePath, fileItems]) => {
+        const enrichedItems = await Promise.all(
+          fileItems.map(async (item) => {
+            const rule = await this.getRule(item.ruleKey);
+            const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
+            return { item, rule, snippetContext };
+          }),
+        );
+        return { filePath, enrichedItems };
+      }),
+    );
 
-      for (let idx = 0; idx < fileItems.length; idx++) {
-        const item = fileItems[idx];
-        const rule = await this.getRule(item.ruleKey);
-        const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
+    for (const { filePath, enrichedItems } of enrichedGroups) {
+      prompt += `## 📁 File: \`${filePath}\` (${enrichedItems.length} issues)\n\n`;
+
+      for (let idx = 0; idx < enrichedItems.length; idx++) {
+        const { item, rule, snippetContext } = enrichedItems[idx];
 
         prompt += `### Issue #${idx + 1}: Line ${item.line || 'File level'} [${item.severity}] ${rule.name}\n`;
         prompt += `- Message: "${item.message}"\n`;
@@ -479,10 +506,22 @@ export class AgentDispatcher {
     const files: Array<{ uri: vscode.Uri; startLine?: number; endLine?: number }> = [];
     const seenUris = new Set<string>();
 
-    for (const it of items) {
-      if (!it.filePath) continue;
-      const resolvedPath = await this.fileNavigator.resolveFilePath(it.filePath);
-      if (resolvedPath && !seenUris.has(resolvedPath)) {
+    const resolvedEntries = await Promise.all(
+      items.map(async (it) => {
+        if (!it.filePath) {
+          return null;
+        }
+        const resolvedPath = await this.fileNavigator.resolveFilePath(it.filePath);
+        return resolvedPath ? { it, resolvedPath } : null;
+      }),
+    );
+
+    for (const entry of resolvedEntries) {
+      if (!entry) {
+        continue;
+      }
+      const { it, resolvedPath } = entry;
+      if (!seenUris.has(resolvedPath)) {
         seenUris.add(resolvedPath);
         const line = it.line && it.line > 0 ? it.line - 1 : 0;
         files.push({
@@ -785,19 +824,19 @@ export class AgentDispatcher {
   /**
    * Resolves target agent using requested ID or active configuration fallback.
    */
-  async resolveTargetAgent(requestedAgentId?: string): Promise<string> {
+  resolveTargetAgent(requestedAgentId?: string): Promise<string> {
     const available = this.getAvailableAgents();
     if (requestedAgentId && available.some((a) => a.id === requestedAgentId)) {
-      return requestedAgentId;
+      return Promise.resolve(requestedAgentId);
     }
     if (requestedAgentId === 'clipboard') {
-      return 'clipboard';
+      return Promise.resolve('clipboard');
     }
     const defaultAgent = this.getDefaultAgentFn();
     if (defaultAgent && available.some((a) => a.id === defaultAgent)) {
-      return defaultAgent;
+      return Promise.resolve(defaultAgent);
     }
-    return available[0]?.id || 'clipboard';
+    return Promise.resolve(available[0]?.id || 'clipboard');
   }
 
   /**
@@ -828,13 +867,12 @@ export class AgentDispatcher {
   }
 
   /**
-   * Dispatches an editor diagnostic (e.g. from SonarLint / CodeAction) to the Target Agent.
+   * Maps an editor diagnostic to a SonarDetailItem representation.
    */
-  async dispatchDiagnostic(
+  mapDiagnosticToItem(
     diagnostic: vscode.Diagnostic,
     document: vscode.TextDocument,
-    options?: DispatchOptions,
-  ): Promise<{ ok: boolean; message: string }> {
+  ): SonarDetailItem {
     let severity: SonarDetailItem['severity'] = 'MAJOR';
     if (diagnostic.severity === vscode.DiagnosticSeverity.Error) {
       severity = 'CRITICAL';
@@ -858,7 +896,7 @@ export class AgentDispatcher {
       codeVal = code.value !== undefined && code.value !== null ? String(code.value) : '';
     }
 
-    const item: SonarDetailItem = {
+    return {
       id: codeVal || 'sonar-issue',
       ruleKey: codeVal,
       message: diagnostic.message,
@@ -871,7 +909,79 @@ export class AgentDispatcher {
       tags: [],
       creationDate: new Date().toISOString(),
     };
+  }
 
+  /**
+   * Assembles an educational Sonar Explain Prompt for an issue.
+   */
+  async assembleExplainPrompt(item: SonarDetailItem): Promise<string> {
+    const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
+    const rule = await this.getRule(item.ruleKey);
+
+    let prompt = `@workspace Please explain the following SonarQube rule and issue in simple, beginner-friendly terms:\n\n`;
+    prompt += `### 📍 Location\n`;
+    prompt += `- File: \`${item.filePath}\`\n`;
+    prompt += `- Line: ${item.line || 'File level'}\n\n`;
+
+    prompt += `### ⚠️ Issue Details\n`;
+    prompt += `- Message: "${item.message}"\n`;
+    prompt += `- Severity: ${item.severity}\n`;
+    prompt += `- Sonar Rule: \`${rule.key}\` - ${rule.name}\n\n`;
+
+    prompt += `### 📖 SonarQube Rule Context\n`;
+    prompt += `${rule.cleanDesc}\n`;
+    if (rule.recommendation) {
+      prompt += `> Sonar Recommendation: ${rule.recommendation}\n`;
+    }
+    prompt += `\n`;
+
+    if (snippetContext) {
+      prompt += `### 💻 Local Code Snippet (\`${item.filePath}\` L${snippetContext.startLine}-L${snippetContext.endLine})\n`;
+      prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
+    }
+
+    prompt += `### 🎯 Instructions for Agent\n`;
+    prompt += `1. Explain why this pattern is problematic and what risks or bugs it can cause in plain, beginner-friendly terms.\n`;
+    prompt += `2. Break down why Sonar flagged this specific line.\n`;
+    prompt += `3. Provide clean refactoring patterns with before-and-after code examples.\n`;
+    prompt += `4. Suggest best practices to avoid similar issues in the future.\n`;
+
+    return prompt;
+  }
+
+  /**
+   * Dispatches an educational Sonar Explain prompt for an issue.
+   */
+  async dispatchExplain(
+    item: SonarDetailItem,
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    const targetAgentId = await this.resolveTargetAgent(options?.targetAgentId);
+    const prompt = await this.assembleExplainPrompt(item);
+    return this.dispatch(prompt, targetAgentId, item);
+  }
+
+  /**
+   * Dispatches an educational Sonar Explain prompt for an editor diagnostic.
+   */
+  async dispatchDiagnosticExplain(
+    diagnostic: vscode.Diagnostic,
+    document: vscode.TextDocument,
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    const item = this.mapDiagnosticToItem(diagnostic, document);
+    return this.dispatchExplain(item, options);
+  }
+
+  /**
+   * Dispatches an editor diagnostic (e.g. from SonarLint / CodeAction) to the Target Agent.
+   */
+  async dispatchDiagnostic(
+    diagnostic: vscode.Diagnostic,
+    document: vscode.TextDocument,
+    options?: DispatchOptions,
+  ): Promise<{ ok: boolean; message: string }> {
+    const item = this.mapDiagnosticToItem(diagnostic, document);
     return this.dispatchIssue(item, options);
   }
 }

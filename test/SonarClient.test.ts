@@ -661,3 +661,272 @@ describe('SonarClient - SonarQube 10.x Clean Code Taxonomy mapping', () => {
     expect(item.status).toBe('OPEN');
   });
 });
+
+describe('SonarClient - Edge Cases, Fallbacks & Error Branches', () => {
+  it('strips trailing slashes from serverUrl and handles clients without token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ valid: true }),
+    });
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000///',
+      fetchFn: fetchMock as any,
+    });
+    expect((client as any).serverUrl).toBe('http://localhost:9000');
+    const res = await client.verifyConnection();
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:9000/api/authentication/validate',
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ Authorization: expect.anything() }),
+      }),
+    );
+  });
+
+  it('correctly maps D and E ratings in parseRating', () => {
+    const client = new SonarClient({ serverUrl: 'http://localhost:9000' });
+    expect((client as any).parseRating(3.5)).toBe('D');
+    expect((client as any).parseRating(4.5)).toBe('E');
+    expect((client as any).extractFilePath('no_colon_path.ts')).toBe('no_colon_path.ts');
+  });
+
+  it('handles Bearer token retry when Basic auth receives 401', async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url, init) => {
+      callCount++;
+      if (callCount === 1) {
+        return { ok: false, status: 401, statusText: 'Unauthorized' };
+      }
+      return { ok: true, status: 200, json: async () => ({ valid: true }) };
+    });
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'bearer_token_123',
+      fetchFn: fetchMock as any,
+    });
+    const res = await client.verifyConnection();
+    expect(res.ok).toBe(true);
+    expect(callCount).toBe(2);
+  });
+
+  it('handles abort and timeout in executeWithAuth', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchMock as any,
+    });
+    await expect(client.getOverview('proj')).rejects.toThrow(/timed out/);
+  });
+
+  it('handles verifyConnection when server returns invalid or non-ok status', async () => {
+    const fetchMock500 = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Error',
+    });
+    const client500 = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchMock500 as any,
+    });
+    const res500 = await client500.verifyConnection();
+    expect(res500.ok).toBe(false);
+
+    const fetchMockFalse = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ valid: false }),
+    });
+    const clientFalse = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchMockFalse as any,
+    });
+    const resFalse = await clientFalse.verifyConnection();
+    expect(resFalse.ok).toBe(false);
+    expect(resFalse.message).toContain('Invalid credentials');
+  });
+
+  it('falls back when metric keys are not found on older SonarQube (HTTP 400)', async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          clone: () => ({
+            json: async () => ({
+              errors: [
+                {
+                  msg: 'The following metric keys are not found: software_quality_maintainability_issues, software_quality_reliability_issues',
+                },
+              ],
+            }),
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          component: {
+            measures: [
+              { metric: 'bugs', value: '3' },
+              { metric: 'vulnerabilities', value: '1' },
+              { metric: 'code_smells', value: '5' },
+              { metric: 'coverage', value: '85.0' },
+              { metric: 'sqale_debt_ratio', value: '1.2' },
+            ],
+          },
+        }),
+      };
+    });
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchMock as any,
+    });
+    const overview = await client.getOverview('my-proj');
+    expect(overview).toBeDefined();
+    expect(callCount).toBe(2);
+  });
+
+  it('getCurrentUserLogin handles non-ok response and missing login', async () => {
+    const fetchErr = vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: 'Error' });
+    const clientErr = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchErr as any,
+    });
+    await expect(clientErr.getCurrentUserLogin()).rejects.toThrow(/Failed to fetch current user/);
+
+    const fetchNoLogin = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    const clientNoLogin = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchNoLogin as any,
+    });
+    await expect(clientNoLogin.getCurrentUserLogin()).rejects.toThrow(
+      /Could not determine the current user/,
+    );
+  });
+
+  it('getIssues falls back to resolutions=WONTFIX when accepted fails', async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      callCount++;
+      if (callCount === 1) {
+        return { ok: false, status: 400, statusText: 'Bad Request' };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ issues: [{ key: 'I1', rule: 'r1', component: 'c1' }] }),
+      };
+    });
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchMock as any,
+    });
+    const issues = await client.getIssues('my-proj', 'accepted');
+    expect(issues).toHaveLength(1);
+    expect(callCount).toBe(2);
+  });
+
+  it('fetches hotspots successfully and throws on error', async () => {
+    const fetchSuccess = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hotspots: [
+          {
+            key: 'H1',
+            ruleKey: 'rspec:S1',
+            message: 'Hotspot msg',
+            component: 'proj:src/file.ts',
+            line: 12,
+          },
+        ],
+      }),
+    });
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchSuccess as any,
+    });
+    const items = await client.getHotspots('proj');
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe('HOTSPOT');
+
+    const fetchErr = vi
+      .fn()
+      .mockResolvedValue({ ok: false, status: 500, statusText: 'Server Error' });
+    const clientErr = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchErr as any,
+    });
+    await expect(clientErr.getHotspots('proj')).rejects.toThrow(/Failed to fetch hotspots/);
+  });
+
+  it('getEnrichedRule fetches and strips HTML descriptions, with graceful fallback', async () => {
+    const fetchSuccess = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        rule: { key: 'ts:S101', name: 'Rule Name', htmlDesc: '<p>Do <b>not</b> do this.</p>' },
+      }),
+    });
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      organization: 'org1',
+      fetchFn: fetchSuccess as any,
+    });
+    const doc = await client.getEnrichedRule('ts:S101');
+    expect(doc.name).toBe('Rule Name');
+    expect(doc.cleanDesc).toBe('Do not do this.');
+
+    const fetch404 = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    const client404 = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetch404 as any,
+    });
+    const doc404 = await client404.getEnrichedRule('unknown:rule');
+    expect(doc404.cleanDesc).toContain('Verify code adherence');
+
+    const fetchThrow = vi.fn().mockRejectedValue(new Error('Network fail'));
+    const clientThrow = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchThrow as any,
+    });
+    const docThrow = await clientThrow.getEnrichedRule('broken:rule');
+    expect(docThrow.cleanDesc).toContain('Verify code adherence');
+  });
+
+  it('getCoverageFiles and getDuplicationFiles throw on HTTP failure', async () => {
+    const fetchErr = vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: 'Fail' });
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchErr as any,
+    });
+    await expect(client.getCoverageFiles('p')).rejects.toThrow(/Failed to fetch coverage files/);
+    await expect(client.getDuplicationFiles('p')).rejects.toThrow(
+      /Failed to fetch duplication files/,
+    );
+  });
+});
