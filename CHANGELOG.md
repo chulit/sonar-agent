@@ -1,84 +1,74 @@
 # [1.7.0](https://github.com/chulit/sonar-agent/compare/v1.6.1...v1.7.0) (2026-10-10)
 
-
 ### Bug Fixes
 
-* revert coverage dependency (breaks CI) ([70b274b](https://github.com/chulit/sonar-agent/commit/70b274bc2b01c61404b6e870c2cb5bc63c1a43f9))
-
+- revert coverage dependency (breaks CI) ([70b274b](https://github.com/chulit/sonar-agent/commit/70b274bc2b01c61404b6e870c2cb5bc63c1a43f9))
 
 ### Features
 
-* enable coverage reporting for SonarCloud ([d374262](https://github.com/chulit/sonar-agent/commit/d37426224f940d7db829545f09ad3ff5494154ae))
-* enable coverage reporting for SonarCloud ([ae2a9ad](https://github.com/chulit/sonar-agent/commit/ae2a9ad22c84c69122daa77a2e8fd936ea3e5e93))
-* enable coverage reporting for SonarCloud ([1b2a457](https://github.com/chulit/sonar-agent/commit/1b2a45710ea23a9c037ba542e5b9eb721179500f))
+- enable coverage reporting for SonarCloud ([d374262](https://github.com/chulit/sonar-agent/commit/d37426224f940d7db829545f09ad3ff5494154ae))
+- enable coverage reporting for SonarCloud ([ae2a9ad](https://github.com/chulit/sonar-agent/commit/ae2a9ad22c84c69122daa77a2e8fd936ea3e5e93))
+- enable coverage reporting for SonarCloud ([1b2a457](https://github.com/chulit/sonar-agent/commit/1b2a45710ea23a9c037ba542e5b9eb721179500f))
 
 ## [1.6.1](https://github.com/chulit/sonar-agent/compare/v1.6.0...v1.6.1) (2026-10-10)
 
-
 ### Bug Fixes
 
-* reduce cognitive complexity and workflow vulnerabilities ([05bb8db](https://github.com/chulit/sonar-agent/commit/05bb8db5be433e1657d3cd38326787c116fa9ad8))
-* reduce cognitive complexity and workflow vulnerabilities ([301e2ac](https://github.com/chulit/sonar-agent/commit/301e2ac36c6d92e56077bb077b4b4b3f58b688f3))
+- reduce cognitive complexity and workflow vulnerabilities ([05bb8db](https://github.com/chulit/sonar-agent/commit/05bb8db5be433e1657d3cd38326787c116fa9ad8))
+- reduce cognitive complexity and workflow vulnerabilities ([301e2ac](https://github.com/chulit/sonar-agent/commit/301e2ac36c6d92e56077bb077b4b4b3f58b688f3))
 
 # [1.6.0](https://github.com/chulit/sonar-agent/compare/v1.5.1...v1.6.0) (2026-10-10)
 
-
 ### Features
 
-* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([278e0f5](https://github.com/chulit/sonar-agent/commit/278e0f593b93f06543feda700f2535c460cdd564))
-* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([980055f](https://github.com/chulit/sonar-agent/commit/980055ffd1ace19ea10854f0e24c7e240e36adea))
-* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([5a78f3b](https://github.com/chulit/sonar-agent/commit/5a78f3b859aec38657dd0654fad3ed9c8380694c))
-* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([2d6fd40](https://github.com/chulit/sonar-agent/commit/2d6fd40ee58e5fead7e8d4ca7637bc3b9e1b41d1))
-* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([39deb85](https://github.com/chulit/sonar-agent/commit/39deb851af99da136f4e1d0b6f512e620c88c020))
-* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([5a8c322](https://github.com/chulit/sonar-agent/commit/5a8c32261a5763fc12fdebb5c278d00c8690fce6))
-* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([a0f615c](https://github.com/chulit/sonar-agent/commit/a0f615c8cfb8399f73d3aa65d5165d2a3a5dd1e5))
+- SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([278e0f5](https://github.com/chulit/sonar-agent/commit/278e0f593b93f06543feda700f2535c460cdd564))
+- SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([980055f](https://github.com/chulit/sonar-agent/commit/980055ffd1ace19ea10854f0e24c7e240e36adea))
+- SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([5a78f3b](https://github.com/chulit/sonar-agent/commit/5a78f3b859aec38657dd0654fad3ed9c8380694c))
+- SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([2d6fd40](https://github.com/chulit/sonar-agent/commit/2d6fd40ee58e5fead7e8d4ca7637bc3b9e1b41d1))
+- SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([39deb85](https://github.com/chulit/sonar-agent/commit/39deb851af99da136f4e1d0b6f512e620c88c020))
+- SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([5a8c322](https://github.com/chulit/sonar-agent/commit/5a8c32261a5763fc12fdebb5c278d00c8690fce6))
+- SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([a0f615c](https://github.com/chulit/sonar-agent/commit/a0f615c8cfb8399f73d3aa65d5165d2a3a5dd1e5))
 
 ## [1.5.1](https://github.com/chulit/sonar-agent/compare/v1.5.0...v1.5.1) (2026-10-09)
 
-
 ### Bug Fixes
 
-* **dispatcher:** harden direct-send paths and honest clipboard fallbacks ([0beb983](https://github.com/chulit/sonar-agent/commit/0beb983b2e7399a847be47b0595bf7a6ce6a6c15))
+- **dispatcher:** harden direct-send paths and honest clipboard fallbacks ([0beb983](https://github.com/chulit/sonar-agent/commit/0beb983b2e7399a847be47b0595bf7a6ce6a6c15))
 
 # [1.5.0](https://github.com/chulit/sonar-agent/compare/v1.4.0...v1.5.0) (2026-10-09)
 
-
 ### Features
 
-* **issues:** add issue lifecycle actions (transitions, assign, comment) ([3a00ef3](https://github.com/chulit/sonar-agent/commit/3a00ef397f39b25579ac829bdd0c0dda1a88da5c))
-* **issues:** add issue lifecycle actions (transitions, assign, comment) ([892f53d](https://github.com/chulit/sonar-agent/commit/892f53de3dac49cc9bd7246973fb813edf7f96f1))
-* **issues:** add issue lifecycle actions (transitions, assign, comment) ([3641ffa](https://github.com/chulit/sonar-agent/commit/3641ffa0c37626b8df095fbd4fb63c96c1d6c184))
-* **issues:** lifecycle actions in sidebar webview ([0eda54f](https://github.com/chulit/sonar-agent/commit/0eda54f01b536ee53be9a66c396fb31b36ef6439))
-* **issues:** lifecycle actions webview (extract menu assets to module) ([a4036a5](https://github.com/chulit/sonar-agent/commit/a4036a505c4c7a6c958f02d64abc3b6023162398))
+- **issues:** add issue lifecycle actions (transitions, assign, comment) ([3a00ef3](https://github.com/chulit/sonar-agent/commit/3a00ef397f39b25579ac829bdd0c0dda1a88da5c))
+- **issues:** add issue lifecycle actions (transitions, assign, comment) ([892f53d](https://github.com/chulit/sonar-agent/commit/892f53de3dac49cc9bd7246973fb813edf7f96f1))
+- **issues:** add issue lifecycle actions (transitions, assign, comment) ([3641ffa](https://github.com/chulit/sonar-agent/commit/3641ffa0c37626b8df095fbd4fb63c96c1d6c184))
+- **issues:** lifecycle actions in sidebar webview ([0eda54f](https://github.com/chulit/sonar-agent/commit/0eda54f01b536ee53be9a66c396fb31b36ef6439))
+- **issues:** lifecycle actions webview (extract menu assets to module) ([a4036a5](https://github.com/chulit/sonar-agent/commit/a4036a505c4c7a6c958f02d64abc3b6023162398))
 
 # [1.4.0](https://github.com/chulit/sonar-agent/compare/v1.3.0...v1.4.0) (2026-10-09)
 
-
 ### Features
 
-* **ui:** add Quality Gate status widget to sidebar ([81c3574](https://github.com/chulit/sonar-agent/commit/81c3574f610105a2fd47d469739b9b210e38b29c))
-* **ui:** quality gate banner in sidebar webview ([435aadb](https://github.com/chulit/sonar-agent/commit/435aadb7ce429d5bc8d45d55d4de58f484115071))
+- **ui:** add Quality Gate status widget to sidebar ([81c3574](https://github.com/chulit/sonar-agent/commit/81c3574f610105a2fd47d469739b9b210e38b29c))
+- **ui:** quality gate banner in sidebar webview ([435aadb](https://github.com/chulit/sonar-agent/commit/435aadb7ce429d5bc8d45d55d4de58f484115071))
 
 # [1.3.0](https://github.com/chulit/sonar-agent/compare/v1.2.0...v1.3.0) (2026-09-22)
 
-
 ### Features
 
-* **ui:** add Select All master checkbox to issue lists ([9475713](https://github.com/chulit/sonar-agent/commit/947571321e5a18b377b3ebc3d02b8a189bb46a53))
+- **ui:** add Select All master checkbox to issue lists ([9475713](https://github.com/chulit/sonar-agent/commit/947571321e5a18b377b3ebc3d02b8a189bb46a53))
 
 # [1.2.0](https://github.com/chulit/sonar-agent/compare/v1.1.0...v1.2.0) (2026-09-21)
 
-
 ### Bug Fixes
 
-* **dispatcher:** direct Antigravity dispatch to extension panel and prevent Copilot hijacking ([6ea2bdb](https://github.com/chulit/sonar-agent/commit/6ea2bdba3b330eac0c88fed7b44f90dacdd39b5d))
-* **dispatcher:** support Codex extension API dispatch and avoid attaching open file ([c1f29cd](https://github.com/chulit/sonar-agent/commit/c1f29cdf666191370fe79a013bc78714c1039a33))
-
+- **dispatcher:** direct Antigravity dispatch to extension panel and prevent Copilot hijacking ([6ea2bdb](https://github.com/chulit/sonar-agent/commit/6ea2bdba3b330eac0c88fed7b44f90dacdd39b5d))
+- **dispatcher:** support Codex extension API dispatch and avoid attaching open file ([c1f29cd](https://github.com/chulit/sonar-agent/commit/c1f29cdf666191370fe79a013bc78714c1039a33))
 
 ### Features
 
-* **agent-dispatch:** kirim prompt dan konteks ke claude code ([8cf66ed](https://github.com/chulit/sonar-agent/commit/8cf66ede65d4a6862abef684acbeaac94225d2ac))
-* **dispatcher:** integrate google.google-antigravity extension discovery and dispatch ([30582db](https://github.com/chulit/sonar-agent/commit/30582dba3d51456d788d9d8d1492987f6063a398))
+- **agent-dispatch:** kirim prompt dan konteks ke claude code ([8cf66ed](https://github.com/chulit/sonar-agent/commit/8cf66ede65d4a6862abef684acbeaac94225d2ac))
+- **dispatcher:** integrate google.google-antigravity extension discovery and dispatch ([30582db](https://github.com/chulit/sonar-agent/commit/30582dba3d51456d788d9d8d1492987f6063a398))
 
 # [1.1.0](https://github.com/chulit/sonar-agent/compare/v1.0.0...v1.1.0) (2026-09-20)
 

@@ -293,24 +293,26 @@ describe('ConnectionProfileWizard', () => {
   });
 
   describe('SonarQube Cloud organization', () => {
+    let clientFactory: ReturnType<typeof vi.fn>;
+    let customWizard: ConnectionProfileWizard;
+
     beforeEach(() => {
       mockProjectDetector.setOrganization = vi.fn(async (org: string) => {
         mockConfig.organization = org;
       });
       mockConfig.organization = undefined;
-    });
 
-    it('should prompt for organization on sonarcloud.io and pass it to the client factory', async () => {
-      const clientFactory = vi.fn().mockReturnValue({
+      clientFactory = vi.fn().mockReturnValue({
         verifyConnection: vi.fn().mockResolvedValue({ ok: true }),
       });
-
-      const customWizard = new ConnectionProfileWizard({
+      customWizard = new ConnectionProfileWizard({
         projectDetector: mockProjectDetector,
         sonarClientFactory: clientFactory,
         onConfigChanged: onConfigChangedMock,
       });
+    });
 
+    it('should prompt for organization on sonarcloud.io and pass it to the client factory', async () => {
       vi.spyOn(vscode.window, 'showInputBox')
         .mockResolvedValueOnce('https://sonarcloud.io') // Server URL
         .mockResolvedValueOnce('sqp_cloud_token') // User Token
@@ -329,15 +331,6 @@ describe('ConnectionProfileWizard', () => {
 
     it('should keep the existing organization when the input is left empty', async () => {
       mockConfig.organization = 'existing-org';
-      const clientFactory = vi.fn().mockReturnValue({
-        verifyConnection: vi.fn().mockResolvedValue({ ok: true }),
-      });
-
-      const customWizard = new ConnectionProfileWizard({
-        projectDetector: mockProjectDetector,
-        sonarClientFactory: clientFactory,
-        onConfigChanged: onConfigChangedMock,
-      });
 
       vi.spyOn(vscode.window, 'showInputBox')
         .mockResolvedValueOnce('https://sonarcloud.io')
@@ -355,26 +348,16 @@ describe('ConnectionProfileWizard', () => {
     });
 
     it('should not prompt for organization on self-hosted SonarQube', async () => {
-      const clientFactory = vi.fn().mockReturnValue({
-        verifyConnection: vi.fn().mockResolvedValue({ ok: true }),
-      });
-
-      const customWizard = new ConnectionProfileWizard({
-        projectDetector: mockProjectDetector,
-        sonarClientFactory: clientFactory,
-        onConfigChanged: onConfigChangedMock,
-      });
-
       const inputSpy = vi
         .spyOn(vscode.window, 'showInputBox')
-        .mockResolvedValueOnce('https://sonar.company.com')
+        .mockResolvedValueOnce('https://sonarcompany.com')
         .mockResolvedValueOnce('sqp_new_secret_token');
 
       await customWizard.promptUpdateCredentials();
 
       expect(inputSpy).toHaveBeenCalledTimes(2);
       expect(clientFactory).toHaveBeenCalledWith({
-        serverUrl: 'https://sonar.company.com',
+        serverUrl: 'https://sonarcompany.com',
         token: 'sqp_new_secret_token',
         organization: undefined,
       });
@@ -382,16 +365,6 @@ describe('ConnectionProfileWizard', () => {
     });
 
     it('should include organization when creating a profile on sonarcloud.io', async () => {
-      const clientFactory = vi.fn().mockReturnValue({
-        verifyConnection: vi.fn().mockResolvedValue({ ok: true }),
-      });
-
-      const customWizard = new ConnectionProfileWizard({
-        projectDetector: mockProjectDetector,
-        sonarClientFactory: clientFactory,
-        onConfigChanged: onConfigChangedMock,
-      });
-
       vi.spyOn(vscode.window, 'showInputBox')
         .mockResolvedValueOnce('cloud-profile') // name
         .mockResolvedValueOnce('https://sonarcloud.io') // server URL
@@ -418,13 +391,7 @@ describe('ConnectionProfileWizard', () => {
     it('should pass organization to fetchProjects for project discovery', async () => {
       mockConfig.organization = 'my-org';
       const mockFetchProjects = vi.fn().mockResolvedValue([]);
-      const clientFactory = vi.fn().mockReturnValue({ fetchProjects: mockFetchProjects });
-
-      const customWizard = new ConnectionProfileWizard({
-        projectDetector: mockProjectDetector,
-        sonarClientFactory: clientFactory,
-        onConfigChanged: onConfigChangedMock,
-      });
+      clientFactory.mockReturnValue({ fetchProjects: mockFetchProjects });
 
       vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(async (items: any) => items[0]);
       vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('my-org_my-app');
