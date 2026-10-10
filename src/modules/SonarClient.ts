@@ -390,9 +390,7 @@ export class SonarClient {
           'new_security_rating',
           'new_code_smells',
           'new_maintainability_rating',
-          'new_sqale_rating',
           'new_accepted_issues',
-          'new_wont_fix_issues',
           'new_coverage',
           'new_lines_to_cover',
           'new_duplicated_lines_density',
@@ -420,7 +418,7 @@ export class SonarClient {
     const url = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
     let response = await this.authenticatedFetch(url);
 
-    if (!response.ok && response.status === 400) {
+    if (!response.ok && (response.status === 400 || response.status === 404)) {
       try {
         const errorData = (await response.clone().json()) as any;
         const msg = errorData?.errors?.[0]?.msg || '';
@@ -448,13 +446,18 @@ export class SonarClient {
 
     const data = (await response.json()) as {
       component?: {
-        measures?: { metric: string; value?: string; period?: { value?: string } }[];
+        measures?: {
+          metric: string;
+          value?: string;
+          period?: { value?: string };
+          periods?: { value?: string; index?: number }[];
+        }[];
       };
     };
 
     const measureMap: Record<string, string> = {};
     for (const m of data.component?.measures || []) {
-      const val = m.value !== undefined ? m.value : m.period?.value;
+      const val = m.value !== undefined ? m.value : (m.period?.value ?? m.periods?.[0]?.value);
       if (val !== undefined) {
         measureMap[m.metric] = val;
       }

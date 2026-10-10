@@ -872,6 +872,13 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
     await send({ command: 'createProfile' });
     expect(createProfileSpy).toHaveBeenCalled();
 
+    // Test configure command
+    const configureSpy = vi
+      .spyOn(provider, 'promptConfigureConnection')
+      .mockResolvedValue(undefined as any);
+    await send({ command: 'configure' });
+    expect(configureSpy).toHaveBeenCalled();
+
     // Test openFile command
     const openFileSpy = vi
       .spyOn((provider as any).fileNavigator, 'openFileAtLine')

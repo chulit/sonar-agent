@@ -277,6 +277,39 @@ describe('SonarClient - Connection Verification', () => {
     expect(overview.hasNewCode).toBe(true);
   });
 
+  it('should support periods array response format from SonarCloud', async () => {
+    const mockMeasuresResponse = {
+      component: {
+        key: 'test-project',
+        measures: [
+          { metric: 'new_bugs', periods: [{ index: 1, value: '3' }] },
+          { metric: 'new_coverage', periods: [{ index: 1, value: '92.5' }] },
+          { metric: 'new_lines_to_cover', periods: [{ index: 1, value: '80' }] },
+          { metric: 'new_reliability_rating', periods: [{ index: 1, value: '2.0' }] },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockMeasuresResponse,
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'https://sonarcloud.io',
+      token: 'valid-token',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const overview = await client.getOverview('test-project', 'new');
+    expect(overview.reliability.count).toBe(3);
+    expect(overview.reliability.rating).toBe('B');
+    expect(overview.coverage.percentage).toBe(92.5);
+    expect(overview.coverage.linesToCover).toBe(80);
+    expect(overview.hasNewCode).toBe(true);
+  });
+
   it('should fetch issues and extract clean relative file paths', async () => {
     const mockIssuesResponse = {
       issues: [
@@ -998,6 +1031,51 @@ describe('SonarClient - Edge Cases, Fallbacks & Error Branches', () => {
     });
     const overview = await client.getOverview('my-proj');
     expect(overview).toBeDefined();
+    expect(callCount).toBe(2);
+  });
+
+  it('falls back when metric keys are not found on SonarCloud (HTTP 404)', async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          clone: () => ({
+            json: async () => ({
+              errors: [
+                {
+                  msg: 'The following metric keys are not found: new_wont_fix_issues, new_sqale_rating',
+                },
+              ],
+            }),
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          component: {
+            measures: [
+              { metric: 'new_bugs', periods: [{ index: 1, value: '0' }] },
+              { metric: 'new_coverage', periods: [{ index: 1, value: '92.0' }] },
+            ],
+          },
+        }),
+      };
+    });
+    const client = new SonarClient({
+      serverUrl: 'https://sonarcloud.io',
+      token: 'tok',
+      fetchFn: fetchMock as any,
+    });
+    const overview = await client.getOverview('my-proj', 'new');
+    expect(overview).toBeDefined();
+    expect(overview.period).toBe('new');
+    expect(overview.coverage.percentage).toBe(92.0);
     expect(callCount).toBe(2);
   });
 

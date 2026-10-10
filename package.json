@@ -117,23 +117,6 @@
           "when": "editorTextFocus",
           "group": "navigation"
         }
-      ],
-      "view/title": [
-        {
-          "command": "sonarAgent.refresh",
-          "when": "view == sonarAgent.overviewView",
-          "group": "navigation@1"
-        },
-        {
-          "command": "sonarAgent.selectProject",
-          "when": "view == sonarAgent.overviewView",
-          "group": "navigation@2"
-        },
-        {
-          "command": "sonarAgent.configure",
-          "when": "view == sonarAgent.overviewView",
-          "group": "navigation@3"
-        }
       ]
     },
     "configuration": {
