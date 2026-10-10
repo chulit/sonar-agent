@@ -592,57 +592,77 @@ export class AgentDispatcher {
   }
 
   private async dispatchCodex(prompt: string): Promise<{ ok: boolean; message: string }> {
-    const candidateExtensionIds = ['openai.chatgpt', 'openai.openai-chatgpt', 'codex.codex'];
-    let codexExt: vscode.Extension<unknown> | undefined;
+    const codexExt = this.findCodexExtension();
+    if (codexExt) {
+      await this.activateExtension(codexExt);
+      const dispatched = await this.tryCodexApiDispatch(codexExt, prompt);
+      if (dispatched) {
+        return dispatched;
+      }
+    }
 
+    await this.focusCodexChat();
+
+    // Tier 3: Clipboard fallback
+    vscode.window.showInformationMessage(
+      'Fix Prompt copied to clipboard for Codex Agent! Press Cmd+V / Ctrl+V to paste.',
+    );
+    return { ok: true, message: 'Prompt ready in clipboard for Codex Agent.' };
+  }
+
+  private findCodexExtension(): vscode.Extension<unknown> | undefined {
+    const candidateExtensionIds = ['openai.chatgpt', 'openai.openai-chatgpt', 'codex.codex'];
     for (const id of candidateExtensionIds) {
       const ext = this.getExtensionFn(id);
       if (ext) {
-        codexExt = ext;
-        break;
+        return ext;
       }
     }
+    return undefined;
+  }
 
-    if (codexExt) {
-      if (!codexExt.isActive) {
-        try {
-          await codexExt.activate();
-        } catch {
-          // Continue if activation fails
-        }
-      }
-
-      // Tier 1: Check exported API (sendMessage or sendPrompt)
-      const api = codexExt.exports as
-        | {
-            sendMessage?: (options: { text: string; prompt?: string }) => unknown;
-            sendPrompt?: (prompt: string) => unknown;
-          }
-        | undefined;
-
-      if (api && typeof api.sendMessage === 'function') {
-        try {
-          await api.sendMessage({
-            text: prompt,
-            prompt,
-          });
-          vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
-          return { ok: true, message: 'Dispatched to Codex via API.' };
-        } catch {
-          // Fall back if API invocation fails
-        }
-      } else if (api && typeof api.sendPrompt === 'function') {
-        try {
-          await api.sendPrompt(prompt);
-          vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
-          return { ok: true, message: 'Dispatched to Codex via API.' };
-        } catch {
-          // Fall back if API invocation fails
-        }
+  private async activateExtension(ext: vscode.Extension<unknown>): Promise<void> {
+    if (!ext.isActive) {
+      try {
+        await ext.activate();
+      } catch {
+        // Continue if activation fails
       }
     }
+  }
 
-    // Tier 2: Open and focus Codex sidebar & input
+  private async tryCodexApiDispatch(
+    codexExt: vscode.Extension<unknown>,
+    prompt: string,
+  ): Promise<{ ok: boolean; message: string } | undefined> {
+    const api = codexExt.exports as
+      | {
+          sendMessage?: (options: { text: string; prompt?: string }) => unknown;
+          sendPrompt?: (prompt: string) => unknown;
+        }
+      | undefined;
+
+    if (api && typeof api.sendMessage === 'function') {
+      try {
+        await api.sendMessage({ text: prompt, prompt });
+        vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
+        return { ok: true, message: 'Dispatched to Codex via API.' };
+      } catch {
+        // Fall back if API invocation fails
+      }
+    } else if (api && typeof api.sendPrompt === 'function') {
+      try {
+        await api.sendPrompt(prompt);
+        vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
+        return { ok: true, message: 'Dispatched to Codex via API.' };
+      } catch {
+        // Fall back if API invocation fails
+      }
+    }
+    return undefined;
+  }
+
+  private async focusCodexChat(): Promise<void> {
     const codexCommands = ['chatgpt.openSidebar', 'chatgpt.focus', 'codex.chat.focus'];
     for (const cmd of codexCommands) {
       try {
@@ -652,12 +672,6 @@ export class AgentDispatcher {
         // continue trying next command
       }
     }
-
-    // Tier 3: Clipboard fallback
-    vscode.window.showInformationMessage(
-      'Fix Prompt copied to clipboard for Codex Agent! Press Cmd+V / Ctrl+V to paste.',
-    );
-    return { ok: true, message: 'Prompt ready in clipboard for Codex Agent.' };
   }
 
   /**
