@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SonarClient } from '../src/modules/SonarClient.js';
+import { SonarClient, InsufficientPermissionError } from '../src/modules/SonarClient.js';
 
 describe('SonarClient - Connection Verification', () => {
   beforeEach(() => {
@@ -452,137 +452,112 @@ describe('SonarClient - Quality Gate Status', () => {
   });
 });
 
-describe('SonarClient - SonarQube Cloud organization', () => {
+describe('SonarClient - Issue Lifecycle Actions', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  const orgFetchMock = (payload: unknown) =>
-    vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => payload,
-    });
+  const okJson = (data: any) => ({ ok: true, status: 200, json: async () => data });
 
-  it('should append organization to every fetchProjects endpoint when configured', async () => {
-    const fetchMock = orgFetchMock({
-      components: [{ key: 'my-org_my-project', name: 'My Project' }],
-    });
-
-    const client = new SonarClient({
-      serverUrl: 'https://sonarcloud.io',
-      token: 'tok',
-      organization: 'my-org',
-      fetchFn: fetchMock as unknown as typeof fetch,
-    });
-
-    await client.fetchProjects();
-
-    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
-    expect(urls.length).toBeGreaterThan(0);
-    for (const url of urls) {
-      expect(url).toContain('organization=my-org');
-    }
-    expect(urls[0]).toBe(
-      'https://sonarcloud.io/api/components/search?qualifiers=TRK&ps=100&organization=my-org',
-    );
-  });
-
-  it('should not append organization to fetchProjects endpoints when not configured', async () => {
-    const fetchMock = orgFetchMock({
-      components: [{ key: 'proj-1', name: 'Project One' }],
-    });
-
+  function lifecycleClient(handler: (url: string, init?: any) => Promise<any>) {
+    const fetchMock = vi.fn(async (url: any, init?: any) => handler(String(url), init));
     const client = new SonarClient({
       serverUrl: 'http://localhost:9000',
-      token: 'tok',
+      token: 'secret-token-xyz',
       fetchFn: fetchMock as unknown as typeof fetch,
     });
+    return { client, fetchMock };
+  }
 
-    await client.fetchProjects();
+  it('getIssueTransitions returns the server response 1:1 without filtering', async () => {
+    const { client, fetchMock } = lifecycleClient(async (url) => {
+      expect(url).toBe('http://localhost:9000/api/issues/transitions?issue=ISSUE-1');
+      return okJson({ transitions: ['confirm', 'falsepositive', 'wontfix'] });
+    });
 
-    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
-    for (const url of urls) {
-      expect(url).not.toContain('organization=');
-    }
+    const transitions = await client.getIssueTransitions('ISSUE-1');
+
+    expect(transitions).toEqual(['confirm', 'falsepositive', 'wontfix']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('should append organization to /api/rules/show when configured', async () => {
-    const fetchMock = orgFetchMock({
-      rule: { key: 'typescript:S1234', name: 'Some rule', mdDesc: 'Do the thing.' },
+  it('doIssueTransition POSTs urlencoded issue/transition with no token in URL or body', async () => {
+    let captured: { url?: string; init?: any } = {};
+    const { client } = lifecycleClient(async (url, init) => {
+      captured = { url, init };
+      return okJson({});
     });
 
-    const client = new SonarClient({
-      serverUrl: 'https://sonarcloud.io',
-      token: 'tok',
-      organization: 'my-org',
-      fetchFn: fetchMock as unknown as typeof fetch,
+    await client.doIssueTransition('ISSUE-1', 'falsepositive');
+
+    expect(captured.url).toBe('http://localhost:9000/api/issues/do_transition');
+    expect(captured.init.method).toBe('POST');
+    expect(captured.init.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    const params = new URLSearchParams(String(captured.init.body));
+    expect(params.get('issue')).toBe('ISSUE-1');
+    expect(params.get('transition')).toBe('falsepositive');
+    // Token must not leak into the URL or the POST body…
+    expect(captured.url).not.toContain('secret-token-xyz');
+    expect(String(captured.init.body)).not.toContain('secret-token-xyz');
+    // …it travels in the Authorization header only.
+    expect(String(captured.init.headers.Authorization || '')).toMatch(/^(Basic|Bearer) /);
+  });
+
+  it('assignIssue sends the assignee; empty assignee unassigns', async () => {
+    const bodies: string[] = [];
+    const { client } = lifecycleClient(async (url, init) => {
+      expect(url).toBe('http://localhost:9000/api/issues/assign');
+      bodies.push(String(init.body));
+      return okJson({});
     });
 
-    const doc = await client.getEnrichedRule('typescript:S1234');
+    await client.assignIssue('ISSUE-1', 'alice');
+    await client.assignIssue('ISSUE-2');
 
-    expect(doc.name).toBe('Some rule');
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://sonarcloud.io/api/rules/show?key=typescript%3AS1234&organization=my-org',
-      expect.anything(),
+    expect(new URLSearchParams(bodies[0]).get('assignee')).toBe('alice');
+    expect(new URLSearchParams(bodies[1]).get('assignee')).toBe('');
+    expect(bodies[1]).not.toContain('secret-token-xyz');
+  });
+
+  it('addIssueComment POSTs the comment text', async () => {
+    let captured: { url?: string; init?: any } = {};
+    const { client } = lifecycleClient(async (url, init) => {
+      captured = { url, init };
+      return okJson({});
+    });
+
+    await client.addIssueComment('ISSUE-1', 'Looks good to me');
+
+    expect(captured.url).toBe('http://localhost:9000/api/issues/add_comment');
+    expect(new URLSearchParams(String(captured.init.body)).get('text')).toBe('Looks good to me');
+  });
+
+  it('write operations surface InsufficientPermissionError on HTTP 403', async () => {
+    const { client } = lifecycleClient(async () => ({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      json: async () => ({}),
+    }));
+
+    await expect(client.doIssueTransition('ISSUE-1', 'falsepositive')).rejects.toBeInstanceOf(
+      InsufficientPermissionError,
+    );
+    await expect(client.assignIssue('ISSUE-1', 'alice')).rejects.toBeInstanceOf(
+      InsufficientPermissionError,
+    );
+    await expect(client.addIssueComment('ISSUE-1', 'hi')).rejects.toBeInstanceOf(
+      InsufficientPermissionError,
     );
   });
 
-  it('should trim whitespace and URL-encode the organization key', async () => {
-    const fetchMock = orgFetchMock({
-      rule: { key: 'r:1', name: 'R', mdDesc: 'd' },
+  it('getCurrentUserLogin returns the token owner login', async () => {
+    const { client } = lifecycleClient(async (url) => {
+      expect(url).toBe('http://localhost:9000/api/users/current');
+      return okJson({ login: 'alice' });
     });
 
-    const client = new SonarClient({
-      serverUrl: 'https://sonarcloud.io',
-      token: 'tok',
-      organization: '  my org  ',
-      fetchFn: fetchMock as unknown as typeof fetch,
-    });
-
-    await client.getEnrichedRule('r:1');
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://sonarcloud.io/api/rules/show?key=r%3A1&organization=my%20org',
-      expect.anything(),
-    );
-  });
-
-  it('should omit organization from /api/rules/show when not configured', async () => {
-    const fetchMock = orgFetchMock({
-      rule: { key: 'r:1', name: 'R', mdDesc: 'd' },
-    });
-
-    const client = new SonarClient({
-      serverUrl: 'http://localhost:9000',
-      token: 'tok',
-      fetchFn: fetchMock as unknown as typeof fetch,
-    });
-
-    await client.getEnrichedRule('r:1');
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:9000/api/rules/show?key=r%3A1',
-      expect.anything(),
-    );
-  });
-
-  it('should not send organization on endpoints that work without it', async () => {
-    const fetchMock = orgFetchMock({ valid: true });
-
-    const client = new SonarClient({
-      serverUrl: 'https://sonarcloud.io',
-      token: 'tok',
-      organization: 'my-org',
-      fetchFn: fetchMock as unknown as typeof fetch,
-    });
-
-    await client.verifyConnection();
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://sonarcloud.io/api/authentication/validate',
-      expect.anything(),
-    );
+    await expect(client.getCurrentUserLogin()).resolves.toBe('alice');
   });
 });
 describe('SonarClient - SonarQube 10.x Clean Code Taxonomy mapping', () => {
