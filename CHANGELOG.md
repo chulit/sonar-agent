@@ -1,3 +1,11 @@
+## [1.6.1](https://github.com/chulit/sonar-agent/compare/v1.6.0...v1.6.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* reduce cognitive complexity and workflow vulnerabilities ([05bb8db](https://github.com/chulit/sonar-agent/commit/05bb8db5be433e1657d3cd38326787c116fa9ad8))
+* reduce cognitive complexity and workflow vulnerabilities ([301e2ac](https://github.com/chulit/sonar-agent/commit/301e2ac36c6d92e56077bb077b4b4b3f58b688f3))
+
 # [1.6.0](https://github.com/chulit/sonar-agent/compare/v1.5.1...v1.6.0) (2026-10-10)
 
 
