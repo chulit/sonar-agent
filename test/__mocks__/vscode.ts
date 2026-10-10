@@ -1,3 +1,5 @@
+import { vi } from 'vitest';
+
 export const workspace = {
   workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
   findFiles: async () => [],
@@ -48,13 +50,37 @@ export enum ProgressLocation {
   Notification = 15,
 }
 
+export class MarkdownString {
+  public value: string;
+  public isTrusted?: boolean;
+  public supportThemeIcons?: boolean;
+  constructor(value = '') {
+    this.value = value;
+  }
+  appendMarkdown(value: string) {
+    this.value += value;
+    return this;
+  }
+  appendText(value: string) {
+    this.value += value;
+    return this;
+  }
+}
+
+export class ThemeColor {
+  constructor(public readonly id: string) {}
+}
+
 export const window = {
   createStatusBarItem: (_alignment?: number, _priority?: number) => ({
     text: '',
-    tooltip: '',
-    show: () => {},
-    hide: () => {},
-    dispose: () => {},
+    tooltip: '' as any,
+    command: '',
+    color: undefined as any,
+    backgroundColor: undefined as any,
+    show: vi.fn(),
+    hide: vi.fn(),
+    dispose: vi.fn(),
   }),
   showTextDocument: async () => ({
     selection: {},

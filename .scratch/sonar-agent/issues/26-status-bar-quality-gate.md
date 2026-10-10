@@ -4,13 +4,13 @@
 
 **Blocked by:** 25: Try Demo Mode Onboarding
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Status Bar item displays passing state (`$(pass) Sonar: Passed`) when Quality Gate is OK.
-- [ ] Status Bar item displays failing state (`$(error) Sonar: Failed`) when Quality Gate has failed conditions.
-- [ ] Status Bar item displays demo state (`$(beaker) Sonar: Demo (Failed)`) when Demo Mode is active.
-- [ ] Hovering over the Status Bar item displays a rich Markdown tooltip with project key and metric breakdown.
-- [ ] Clicking the Status Bar item focuses the Sonar Overview sidebar view.
-- [ ] Status Bar item updates automatically on refresh, profile switch, and demo mode toggles, and clears when disconnected.
-- [ ] Unit tests verify status mapping, tooltip generation, command triggering, and disposal lifecycle.
-- [ ] All test suites and typechecks pass with zero regressions.
+- [x] Status Bar item displays passing state (`$(pass) Sonar: Passed`) when Quality Gate is OK.
+- [x] Status Bar item displays failing state (`$(error) Sonar: Failed`) when Quality Gate has failed conditions.
+- [x] Status Bar item displays demo state (`$(beaker) Sonar: Demo (Failed)`) when Demo Mode is active.
+- [x] Hovering over the Status Bar item displays a rich Markdown tooltip with project key and metric breakdown.
+- [x] Clicking the Status Bar item focuses the Sonar Overview sidebar view.
+- [x] Status Bar item updates automatically on refresh, profile switch, and demo mode toggles, and clears when disconnected.
+- [x] Unit tests verify status mapping, tooltip generation, command triggering, and disposal lifecycle.
+- [x] All test suites and typechecks pass with zero regressions.

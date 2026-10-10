@@ -14,6 +14,7 @@ import { ConnectionProfileWizard } from './ConnectionProfileWizard.js';
 import { SonarLocalScanner } from './SonarLocalScanner.js';
 import { Logger } from './Logger.js';
 import { DemoData } from './DemoData.js';
+import { SonarStatusBar } from './SonarStatusBar.js';
 import {
   ISSUE_LIFECYCLE_CSS,
   ISSUE_LIFECYCLE_MENU_SCRIPT,
@@ -23,7 +24,7 @@ import {
 
 export type CurrentCodeTab = 'overallCode' | 'currentCode';
 
-export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
+export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'sonarAgent.overviewView';
   /**
    * Transitions that resolve an issue and change shared server state.
@@ -38,6 +39,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
   private readonly connectionWizard: ConnectionProfileWizard;
   private readonly localScanner: SonarLocalScanner;
+  private readonly statusBar: SonarStatusBar;
   private readonly workspaceRoot?: string;
   private _currentCodeEnabled = true;
   private _activeTab: CurrentCodeTab = 'overallCode';
@@ -59,9 +61,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     connectionWizard?: ConnectionProfileWizard,
     localScanner?: SonarLocalScanner,
     workspaceRoot?: string,
+    statusBar?: SonarStatusBar,
   ) {
     this.workspaceRoot = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     this.fileNavigator = fileNavigator ?? new FileNavigator();
+    this.statusBar = statusBar ?? new SonarStatusBar();
     this.localScanner =
       localScanner ?? new SonarLocalScanner({ workspaceRoot: this.workspaceRoot });
     this.agentDispatcher =
@@ -290,11 +294,27 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     await this._view?.webview.postMessage(demoState);
     await this._view?.webview.postMessage({ type: 'qualityGate', status: demoGate });
     await this._view?.webview.postMessage({ type: 'loading', loading: false });
+
+    this.statusBar.update({
+      projectKey: 'demo-sample-project',
+      overview: demoOverview,
+      qualityGate: demoGate,
+      isDemoMode: true,
+    });
   }
 
   public async disableDemoMode(): Promise<void> {
     this._isDemoMode = false;
+    this.statusBar.clear();
     await this._syncState();
+  }
+
+  public getStatusBar(): SonarStatusBar {
+    return this.statusBar;
+  }
+
+  public dispose(): void {
+    this.statusBar.dispose();
   }
 
   public isCurrentCodeEnabled(): boolean {
@@ -789,6 +809,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       availableAgents,
     };
     this._lastStateMessage = noProfilesState;
+    this.statusBar.clear();
     await this._view?.webview.postMessage(noProfilesState);
   }
 
@@ -809,6 +830,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       availableAgents,
     };
     this._lastStateMessage = onboardingState;
+    this.statusBar.clear();
     const delivered = await this._view?.webview.postMessage(onboardingState);
     Logger.info(`[Host] postMessage(onboarding) delivered=${delivered}`);
   }
@@ -959,6 +981,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     await this._view?.webview.postMessage({ type: 'loading', loading: false });
 
+    this.statusBar.update({
+      projectKey: resolvedProjectKey,
+      overview,
+      qualityGate,
+      isDemoMode: false,
+    });
+
     if (!this._webviewReady && this._view) {
       setTimeout(async () => {
         if (!this._webviewReady && this._view && this._lastStateMessage) {
@@ -1106,6 +1135,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     const isConnected = Boolean(config.serverUrl && token);
 
     if (!isConnected) {
+      this.statusBar.clear();
       this._view?.webview.postMessage({
         type: 'disconnected',
         message: 'Connection credentials cleared.',
@@ -1122,6 +1152,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     if (confirm === 'Disconnect') {
       await this.projectDetector.deleteToken();
+      this.statusBar.clear();
       Logger.info('SonarQube credentials removed and disconnected.');
       this._view?.webview.postMessage({
         type: 'disconnected',

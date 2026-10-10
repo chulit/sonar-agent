@@ -147,10 +147,14 @@ describe('SonarOverviewViewProvider - Demo Mode', () => {
     await messageCallback?.({ command: 'enableDemoMode' });
     expect(provider.isDemoMode).toBe(true);
 
+    const statusBarItem = (provider.getStatusBar() as any).statusBarItem;
+    expect(statusBarItem.text).toBe('$(beaker) Sonar: Demo (Failed)');
+
     postedMessages = [];
     await messageCallback?.({ command: 'disableDemoMode' });
 
     expect(provider.isDemoMode).toBe(false);
+    expect(statusBarItem.hide).toHaveBeenCalled();
     const stateMsg = postedMessages.find((m) => m.type === 'state');
     expect(stateMsg).toBeDefined();
     expect(stateMsg.state).not.toBe('connected');
@@ -167,5 +171,8 @@ describe('SonarOverviewViewProvider - Demo Mode', () => {
     expect(provider.isDemoMode).toBe(true);
     const stateMsg = postedMessages.find((m) => m.type === 'state' && m.isDemoMode);
     expect(stateMsg).toBeDefined();
+
+    const statusBarItem = (provider.getStatusBar() as any).statusBarItem;
+    expect(statusBarItem.text).toBe('$(beaker) Sonar: Demo (Failed)');
   });
 });

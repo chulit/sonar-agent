@@ -29,6 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(
+    overviewProvider,
     vscode.window.registerWebviewViewProvider(SonarOverviewViewProvider.viewType, overviewProvider),
     vscode.commands.registerCommand('sonarAgent.refresh', async () => {
       await overviewProvider.refresh();
