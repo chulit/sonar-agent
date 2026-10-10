@@ -1,3 +1,17 @@
+# [1.7.0](https://github.com/chulit/sonar-agent/compare/v1.6.1...v1.7.0) (2026-10-10)
+
+
+### Bug Fixes
+
+* revert coverage dependency (breaks CI) ([70b274b](https://github.com/chulit/sonar-agent/commit/70b274bc2b01c61404b6e870c2cb5bc63c1a43f9))
+
+
+### Features
+
+* enable coverage reporting for SonarCloud ([d374262](https://github.com/chulit/sonar-agent/commit/d37426224f940d7db829545f09ad3ff5494154ae))
+* enable coverage reporting for SonarCloud ([ae2a9ad](https://github.com/chulit/sonar-agent/commit/ae2a9ad22c84c69122daa77a2e8fd936ea3e5e93))
+* enable coverage reporting for SonarCloud ([1b2a457](https://github.com/chulit/sonar-agent/commit/1b2a45710ea23a9c037ba542e5b9eb721179500f))
+
 ## [1.6.1](https://github.com/chulit/sonar-agent/compare/v1.6.0...v1.6.1) (2026-10-10)
 
 
