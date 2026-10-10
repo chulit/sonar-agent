@@ -6,5 +6,9 @@ export default defineConfig({
     alias: {
       vscode: path.resolve(__dirname, 'test/__mocks__/vscode.ts'),
     },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov', 'clover'],
+    },
   },
 });
