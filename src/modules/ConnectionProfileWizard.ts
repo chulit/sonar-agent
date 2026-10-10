@@ -298,96 +298,111 @@ export class ConnectionProfileWizard {
     let currentToken = initialToken || '';
 
     while (true) {
-      const serverUrl = await this.showInputBoxFn({
-        title: 'SonarQube Connection (1/2)',
-        prompt: 'Enter the SonarQube Server URL',
-        placeHolder: 'http://localhost:9000 or https://sonar.example.com',
-        value: currentUrl,
-        ignoreFocusOut: true,
-        validateInput: (value) => this.validateServerUrlInput(value),
-      });
-
+      const serverUrl = await this.promptServerUrl(currentUrl);
       if (serverUrl === undefined) {
         return;
       }
+      currentUrl = serverUrl;
 
-      currentUrl = serverUrl.trim();
-
-      const token = await this.showInputBoxFn({
-        title: 'SonarQube Connection (2/2)',
-        prompt: 'Enter your SonarQube User Token',
-        placeHolder: 'sqp_...',
-        value: currentToken,
-        password: true,
-        ignoreFocusOut: true,
-        validateInput: (value) => {
-          if (!value.trim()) {
-            return 'User Token is required';
-          }
-          return null;
-        },
-      });
-
+      const token = await this.promptToken(currentToken);
       if (token === undefined) {
         return;
       }
+      currentToken = token;
 
-      currentToken = token.trim();
+      const organization = await this.promptOrganizationIfNeeded(currentUrl);
 
-      let organization = (await this.projectDetector.getConfig()).organization;
-      if (isSonarCloudUrl(currentUrl)) {
-        const entered = await this.promptOrganizationKey(organization);
-        if (entered !== undefined) {
-          organization = entered;
-        }
+      const verified = await this.verifyAndSaveCredentials(currentUrl, currentToken, organization);
+      if (verified === 'retry') {
+        continue;
       }
-
-      let verificationResult: { ok: boolean; message?: string } = { ok: false };
-      await this.withProgressFn(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Verifying SonarQube connection...',
-          cancellable: false,
-        },
-        async () => {
-          const client = this.sonarClientFactory({
-            serverUrl: currentUrl,
-            token: currentToken,
-            organization,
-          });
-          verificationResult = await client.verifyConnection();
-        },
-      );
-
-      if (!verificationResult.ok) {
-        const action = await this.showErrorMessageFn(
-          `SonarQube connection verification failed: ${verificationResult.message || 'Unknown error'}`,
-          'Retry',
-          'Cancel',
-        );
-
-        if (action === 'Retry') {
-          continue;
-        }
-        return;
-      }
-
-      await this.projectDetector.setServerUrl(currentUrl);
-      await this.projectDetector.setToken(currentToken);
-      if (organization !== undefined) {
-        await this.projectDetector.setOrganization(organization);
-      }
-
-      this.showInformationMessageFn('SonarQube connection successfully verified and saved!');
-
-      const updatedConfig = await this.projectDetector.getConfig();
-      if (!updatedConfig.projectKey) {
-        await this.promptProjectSelection();
-      }
-
-      await this.notifyConfigChanged();
       return;
     }
+  }
+
+  private async promptServerUrl(currentUrl: string): Promise<string | undefined> {
+    const serverUrl = await this.showInputBoxFn({
+      title: 'SonarQube Connection (1/2)',
+      prompt: 'Enter the SonarQube Server URL',
+      placeHolder: 'http://localhost:9000 or https://sonar.example.com',
+      value: currentUrl,
+      ignoreFocusOut: true,
+      validateInput: (value) => this.validateServerUrlInput(value),
+    });
+    return serverUrl === undefined ? undefined : serverUrl.trim();
+  }
+
+  private async promptToken(currentToken: string): Promise<string | undefined> {
+    const token = await this.showInputBoxFn({
+      title: 'SonarQube Connection (2/2)',
+      prompt: 'Enter your SonarQube User Token',
+      placeHolder: 'sqp_...',
+      value: currentToken,
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (value) => {
+        if (!value.trim()) {
+          return 'User Token is required';
+        }
+        return null;
+      },
+    });
+    return token === undefined ? undefined : token.trim();
+  }
+
+  private async promptOrganizationIfNeeded(currentUrl: string): Promise<string | undefined> {
+    let organization = (await this.projectDetector.getConfig()).organization;
+    if (isSonarCloudUrl(currentUrl)) {
+      const entered = await this.promptOrganizationKey(organization);
+      if (entered !== undefined) {
+        organization = entered;
+      }
+    }
+    return organization;
+  }
+
+  private async verifyAndSaveCredentials(
+    serverUrl: string,
+    token: string,
+    organization: string | undefined,
+  ): Promise<'saved' | 'retry' | 'cancelled'> {
+    let verificationResult: { ok: boolean; message?: string } = { ok: false };
+    await this.withProgressFn(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Verifying SonarQube connection...',
+        cancellable: false,
+      },
+      async () => {
+        const client = this.sonarClientFactory({ serverUrl, token, organization });
+        verificationResult = await client.verifyConnection();
+      },
+    );
+
+    if (!verificationResult.ok) {
+      const action = await this.showErrorMessageFn(
+        `SonarQube connection verification failed: ${verificationResult.message || 'Unknown error'}`,
+        'Retry',
+        'Cancel',
+      );
+      return action === 'Retry' ? 'retry' : 'cancelled';
+    }
+
+    await this.projectDetector.setServerUrl(serverUrl);
+    await this.projectDetector.setToken(token);
+    if (organization !== undefined) {
+      await this.projectDetector.setOrganization(organization);
+    }
+
+    this.showInformationMessageFn('SonarQube connection successfully verified and saved!');
+
+    const updatedConfig = await this.projectDetector.getConfig();
+    if (!updatedConfig.projectKey) {
+      await this.promptProjectSelection();
+    }
+
+    await this.notifyConfigChanged();
+    return 'saved';
   }
 
   public validateServerUrlInput(value: string): string | null {
