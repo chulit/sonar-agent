@@ -5,6 +5,7 @@ import { SonarClient, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
 import { ProjectDetector } from './ProjectDetector.js';
 import { DemoData } from './DemoData.js';
+import { TestFrameworkDetector } from './TestFrameworkDetector.js';
 
 export interface CodeSnippetContext {
   snippet: string;
@@ -30,6 +31,7 @@ export interface AgentDispatcherOptions {
   clipboardWriteFn?: (text: string) => Thenable<void> | Promise<void>;
   sendToAgentPanelFn?: (options: SendToAgentPanelOptions) => Thenable<void> | Promise<void>;
   getDefaultAgentFn?: () => string;
+  testFrameworkDetector?: TestFrameworkDetector;
 }
 
 export interface SendToAgentPanelOptions {
@@ -70,6 +72,7 @@ export class AgentDispatcher {
   private readonly sendToAgentPanelFn: (
     options: SendToAgentPanelOptions,
   ) => Thenable<void> | Promise<void>;
+  private readonly testFrameworkDetector: TestFrameworkDetector;
 
   constructor(options?: AgentDispatcherOptions) {
     this.fileNavigator = options?.fileNavigator ?? new FileNavigator();
@@ -83,6 +86,7 @@ export class AgentDispatcher {
         vscode.workspace.getConfiguration('sonarAgent').get<string>('defaultAgent', 'copilot'));
     this.fetchRuleFn = options?.fetchRuleFn;
     this.readCodeSnippetFn = options?.readCodeSnippetFn;
+    this.testFrameworkDetector = options?.testFrameworkDetector ?? new TestFrameworkDetector();
     this.executeCommandFn =
       options?.executeCommandFn ??
       ((cmd: string, ...args: unknown[]) => vscode.commands.executeCommand(cmd, ...args));
@@ -337,20 +341,30 @@ export class AgentDispatcher {
     const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
 
     if (item.type === 'COVERAGE') {
+      const framework = await this.testFrameworkDetector.detectFramework(item.filePath);
       let prompt = `@workspace Please generate unit tests to improve test coverage for the following file:\n\n`;
       prompt += `### 📍 Target File\n`;
       prompt += `- File: \`${item.filePath}\`\n`;
-      prompt += `- Status: ${item.message}\n\n`;
+      prompt += `- Coverage Status: ${item.message}\n\n`;
+
+      prompt += `### 🛠️ Detected Test Framework\n`;
+      prompt += `- Framework: ${framework.name}\n`;
+      prompt += `- Runner Command: \`${framework.runnerCommand}\`\n`;
+      prompt += `- File Convention: \`${framework.fileNamingConvention}\`\n`;
+      prompt += `- Mocking: ${framework.mockingConventions}\n`;
+      prompt += `- Assertions: ${framework.assertionSyntax}\n\n`;
 
       if (snippetContext) {
-        prompt += `### 💻 Local Code Snippet (\`${item.filePath}\`)\n`;
+        prompt += `### 💻 Target Code Snippet (\`${item.filePath}\`)\n`;
         prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
       }
 
       prompt += `### 🎯 Instructions for Agent\n`;
-      prompt += `1. Analyze the code in \`${item.filePath}\`.\n`;
-      prompt += `2. Generate comprehensive unit tests covering untested functions, branches, and lines.\n`;
-      prompt += `3. Use testing frameworks and conventions consistent with this project.\n`;
+      prompt += `1. Analyze the uncovered functions, branches, and edge cases in \`${item.filePath}\`.\n`;
+      prompt += `2. Generate a comprehensive unit test suite adhering to ${framework.name} idioms.\n`;
+      prompt += `3. ${framework.mockingConventions}\n`;
+      prompt += `4. Target at least 80%+ branch and statement coverage.\n`;
+      prompt += `5. Provide the complete runnable test file code with clear descriptions.\n`;
       return prompt;
     }
 

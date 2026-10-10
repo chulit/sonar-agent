@@ -96,6 +96,11 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "sonarAgent.generateMissingTests",
+        "title": "Generate Missing Unit Tests with AI",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "sonarAgent.showLogs",
         "title": "Show Logs"
       }

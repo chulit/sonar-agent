@@ -4,11 +4,11 @@
 
 **Blocked by:** 28: 1-Click Clean Current File with AI
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Test framework detector identifies installed test frameworks and runner configurations (Vitest, Jest, Mocha, Go test, Pytest) from workspace manifest files.
-- [ ] Command `sonarAgent.generateMissingTests` registered and exposed in Command Palette and Coverage drilldown item actions.
-- [ ] Prompt assembler builds comprehensive test generation prompt specifying target functions, detected framework syntax, mocking conventions, and target coverage goals.
-- [ ] Coverage drilldown in sidebar displays a "⚡ Generate Unit Tests" button next to low-coverage files.
-- [ ] Unit tests verify test framework detection, prompt generation with custom frameworks, and command execution.
-- [ ] All test suites, linting, and typechecks pass with zero regressions.
+- [x] Test framework detector identifies installed test frameworks and runner configurations (Vitest, Jest, Mocha, Go test, Pytest) from workspace manifest files.
+- [x] Command `sonarAgent.generateMissingTests` registered and exposed in Command Palette and Coverage drilldown item actions.
+- [x] Prompt assembler builds comprehensive test generation prompt specifying target functions, detected framework syntax, mocking conventions, and target coverage goals.
+- [x] Coverage drilldown in sidebar displays a "⚡ Generate Unit Tests" button next to low-coverage files.
+- [x] Unit tests verify test framework detection, prompt generation with custom frameworks, and command execution.
+- [x] All test suites, linting, and typechecks pass with zero regressions.

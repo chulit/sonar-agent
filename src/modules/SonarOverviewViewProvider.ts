@@ -181,6 +181,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
             await this.cleanCurrentFile();
             break;
           }
+          case 'generateMissingTests': {
+            await this.generateMissingTests(message.item, message.targetAgentId);
+            break;
+          }
           case 'enableDemoMode': {
             await this.enableDemoMode();
             break;
@@ -366,6 +370,83 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     });
 
     return { ok: result.ok, count: issues.length, message: result.message };
+  }
+
+  public async generateMissingTests(
+    itemOrDoc?: SonarDetailItem | vscode.TextDocument | vscode.Uri,
+    targetAgentId?: string,
+  ): Promise<{ ok: boolean; message: string }> {
+    let item: SonarDetailItem | undefined;
+
+    if (itemOrDoc) {
+      if ('type' in itemOrDoc && 'ruleKey' in itemOrDoc) {
+        item = itemOrDoc as SonarDetailItem;
+      } else if ('uri' in itemOrDoc && 'fileName' in itemOrDoc) {
+        const doc = itemOrDoc as vscode.TextDocument;
+        const relPath = this.workspaceRoot
+          ? path.relative(this.workspaceRoot, doc.uri.fsPath)
+          : doc.uri.fsPath;
+        item = {
+          id: `cov-${Date.now()}`,
+          ruleKey: 'coverage:uncovered_lines',
+          message: `Coverage gap for ${path.basename(relPath)}`,
+          component: relPath,
+          filePath: relPath,
+          line: 1,
+          type: 'COVERAGE',
+          severity: 'MAJOR',
+          status: 'OPEN',
+          tags: ['test-coverage', 'unit-test'],
+          creationDate: new Date().toISOString(),
+        };
+      } else if ('fsPath' in itemOrDoc && 'scheme' in itemOrDoc) {
+        const uri = itemOrDoc as vscode.Uri;
+        const relPath = this.workspaceRoot
+          ? path.relative(this.workspaceRoot, uri.fsPath)
+          : uri.fsPath;
+        item = {
+          id: `cov-${Date.now()}`,
+          ruleKey: 'coverage:uncovered_lines',
+          message: `Coverage gap for ${path.basename(relPath)}`,
+          component: relPath,
+          filePath: relPath,
+          line: 1,
+          type: 'COVERAGE',
+          severity: 'MAJOR',
+          status: 'OPEN',
+          tags: ['test-coverage', 'unit-test'],
+          creationDate: new Date().toISOString(),
+        };
+      }
+    } else if (vscode.window.activeTextEditor?.document) {
+      const doc = vscode.window.activeTextEditor.document;
+      const relPath = this.workspaceRoot
+        ? path.relative(this.workspaceRoot, doc.uri.fsPath)
+        : doc.uri.fsPath;
+      item = {
+        id: `cov-${Date.now()}`,
+        ruleKey: 'coverage:uncovered_lines',
+        message: `Coverage gap for ${path.basename(relPath)}`,
+        component: relPath,
+        filePath: relPath,
+        line: 1,
+        type: 'COVERAGE',
+        severity: 'MAJOR',
+        status: 'OPEN',
+        tags: ['test-coverage', 'unit-test'],
+        creationDate: new Date().toISOString(),
+      };
+    }
+
+    if (!item) {
+      const msg =
+        'No active file open to generate tests for. Please open a file or select a coverage item.';
+      vscode.window.showInformationMessage(msg);
+      return { ok: false, message: msg };
+    }
+
+    const agent = targetAgentId ?? this._getEffectiveDefaultAgent();
+    return await this.agentDispatcher.dispatchIssue(item, { targetAgentId: agent });
   }
 
   public dispose(): void {
@@ -3020,18 +3101,22 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
       agentBtn.className = "btn btn-agent btn-sm";
       let agentBtnLabel = "Send to Agent";
       if (item.type === "COVERAGE") {
-        agentBtnLabel = "Generate Tests";
+        agentBtnLabel = "⚡ Generate Unit Tests";
       } else if (item.type === "DUPLICATION") {
         agentBtnLabel = "Refactor";
       } else if (item.type === "HOTSPOT") {
         agentBtnLabel = "Review";
       }
       agentBtn.setAttribute("aria-label", agentBtnLabel + " for " + item.message);
-      agentBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>' + agentBtnLabel;
+      agentBtn.innerHTML = (item.type === "COVERAGE" ? "" : '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>') + agentBtnLabel;
       agentBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const targetAgentId = targetAgentDropdown.value;
-        vscode.postMessage({ command: "sendToAgent", item, targetAgentId });
+        if (item.type === "COVERAGE") {
+          vscode.postMessage({ command: "generateMissingTests", item, targetAgentId });
+        } else {
+          vscode.postMessage({ command: "sendToAgent", item, targetAgentId });
+        }
       });
 
       actionsDiv.appendChild(jumpBtn);
