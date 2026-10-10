@@ -191,7 +191,7 @@
     "lint:fix": "eslint --fix .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run --coverage",
+    "test": "vitest run",
     "package": "vsce package --no-git-tag-version",
     "release:dry-run": "semantic-release --dry-run"
   },
@@ -202,7 +202,6 @@
     "@semantic-release/git": "^11.0.1",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
-    "@vitest/coverage-v8": "^1.6.1",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.20.0",
     "eslint": "^10.11.0",
