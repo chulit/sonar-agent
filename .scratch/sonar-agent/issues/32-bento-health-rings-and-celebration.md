@@ -4,12 +4,12 @@
 
 **Blocked by:** 27: Demo Preview Asset & Documentation Polish
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Metric cards incorporate responsive SVG circular progress rings showing percentage and rating scores.
-- [ ] Circular health rings adapt seamlessly across narrow and wide sidebar containers via `@container` queries.
-- [ ] When Quality Gate status transitions from FAILED to PASSED or zero issues are reached, triggers a celebration micro-animation (green pulse glow and subtle celebratory confetti).
-- [ ] Displays a gamified badge: `🎉 0 Issues Reached! Clean Code streak maintained`.
-- [ ] Animations strictly adhere to `prefers-reduced-motion` media query to ensure accessibility compliance.
-- [ ] Unit tests verify SVG ring rendering calculations, status transition detection, and reduced motion fallbacks.
-- [ ] All test suites, linting, and typechecks pass with zero regressions.
+- [x] Metric cards incorporate responsive SVG circular progress rings showing percentage and rating scores.
+- [x] Circular health rings adapt seamlessly across narrow and wide sidebar containers via `@container` queries.
+- [x] When Quality Gate status transitions from FAILED to PASSED or zero issues are reached, triggers a celebration micro-animation (green pulse glow and subtle celebratory confetti).
+- [x] Displays a gamified badge: `🎉 0 Issues Reached! Clean Code streak maintained`.
+- [x] Animations strictly adhere to `prefers-reduced-motion` media query to ensure accessibility compliance.
+- [x] Unit tests verify SVG ring rendering calculations, status transition detection, and reduced motion fallbacks.
+- [x] All test suites, linting, and typechecks pass with zero regressions.

@@ -1922,6 +1922,122 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       flex-shrink: 0;
     }
 
+    /* Bento Health Rings & Container Queries */
+    .health-ring-container {
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .health-ring {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .health-ring-bg {
+      fill: none;
+      stroke: rgba(128, 128, 128, 0.2);
+      stroke-width: 3.5;
+    }
+
+    .health-ring-progress {
+      fill: none;
+      stroke-width: 3.5;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.6s ease, stroke 0.3s ease;
+    }
+
+    .rating-ring-container {
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .rating-ring-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .rating-ring-circle {
+      fill: none;
+      stroke-width: 2.5;
+      transition: stroke 0.3s ease;
+    }
+
+    @container (max-width: 260px) {
+      .health-ring-container,
+      .rating-ring-container {
+        width: 26px;
+        height: 26px;
+      }
+    }
+
+    /* Celebration & Streak Badge */
+    .celebration-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 8px 0;
+      padding: 6px 12px;
+      background: rgba(0, 170, 94, 0.15);
+      border: 1px solid var(--sonar-green);
+      border-radius: 6px;
+      color: var(--sonar-green);
+      font-size: 11px;
+      font-weight: 600;
+      animation: celebration-slide-in 0.5s ease-out;
+    }
+
+    @keyframes celebration-slide-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .quality-gate-celebrate {
+      animation: gate-pulse-glow 1.5s ease-in-out infinite alternate;
+    }
+
+    @keyframes gate-pulse-glow {
+      from { box-shadow: 0 0 4px rgba(0, 170, 94, 0.3); }
+      to { box-shadow: 0 0 16px rgba(0, 170, 94, 0.8); }
+    }
+
+    .confetti-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .celebration-badge {
+        animation: none;
+      }
+      .quality-gate-celebrate {
+        animation: none;
+        box-shadow: 0 0 8px rgba(0, 170, 94, 0.5);
+      }
+      .health-ring-progress {
+        transition: none;
+      }
+    }
+
     .source-badge {
       font-size: 10px;
       background: var(--vscode-badge-background);
@@ -2383,6 +2499,12 @@ ${ISSUE_LIFECYCLE_CSS}
         <ul id="quality-gate-conditions" class="quality-gate-conditions hidden"></ul>
       </div>
 
+      <!-- Celebration & Streak Badge -->
+      <div id="celebration-badge" class="celebration-badge hidden" role="status" aria-live="polite">
+        🎉 0 Issues Reached! Clean Code streak maintained
+      </div>
+      <canvas id="celebration-canvas" class="confetti-canvas"></canvas>
+
       <!-- Metric Cards Grid (Container Query Controlled) -->
       <div id="metrics-grid" class="metrics-grid">
         <!-- Security -->
@@ -2394,7 +2516,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <span class="metric-sublabel">Open issues</span>
             </div>
           </div>
-          <div id="badge-security" class="rating-badge rating-A">A</div>
+          <div class="rating-ring-container">
+            <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-security" class="rating-ring-circle" cx="18" cy="18" r="15" stroke="var(--sonar-green)" /></svg>
+            <div id="badge-security" class="rating-badge rating-A">A</div>
+          </div>
         </div>
 
         <!-- Reliability -->
@@ -2406,7 +2531,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <span class="metric-sublabel">Open issues</span>
             </div>
           </div>
-          <div id="badge-reliability" class="rating-badge rating-C">C</div>
+          <div class="rating-ring-container">
+            <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-reliability" class="rating-ring-circle" cx="18" cy="18" r="15" stroke="var(--sonar-yellow)" /></svg>
+            <div id="badge-reliability" class="rating-badge rating-C">C</div>
+          </div>
         </div>
 
         <!-- Maintainability -->
@@ -2418,7 +2546,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <span class="metric-sublabel">Open issues</span>
             </div>
           </div>
-          <div id="badge-maintainability" class="rating-badge rating-A">A</div>
+          <div class="rating-ring-container">
+            <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-maintainability" class="rating-ring-circle" cx="18" cy="18" r="15" stroke="var(--sonar-green)" /></svg>
+            <div id="badge-maintainability" class="rating-badge rating-A">A</div>
+          </div>
         </div>
 
         <!-- Security Hotspots -->
@@ -2430,7 +2561,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <span class="metric-sublabel">To review</span>
             </div>
           </div>
-          <div id="badge-hotspots" class="rating-badge rating-A">A</div>
+          <div class="rating-ring-container">
+            <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-hotspots" class="rating-ring-circle" cx="18" cy="18" r="15" stroke="var(--sonar-green)" /></svg>
+            <div id="badge-hotspots" class="rating-badge rating-A">A</div>
+          </div>
         </div>
 
         <!-- Coverage -->
@@ -2442,8 +2576,11 @@ ${ISSUE_LIFECYCLE_CSS}
             </div>
             <span id="metric-coverage-lines" class="metric-helper">On - lines to cover.</span>
           </div>
-          <div class="circle-icon">
-            <div class="dot-inner"></div>
+          <div class="health-ring-container" aria-hidden="true">
+            <svg class="health-ring" viewBox="0 0 36 36">
+              <circle class="health-ring-bg" cx="18" cy="18" r="14" />
+              <circle id="ring-coverage" class="health-ring-progress" cx="18" cy="18" r="14" stroke-dasharray="87.96" stroke-dashoffset="87.96" stroke="var(--sonar-green)" />
+            </svg>
           </div>
         </div>
 
@@ -2456,8 +2593,11 @@ ${ISSUE_LIFECYCLE_CSS}
             </div>
             <span id="metric-duplications-lines" class="metric-helper">On - lines.</span>
           </div>
-          <div class="circle-icon" style="border-color: var(--sonar-green);">
-            <div class="dot-inner" style="background: var(--sonar-green);"></div>
+          <div class="health-ring-container" aria-hidden="true">
+            <svg class="health-ring" viewBox="0 0 36 36">
+              <circle class="health-ring-bg" cx="18" cy="18" r="14" />
+              <circle id="ring-duplications" class="health-ring-progress" cx="18" cy="18" r="14" stroke-dasharray="87.96" stroke-dashoffset="87.96" stroke="var(--sonar-green)" />
+            </svg>
           </div>
         </div>
 
@@ -2834,9 +2974,117 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
       return String(num);
     }
 
-    function updateRatingBadge(el, rating) {
+    const ringCoverage = document.getElementById("ring-coverage");
+    const ringDuplications = document.getElementById("ring-duplications");
+    const ringSecurity = document.getElementById("ring-security");
+    const ringReliability = document.getElementById("ring-reliability");
+    const ringMaintainability = document.getElementById("ring-maintainability");
+    const ringHotspots = document.getElementById("ring-hotspots");
+    const celebrationBadge = document.getElementById("celebration-badge");
+    const celebrationCanvas = document.getElementById("celebration-canvas");
+    let lastGateStatus = null;
+
+    const CIRCUMFERENCE_R14 = 87.96;
+
+    function updateDonutRing(circleEl, percent, isCoverage) {
+      if (!circleEl) return;
+      const clamped = Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0));
+      const dashOffset = Math.round((CIRCUMFERENCE_R14 - (clamped / 100) * CIRCUMFERENCE_R14) * 100) / 100;
+      circleEl.style.strokeDasharray = String(CIRCUMFERENCE_R14);
+      circleEl.style.strokeDashoffset = String(dashOffset);
+
+      if (isCoverage) {
+        circleEl.style.stroke = clamped >= 80 ? "var(--sonar-green)" : clamped >= 50 ? "var(--sonar-yellow)" : "var(--sonar-red)";
+      } else {
+        circleEl.style.stroke = clamped > 10 ? "var(--sonar-red)" : clamped > 3 ? "var(--sonar-yellow)" : "var(--sonar-green)";
+      }
+    }
+
+    function getRatingColorVar(rating) {
+      const r = String(rating || "A").toUpperCase().trim();
+      if (r === "A" || r === "1" || r === "1.0") return "var(--sonar-green)";
+      if (r === "B" || r === "2" || r === "2.0") return "var(--sonar-lime)";
+      if (r === "C" || r === "3" || r === "3.0") return "var(--sonar-yellow)";
+      if (r === "D" || r === "4" || r === "4.0") return "var(--sonar-orange)";
+      if (r === "E" || r === "5" || r === "5.0") return "var(--sonar-red)";
+      return "var(--sonar-green)";
+    }
+
+    function updateRatingBadge(el, rating, ringEl) {
       el.className = "rating-badge rating-" + rating;
       el.textContent = rating;
+      if (ringEl) {
+        ringEl.style.stroke = getRatingColorVar(rating);
+      }
+    }
+
+    function triggerCelebration(msg) {
+      if (celebrationBadge) {
+        celebrationBadge.textContent = "🎉 " + msg;
+        celebrationBadge.classList.remove("hidden");
+      }
+      if (qualityGateBanner) {
+        qualityGateBanner.classList.add("quality-gate-celebrate");
+        setTimeout(() => {
+          qualityGateBanner.classList.remove("quality-gate-celebrate");
+        }, 4000);
+      }
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        return;
+      }
+      launchConfetti();
+    }
+
+    function launchConfetti() {
+      if (!celebrationCanvas) return;
+      const ctx = celebrationCanvas.getContext("2d");
+      if (!ctx) return;
+      celebrationCanvas.width = window.innerWidth;
+      celebrationCanvas.height = window.innerHeight;
+
+      const colors = ["#00aa5e", "#81b300", "#eabe06", "#2563eb", "#9333ea", "#06b6d4"];
+      const particles = [];
+      for (let i = 0; i < 35; i++) {
+        particles.push({
+          x: celebrationCanvas.width * (0.2 + Math.random() * 0.6),
+          y: celebrationCanvas.height * 0.2,
+          vx: (Math.random() - 0.5) * 6,
+          vy: -Math.random() * 5 - 2,
+          size: Math.random() * 5 + 3,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          alpha: 1,
+          rot: Math.random() * 360,
+        });
+      }
+
+      let frame = 0;
+      function step() {
+        frame++;
+        ctx.clearRect(0, 0, celebrationCanvas.width, celebrationCanvas.height);
+        let alive = false;
+        for (const p of particles) {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.2;
+          p.alpha -= 0.015;
+          if (p.alpha > 0) {
+            alive = true;
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            ctx.fillStyle = p.color;
+            ctx.translate(p.x, p.y);
+            ctx.rotate((p.rot * Math.PI) / 180);
+            ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+            ctx.restore();
+          }
+        }
+        if (alive && frame < 90) {
+          requestAnimationFrame(step);
+        } else {
+          ctx.clearRect(0, 0, celebrationCanvas.width, celebrationCanvas.height);
+        }
+      }
+      requestAnimationFrame(step);
     }
 
     function updateBatchBar() {
@@ -2864,25 +3112,35 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
       if (!overview) return;
 
       securityCount.textContent = overview.security.count;
-      updateRatingBadge(badgeSecurity, overview.security.rating);
+      updateRatingBadge(badgeSecurity, overview.security.rating, ringSecurity);
 
       reliabilityCount.textContent = overview.reliability.count;
-      updateRatingBadge(badgeReliability, overview.reliability.rating);
+      updateRatingBadge(badgeReliability, overview.reliability.rating, ringReliability);
 
       maintainabilityCount.textContent = overview.maintainability.count;
-      updateRatingBadge(badgeMaintainability, overview.maintainability.rating);
+      updateRatingBadge(badgeMaintainability, overview.maintainability.rating, ringMaintainability);
 
       coveragePercent.textContent = overview.coverage.percentage.toFixed(1) + "%";
       coverageLines.textContent = "On " + formatNumber(overview.coverage.linesToCover) + " lines to cover.";
+      updateDonutRing(ringCoverage, overview.coverage.percentage, true);
 
       duplicationsPercent.textContent = overview.duplications.percentage.toFixed(1) + "%";
       duplicationsLines.textContent = "On " + formatNumber(overview.duplications.duplicatedLines) + " lines.";
+      updateDonutRing(ringDuplications, overview.duplications.percentage, false);
 
       hotspotsCount.textContent = overview.securityHotspots.count;
-      updateRatingBadge(badgeHotspots, overview.securityHotspots.rating);
+      updateRatingBadge(badgeHotspots, overview.securityHotspots.rating, ringHotspots);
 
       if (acceptedCount && overview.acceptedIssues) {
         acceptedCount.textContent = formatNumber(overview.acceptedIssues.count);
+      }
+
+      const totalIssues =
+        (overview.security.count || 0) +
+        (overview.reliability.count || 0) +
+        (overview.maintainability.count || 0);
+      if (totalIssues === 0) {
+        triggerCelebration("0 Issues Reached! Clean Code streak maintained");
       }
     }
 
@@ -2924,6 +3182,11 @@ ${ISSUE_LIFECYCLE_MENU_SCRIPT}
         qualityGateBanner.className = "quality-gate hidden";
         return;
       }
+
+      if (lastGateStatus === "ERROR" && status.status === "OK") {
+        triggerCelebration("Quality Gate Passed! Clean Code streak maintained");
+      }
+      lastGateStatus = status.status;
 
       const variant = QUALITY_GATE_CLASSES[status.status];
       qualityGateBanner.className = "quality-gate " + variant;
