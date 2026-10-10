@@ -126,6 +126,18 @@ function mapIssueStatus(item: any): string {
   return item?.issueStatus || item?.status || 'OPEN';
 }
 
+/**
+ * Thrown when the server rejects a write operation because the token lacks
+ * the required permission (HTTP 403). The UI catches this to render a
+ * friendly hint instead of a raw error.
+ */
+export class InsufficientPermissionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InsufficientPermissionError';
+  }
+}
+
 export class SonarClient {
   private readonly serverUrl: string;
   private readonly token?: string;
@@ -181,12 +193,19 @@ export class SonarClient {
   }
 
   /**
-   * Helper that executes fetch with Basic Auth and falls back to Bearer Auth if 401
+   * Core request executor: sends the request with Basic Auth and falls back
+   * to Bearer Auth if the server answers 401. The token travels exclusively
+   * in the Authorization header — never in the URL or the request body.
    */
-  private async authenticatedFetch(url: string, timeoutMs: number = 10000): Promise<Response> {
+  private async executeWithAuth(
+    url: string,
+    init: { method: 'GET' | 'POST'; headers?: Record<string, string>; body?: string },
+    timeoutMs: number = 10000,
+  ): Promise<Response> {
     const basicHeaders = {
       Accept: 'application/json',
       ...this.getAuthHeader(),
+      ...init.headers,
     };
 
     const controller = new AbortController();
@@ -194,8 +213,9 @@ export class SonarClient {
 
     try {
       const response = await this.fetchFn(url, {
-        method: 'GET',
+        method: init.method,
         headers: basicHeaders,
+        body: init.body,
         signal: controller.signal,
       });
 
@@ -204,10 +224,12 @@ export class SonarClient {
         const bearerHeaders = {
           Accept: 'application/json',
           Authorization: `Bearer ${this.token}`,
+          ...init.headers,
         };
         const bearerResponse = await this.fetchFn(url, {
-          method: 'GET',
+          method: init.method,
           headers: bearerHeaders,
+          body: init.body,
           signal: controller.signal,
         });
         if (bearerResponse.ok) {
@@ -224,6 +246,49 @@ export class SonarClient {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  /**
+   * Helper that executes fetch with Basic Auth and falls back to Bearer Auth if 401
+   */
+  private async authenticatedFetch(url: string, timeoutMs: number = 10000): Promise<Response> {
+    return this.executeWithAuth(url, { method: 'GET' }, timeoutMs);
+  }
+
+  /**
+   * POST sibling of authenticatedFetch. Parameters are sent as
+   * application/x-www-form-urlencoded in the request body — never in the
+   * URL query string (which leaks into server access logs and proxies).
+   * Throws InsufficientPermissionError on HTTP 403.
+   */
+  private async authenticatedPost(
+    path: string,
+    params: Record<string, string>,
+    timeoutMs: number = 10000,
+  ): Promise<Response> {
+    const url = `${this.serverUrl}${path}`;
+    const body = new URLSearchParams(params).toString();
+    const response = await this.executeWithAuth(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      },
+      timeoutMs,
+    );
+
+    if (response.status === 403) {
+      throw new InsufficientPermissionError(
+        'Your SonarQube token needs the "Administer Issues" permission for this action.',
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(`Request failed: HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return response;
   }
 
   /**
@@ -450,6 +515,76 @@ export class SonarClient {
         actualValue: c.actualValue,
       })),
     };
+  }
+
+  /**
+   * Lists the transitions available for an issue, exactly as reported by the
+   * server. Returned 1:1 without filtering — available transitions depend on
+   * issue type, status, and server version.
+   */
+  async getIssueTransitions(issueKey: string): Promise<string[]> {
+    const url = `${this.serverUrl}/api/issues/transitions?issue=${encodeURIComponent(issueKey)}`;
+    const response = await this.authenticatedFetch(url);
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch issue transitions: HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const data = (await response.json()) as { transitions?: string[] };
+    return [...(data.transitions || [])];
+  }
+
+  /**
+   * Applies a server-provided transition to an issue
+   * (e.g. falsepositive, wontfix, confirm, reopen).
+   */
+  async doIssueTransition(issueKey: string, transition: string): Promise<void> {
+    await this.authenticatedPost('/api/issues/do_transition', {
+      issue: issueKey,
+      transition,
+    });
+  }
+
+  /**
+   * Assigns an issue to a user. An empty assignee unassigns it.
+   */
+  async assignIssue(issueKey: string, assignee?: string): Promise<void> {
+    await this.authenticatedPost('/api/issues/assign', {
+      issue: issueKey,
+      assignee: assignee || '',
+    });
+  }
+
+  /**
+   * Adds a comment to an issue.
+   */
+  async addIssueComment(issueKey: string, text: string): Promise<void> {
+    await this.authenticatedPost('/api/issues/add_comment', {
+      issue: issueKey,
+      text,
+    });
+  }
+
+  /**
+   * Returns the login of the user owning the configured token.
+   */
+  async getCurrentUserLogin(): Promise<string> {
+    const url = `${this.serverUrl}/api/users/current`;
+    const response = await this.authenticatedFetch(url);
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch current user: HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const data = (await response.json()) as { login?: string };
+    if (!data.login) {
+      throw new Error('Could not determine the current user from the SonarQube server.');
+    }
+    return data.login;
   }
 
   /**
