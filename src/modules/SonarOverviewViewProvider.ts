@@ -403,7 +403,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
   public getAllCachedIssues(): SonarDetailItem[] {
     if (this._isDemoMode) {
-      return DemoData.getDetails();
+      return DemoData.getDetails(undefined, this._codePeriod);
     }
     const set = new Map<string, SonarDetailItem>();
     for (const item of this._currentCodeItems) {
@@ -425,8 +425,18 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       return { ok: false, count: 0, message: msg };
     }
 
-    const issues = this.fileIssueAggregator.aggregateIssuesForDocument(doc);
-    if (issues.length === 0) {
+    const allIssues = this.fileIssueAggregator.aggregateIssuesForDocument(doc);
+    let issues = allIssues;
+
+    if (this._codePeriod === 'new') {
+      issues = allIssues.filter((i) => i.inNewCodePeriod === true);
+      if (issues.length === 0) {
+        const fileName = path.basename(doc.fileName || doc.uri.fsPath);
+        const msg = `No new Sonar issues detected in ${fileName} for the current leak period!`;
+        vscode.window.showInformationMessage(msg);
+        return { ok: true, count: 0, message: msg };
+      }
+    } else if (issues.length === 0) {
       const fileName = path.basename(doc.fileName || doc.uri.fsPath);
       const msg = `No Sonar issues detected in ${fileName}. File is clean!`;
       vscode.window.showInformationMessage(msg);
@@ -436,6 +446,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     const effectiveDefaultAgent = this._getEffectiveDefaultAgent();
     const result = await this.agentDispatcher.dispatchBatch(issues, {
       targetAgentId: effectiveDefaultAgent,
+      codePeriod: this._codePeriod,
     });
 
     return { ok: result.ok, count: issues.length, message: result.message };
@@ -578,6 +589,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         period: this._codePeriod,
         hasNewCode: demoOverview.hasNewCode,
       });
+      if (this._currentDetailCategory) {
+        await this._handleFetchDetails(this._currentDetailCategory);
+      }
       return;
     }
 
@@ -588,6 +602,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         type: 'codePeriodState',
         period: this._codePeriod,
       });
+      if (this._currentDetailCategory) {
+        await this._handleFetchDetails(this._currentDetailCategory);
+      }
       return;
     }
 
@@ -615,6 +632,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       period: this._codePeriod,
       hasNewCode: overview?.hasNewCode,
     });
+
+    if (this._currentDetailCategory) {
+      await this._handleFetchDetails(this._currentDetailCategory);
+    }
   }
 
   private async subscribeCurrentCode(): Promise<void> {
@@ -771,14 +792,20 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
   }
 
   private async _handleSendToAgent(item: SonarDetailItem, targetAgentId?: string): Promise<void> {
-    await this.agentDispatcher.dispatchIssue(item, { targetAgentId });
+    await this.agentDispatcher.dispatchIssue(item, {
+      targetAgentId,
+      codePeriod: this._codePeriod,
+    });
   }
 
   private async _handleSendBatchToAgent(
     items: SonarDetailItem[],
     targetAgentId?: string,
   ): Promise<void> {
-    await this.agentDispatcher.dispatchBatch(items, { targetAgentId });
+    await this.agentDispatcher.dispatchBatch(items, {
+      targetAgentId,
+      codePeriod: this._codePeriod,
+    });
   }
 
   private async _handleFetchDetails(category: string): Promise<void> {
@@ -787,11 +814,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     this._currentDetailCategory = category;
 
     if (this._isDemoMode) {
-      const items = DemoData.getDetails(category);
+      const items = DemoData.getDetails(category, this._codePeriod);
       this._view.webview.postMessage({
         type: 'details',
         category,
         items,
+        period: this._codePeriod,
       });
       return;
     }
@@ -805,9 +833,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     try {
       const client = new SonarClient({ serverUrl: config.serverUrl, token });
       let items: SonarDetailItem[] = [];
+      const inNewCodePeriod = this._codePeriod === 'new';
 
       if (category === 'hotspots') {
-        items = await client.getHotspots(config.projectKey);
+        items = await client.getHotspots(config.projectKey, inNewCodePeriod);
       } else if (category === 'coverage') {
         items = await client.getCoverageFiles(config.projectKey);
       } else if (category === 'duplications') {
@@ -818,9 +847,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         category === 'maintainability' ||
         category === 'accepted'
       ) {
-        items = await client.getIssues(config.projectKey, category);
+        items = await client.getIssues(config.projectKey, category, inNewCodePeriod);
       } else {
-        items = await client.getIssues(config.projectKey);
+        items = await client.getIssues(config.projectKey, undefined, inNewCodePeriod);
       }
 
       this._updateCachedServerIssues(items);
@@ -828,6 +857,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         type: 'details',
         category,
         items,
+        period: this._codePeriod,
       });
       await this.syncDiagnostics(items);
     } catch (err: any) {
@@ -3129,6 +3159,7 @@ ${ISSUE_LIFECYCLE_CSS}
     const acceptedCount = document.getElementById("metric-accepted-count");
 
     let activeCategory = null;
+    let currentDetailPeriod = "${codePeriod}";
     let rawCategoryItems = [];
     let currentItems = [];
     const selectedItemIds = new Set();
@@ -3620,7 +3651,11 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       issuesContainer.innerHTML = "";
 
       if (filtered.length === 0) {
-        issuesContainer.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 12px;">No issues match the selected filters.</div>';
+        const isNewCodePeriod = currentDetailPeriod === "new";
+        const emptyMsg = isNewCodePeriod
+          ? "No issues in New Code period for this category."
+          : "No issues match the selected filters.";
+        issuesContainer.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 12px;">' + emptyMsg + '</div>';
         return;
       }
 
@@ -3629,7 +3664,10 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       });
     }
 
-    function renderIssues(items, category) {
+    function renderIssues(items, category, period) {
+      if (period) {
+        currentDetailPeriod = period;
+      }
       rawCategoryItems = items;
       selectedItemIds.clear();
 
@@ -3885,6 +3923,7 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
     const newCodeEmptyNotice = document.getElementById("new-code-empty-notice");
 
     function setCodePeriodUI(period, hasNewCode) {
+      currentDetailPeriod = period;
       const isNew = period === "new";
       if (measuresTitle) {
         measuresTitle.textContent = isNew ? "New Code Measures" : "Overall Code Measures";
@@ -4132,7 +4171,7 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
         }
 ${ISSUE_LIFECYCLE_MESSAGE_SCRIPT}
         case "details": {
-          renderIssues(message.items || [], message.category);
+          renderIssues(message.items || [], message.category, message.period);
           break;
         }
         case "state": {

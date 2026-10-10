@@ -52,6 +52,7 @@ export interface SonarDetailItem {
   creationDate: string;
   author?: string;
   source?: string;
+  inNewCodePeriod?: boolean;
 }
 
 export type QualityGateStatusValue = 'OK' | 'WARN' | 'ERROR' | 'NONE';
@@ -476,18 +477,14 @@ export class SonarClient {
       ? measureMap.new_accepted_issues || measureMap.new_wont_fix_issues
       : measureMap.accepted_issues || measureMap.wont_fix_issues;
     const rawCoverage = isNewCode ? measureMap.new_coverage : measureMap.coverage;
-    const rawLinesToCover = isNewCode
-      ? measureMap.new_lines_to_cover
-      : measureMap.lines_to_cover;
+    const rawLinesToCover = isNewCode ? measureMap.new_lines_to_cover : measureMap.lines_to_cover;
     const rawDuplicatedDensity = isNewCode
       ? measureMap.new_duplicated_lines_density
       : measureMap.duplicated_lines_density;
     const rawDuplicatedLines = isNewCode
       ? measureMap.new_duplicated_lines
       : measureMap.duplicated_lines;
-    const rawHotspots = isNewCode
-      ? measureMap.new_security_hotspots
-      : measureMap.security_hotspots;
+    const rawHotspots = isNewCode ? measureMap.new_security_hotspots : measureMap.security_hotspots;
     const rawHotspotRating = isNewCode
       ? measureMap.new_security_review_rating
       : measureMap.security_review_rating;
@@ -666,12 +663,17 @@ export class SonarClient {
   }
 
   /**
-   * Fetches issues list filtered by category/type
+   * Fetches issues list filtered by category/type and optionally scoped to New Code period
    */
-  async getIssues(projectKey: string, category?: string): Promise<SonarDetailItem[]> {
+  async getIssues(
+    projectKey: string,
+    category?: string,
+    inNewCodePeriod: boolean = false,
+  ): Promise<SonarDetailItem[]> {
+    const periodParam = inNewCodePeriod ? '&inNewCodePeriod=true' : '';
     let url: string;
     if (category === 'accepted') {
-      url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=BUG,VULNERABILITY,CODE_SMELL&issueStatuses=ACCEPTED&ps=100`;
+      url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=BUG,VULNERABILITY,CODE_SMELL&issueStatuses=ACCEPTED&ps=100${periodParam}`;
     } else {
       let typeParam = 'BUG,VULNERABILITY,CODE_SMELL';
       if (category === 'reliability') {
@@ -681,14 +683,14 @@ export class SonarClient {
       } else if (category === 'maintainability') {
         typeParam = 'CODE_SMELL';
       }
-      url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=${typeParam}&statuses=OPEN,CONFIRMED,REOPENED&ps=100`;
+      url = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=${typeParam}&statuses=OPEN,CONFIRMED,REOPENED&ps=100${periodParam}`;
     }
 
     let response = await this.authenticatedFetch(url);
 
     // Fallback for older SonarQube versions using resolutions=WONTFIX
     if (!response.ok && category === 'accepted') {
-      const fallbackUrl = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=BUG,VULNERABILITY,CODE_SMELL&resolutions=WONTFIX&ps=100`;
+      const fallbackUrl = `${this.serverUrl}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&types=BUG,VULNERABILITY,CODE_SMELL&resolutions=WONTFIX&ps=100${periodParam}`;
       const fallbackResponse = await this.authenticatedFetch(fallbackUrl);
       if (fallbackResponse.ok) {
         response = fallbackResponse;
@@ -714,14 +716,19 @@ export class SonarClient {
       tags: item.tags || [],
       creationDate: item.creationDate || '',
       author: item.author || undefined,
+      inNewCodePeriod: inNewCodePeriod || item.inNewCodePeriod === true,
     }));
   }
 
   /**
-   * Fetches Security Hotspots for a project
+   * Fetches Security Hotspots for a project, optionally scoped to New Code period
    */
-  async getHotspots(projectKey: string): Promise<SonarDetailItem[]> {
-    const url = `${this.serverUrl}/api/hotspots/search?projectKey=${encodeURIComponent(projectKey)}&status=TO_REVIEW&ps=100`;
+  async getHotspots(
+    projectKey: string,
+    inNewCodePeriod: boolean = false,
+  ): Promise<SonarDetailItem[]> {
+    const periodParam = inNewCodePeriod ? '&inNewCodePeriod=true' : '';
+    const url = `${this.serverUrl}/api/hotspots/search?projectKey=${encodeURIComponent(projectKey)}&status=TO_REVIEW&ps=100${periodParam}`;
     const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
@@ -742,6 +749,7 @@ export class SonarClient {
       tags: ['security-hotspot'],
       creationDate: item.creationDate || '',
       author: item.author || undefined,
+      inNewCodePeriod: inNewCodePeriod || item.inNewCodePeriod === true,
     }));
   }
 

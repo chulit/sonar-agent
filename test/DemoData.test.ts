@@ -79,4 +79,20 @@ describe('DemoData', () => {
     expect(credDoc).toBeDefined();
     expect(credDoc?.cleanDesc).toContain('Hard-coded credentials');
   });
+
+  it('returns scoped detail items for new code period', () => {
+    const newItems = DemoData.getDetails(undefined, 'new');
+    expect(newItems.length).toBeGreaterThan(0);
+    expect(newItems.every((i) => i.inNewCodePeriod === true)).toBe(true);
+
+    const reliabilityNew = DemoData.getDetails('reliability', 'new');
+    expect(reliabilityNew).toHaveLength(2);
+    expect(reliabilityNew.every((i) => i.inNewCodePeriod === true)).toBe(true);
+
+    const securityNew = DemoData.getDetails('security', 'new');
+    expect(securityNew).toHaveLength(1);
+
+    const duplicationsNew = DemoData.getDetails('duplications', 'new');
+    expect(duplicationsNew).toHaveLength(0);
+  });
 });

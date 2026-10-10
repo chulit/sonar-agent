@@ -1038,4 +1038,72 @@ describe('SonarClient - Edge Cases, Fallbacks & Error Branches', () => {
       /Failed to fetch duplication files/,
     );
   });
+
+  it('getIssues appends inNewCodePeriod=true and tags items when requested', async () => {
+    let capturedUrl = '';
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          issues: [
+            {
+              key: 'NEW-ISSUE-1',
+              rule: 'typescript:S2259',
+              component: 'proj:src/UserService.ts',
+              line: 42,
+              message: 'Null pointer check missing',
+            },
+          ],
+        }),
+      };
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchFn as any,
+    });
+
+    const issues = await client.getIssues('proj', 'reliability', true);
+    expect(capturedUrl).toContain('inNewCodePeriod=true');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].inNewCodePeriod).toBe(true);
+    expect(issues[0].id).toBe('NEW-ISSUE-1');
+  });
+
+  it('getHotspots appends inNewCodePeriod=true and tags hotspots when requested', async () => {
+    let capturedUrl = '';
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          hotspots: [
+            {
+              key: 'HOTSPOT-1',
+              ruleKey: 'javascript:S4790',
+              component: 'proj:src/hash.ts',
+              line: 12,
+              message: 'Weak hash algorithm',
+            },
+          ],
+        }),
+      };
+    });
+
+    const client = new SonarClient({
+      serverUrl: 'http://localhost:9000',
+      token: 'tok',
+      fetchFn: fetchFn as any,
+    });
+
+    const hotspots = await client.getHotspots('proj', true);
+    expect(capturedUrl).toContain('inNewCodePeriod=true');
+    expect(hotspots).toHaveLength(1);
+    expect(hotspots[0].inNewCodePeriod).toBe(true);
+    expect(hotspots[0].id).toBe('HOTSPOT-1');
+  });
 });

@@ -1,4 +1,10 @@
-import { SonarOverview, SonarCodePeriod, QualityGateStatus, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
+import {
+  SonarOverview,
+  SonarCodePeriod,
+  QualityGateStatus,
+  SonarDetailItem,
+  SonarRuleDoc,
+} from './SonarClient.js';
 
 export interface DemoProject {
   key: string;
@@ -78,7 +84,7 @@ export class DemoData {
     };
   }
 
-  static getDetails(category?: string): SonarDetailItem[] {
+  static getDetails(category?: string, period: SonarCodePeriod = 'overall'): SonarDetailItem[] {
     const items: SonarDetailItem[] = [
       // Bugs (Reliability)
       {
@@ -95,6 +101,7 @@ export class DemoData {
         tags: ['bug', 'null-safety'],
         creationDate: '2026-10-09T08:30:00Z',
         author: 'developer@example.com',
+        inNewCodePeriod: true,
       },
       {
         id: 'demo-rel-2',
@@ -110,6 +117,7 @@ export class DemoData {
         tags: ['bug', 'es6'],
         creationDate: '2026-10-08T14:15:00Z',
         author: 'developer@example.com',
+        inNewCodePeriod: true,
       },
       {
         id: 'demo-rel-3',
@@ -126,6 +134,7 @@ export class DemoData {
         tags: ['bug', 'redundant'],
         creationDate: '2026-10-07T11:00:00Z',
         author: 'lead@example.com',
+        inNewCodePeriod: false,
       },
 
       // Vulnerabilities (Security)
@@ -144,6 +153,7 @@ export class DemoData {
         tags: ['security', 'cwe-798', 'owasp-a2'],
         creationDate: '2026-10-09T09:12:00Z',
         author: 'security@example.com',
+        inNewCodePeriod: true,
       },
       {
         id: 'demo-sec-2',
@@ -160,6 +170,7 @@ export class DemoData {
         tags: ['security', 'injection', 'cwe-89'],
         creationDate: '2026-10-08T16:20:00Z',
         author: 'backend@example.com',
+        inNewCodePeriod: false,
       },
 
       // Code Smells (Maintainability)
@@ -178,6 +189,7 @@ export class DemoData {
         tags: ['brain-overload', 'complexity'],
         creationDate: '2026-10-06T12:00:00Z',
         author: 'contributor@example.com',
+        inNewCodePeriod: true,
       },
       {
         id: 'demo-maint-2',
@@ -194,6 +206,7 @@ export class DemoData {
         tags: ['design', 'parameters'],
         creationDate: '2026-10-07T10:05:00Z',
         author: 'contributor@example.com',
+        inNewCodePeriod: true,
       },
       {
         id: 'demo-maint-3',
@@ -209,6 +222,23 @@ export class DemoData {
         tags: ['unused'],
         creationDate: '2026-10-09T14:40:00Z',
         author: 'intern@example.com',
+        inNewCodePeriod: true,
+      },
+      {
+        id: 'demo-maint-4',
+        ruleKey: 'javascript:S1481',
+        message: 'Remove this unused local variable `cachedAuthToken`',
+        component: 'src/config/authConfig.ts',
+        filePath: 'src/config/authConfig.ts',
+        line: 42,
+        type: 'CODE_SMELL',
+        severity: 'MINOR',
+        status: 'OPEN',
+        effort: '5min',
+        tags: ['unused', 'clean-code'],
+        creationDate: '2026-10-09T15:00:00Z',
+        author: 'developer@example.com',
+        inNewCodePeriod: true,
       },
 
       // Security Hotspots
@@ -225,6 +255,7 @@ export class DemoData {
         tags: ['cryptography', 'owasp-a3'],
         creationDate: '2026-10-05T09:00:00Z',
         author: 'developer@example.com',
+        inNewCodePeriod: true,
       },
       {
         id: 'demo-hotspot-2',
@@ -239,6 +270,7 @@ export class DemoData {
         tags: ['cors', 'security'],
         creationDate: '2026-10-04T15:30:00Z',
         author: 'lead@example.com',
+        inNewCodePeriod: false,
       },
 
       // Coverage
@@ -255,6 +287,7 @@ export class DemoData {
         effort: '1h',
         tags: ['test-coverage', 'unit-test'],
         creationDate: '2026-10-09T00:00:00Z',
+        inNewCodePeriod: true,
       },
       {
         id: 'demo-cov-2',
@@ -269,6 +302,7 @@ export class DemoData {
         effort: '30min',
         tags: ['test-coverage', 'unit-test'],
         creationDate: '2026-10-09T00:00:00Z',
+        inNewCodePeriod: false,
       },
 
       // Duplications
@@ -285,6 +319,7 @@ export class DemoData {
         effort: '25min',
         tags: ['duplication', 'refactor'],
         creationDate: '2026-10-08T00:00:00Z',
+        inNewCodePeriod: false,
       },
       {
         id: 'demo-dup-2',
@@ -299,28 +334,31 @@ export class DemoData {
         effort: '25min',
         tags: ['duplication', 'refactor'],
         creationDate: '2026-10-08T00:00:00Z',
+        inNewCodePeriod: false,
       },
     ];
 
+    const scopedItems = period === 'new' ? items.filter((i) => i.inNewCodePeriod === true) : items;
+
     if (!category || category === 'all') {
-      return items;
+      return scopedItems;
     }
 
     switch (category) {
       case 'reliability':
-        return items.filter((i) => i.type === 'BUG');
+        return scopedItems.filter((i) => i.type === 'BUG');
       case 'security':
-        return items.filter((i) => i.type === 'VULNERABILITY');
+        return scopedItems.filter((i) => i.type === 'VULNERABILITY');
       case 'maintainability':
-        return items.filter((i) => i.type === 'CODE_SMELL');
+        return scopedItems.filter((i) => i.type === 'CODE_SMELL');
       case 'hotspots':
-        return items.filter((i) => i.type === 'HOTSPOT');
+        return scopedItems.filter((i) => i.type === 'HOTSPOT');
       case 'coverage':
-        return items.filter((i) => i.type === 'COVERAGE');
+        return scopedItems.filter((i) => i.type === 'COVERAGE');
       case 'duplications':
-        return items.filter((i) => i.type === 'DUPLICATION');
+        return scopedItems.filter((i) => i.type === 'DUPLICATION');
       default:
-        return items;
+        return scopedItems;
     }
   }
 

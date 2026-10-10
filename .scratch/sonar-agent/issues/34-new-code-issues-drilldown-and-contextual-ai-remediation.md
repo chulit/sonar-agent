@@ -4,11 +4,11 @@
 
 **Blocked by:** 33
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Update `SonarClient.getIssues(projectKey, category, inNewCodePeriod)` to pass `inNewCodePeriod=true` when requested.
-- [ ] In `SonarOverviewViewProvider`, pass active `codePeriod` when querying issues for drilldown and drawer lists.
-- [ ] Update "Clean Current File with AI" and `AgentDispatcher` batch prompt builders to respect active `codePeriod`, prioritizing or filtering issues to New Code when active.
-- [ ] Add empty state indicator in issues list when 0 issues exist in New Code period.
-- [ ] Unit tests for `SonarClient.getIssues` with `inNewCodePeriod`, drilldown filtering, and prompt generation scoping.
-- [ ] Build, typecheck, lint, and tests all pass.
+- [x] Update `SonarClient.getIssues(projectKey, category, inNewCodePeriod)` to pass `inNewCodePeriod=true` when requested.
+- [x] In `SonarOverviewViewProvider`, pass active `codePeriod` when querying issues for drilldown and drawer lists.
+- [x] Update "Clean Current File with AI" and `AgentDispatcher` batch prompt builders to respect active `codePeriod`, prioritizing or filtering issues to New Code when active.
+- [x] Add empty state indicator in issues list when 0 issues exist in New Code period.
+- [x] Unit tests for `SonarClient.getIssues` with `inNewCodePeriod`, drilldown filtering, and prompt generation scoping.
+- [x] Build, typecheck, lint, and tests all pass.

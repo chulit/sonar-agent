@@ -727,6 +727,48 @@ describe('AgentDispatcher - Deep Dispatch Seam', () => {
       expect(dispatchedPrompt).toContain('Issue #1: Line 10');
       expect(dispatchedPrompt).toContain('Issue #2: Line 20');
     });
+
+    it('scopes single issue prompt to New Code period when inNewCodePeriod or codePeriod option is set', async () => {
+      const dispatcher = new AgentDispatcher({
+        fetchRuleFn: async (key) => ({
+          key,
+          name: 'Sample Rule',
+          cleanDesc: 'Guidance',
+        }),
+      });
+
+      const newItem: SonarDetailItem = {
+        ...sampleItem,
+        inNewCodePeriod: true,
+      };
+
+      const promptFromItem = await dispatcher.assemblePrompt(newItem);
+      expect(promptFromItem).toContain('- Scope: New Code Period (Clean as You Code)');
+
+      const promptFromOption = await dispatcher.assemblePrompt(sampleItem, { codePeriod: 'new' });
+      expect(promptFromOption).toContain('- Scope: New Code Period (Clean as You Code)');
+    });
+
+    it('scopes batch prompt header and items to New Code period when codePeriod is new', async () => {
+      const dispatcher = new AgentDispatcher({
+        fetchRuleFn: async (key) => ({
+          key,
+          name: 'Sample Rule',
+          cleanDesc: 'Guidance',
+        }),
+      });
+
+      const items: SonarDetailItem[] = [
+        sampleItem,
+        { ...sampleItem, id: 'ISSUE-2', line: 20, message: 'Second issue' },
+      ];
+
+      const batchPrompt = await dispatcher.assembleBatchPrompt(items, { codePeriod: 'new' });
+      expect(batchPrompt).toContain(
+        'Please fix the following 2 SonarQube issues (New Code Period - Clean as You Code)',
+      );
+      expect(batchPrompt).toContain('- Scope: New Code Period');
+    });
   });
 
   describe('dispatchDiagnostic', () => {
