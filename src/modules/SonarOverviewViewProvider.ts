@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ProjectDetector } from './ProjectDetector.js';
 import {
@@ -15,6 +16,7 @@ import { SonarLocalScanner } from './SonarLocalScanner.js';
 import { Logger } from './Logger.js';
 import { DemoData } from './DemoData.js';
 import { SonarStatusBar } from './SonarStatusBar.js';
+import { FileIssueAggregator } from './FileIssueAggregator.js';
 import {
   ISSUE_LIFECYCLE_CSS,
   ISSUE_LIFECYCLE_MENU_SCRIPT,
@@ -51,6 +53,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
   private currentUserLogin: string | null = null;
   private _currentDetailCategory: string | null = null;
   private _isDemoMode = false;
+  private _cachedServerIssues: SonarDetailItem[] = [];
+  private readonly fileIssueAggregator: FileIssueAggregator;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -74,6 +78,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         fileNavigator: this.fileNavigator,
         projectDetector: this.projectDetector,
       });
+    this.fileIssueAggregator = new FileIssueAggregator({
+      getCachedIssuesFn: () => this.getAllCachedIssues(),
+    });
     this.diagnosticCollection =
       diagnosticCollection ?? vscode.languages.createDiagnosticCollection('SonarQube');
     this.connectionWizard =
@@ -170,6 +177,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
             await this._handleSendBatchToAgent(message.items, message.targetAgentId);
             break;
           }
+          case 'cleanCurrentFile': {
+            await this.cleanCurrentFile();
+            break;
+          }
           case 'enableDemoMode': {
             await this.enableDemoMode();
             break;
@@ -240,7 +251,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     // Proactively sync state when view is created or becomes visible
     void this._syncState();
 
-    webviewView.onDidChangeVisibility(() => {
+    webviewView.onDidChangeVisibility?.(() => {
       if (webviewView.visible) {
         void this._syncState();
         if (this._currentCodeEnabled && this._activeTab === 'currentCode') {
@@ -311,6 +322,50 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
   public getStatusBar(): SonarStatusBar {
     return this.statusBar;
+  }
+
+  public getFileIssueAggregator(): FileIssueAggregator {
+    return this.fileIssueAggregator;
+  }
+
+  public getAllCachedIssues(): SonarDetailItem[] {
+    if (this._isDemoMode) {
+      return DemoData.getDetails();
+    }
+    const set = new Map<string, SonarDetailItem>();
+    for (const item of this._currentCodeItems) {
+      set.set(item.id, item);
+    }
+    for (const item of this._cachedServerIssues) {
+      set.set(item.id, item);
+    }
+    return Array.from(set.values());
+  }
+
+  public async cleanCurrentFile(
+    targetDoc?: vscode.TextDocument,
+  ): Promise<{ ok: boolean; count: number; message: string }> {
+    const doc = targetDoc ?? vscode.window.activeTextEditor?.document;
+    if (!doc) {
+      const msg = 'No active editor found. Open a file to clean Sonar issues.';
+      vscode.window.showInformationMessage(msg);
+      return { ok: false, count: 0, message: msg };
+    }
+
+    const issues = this.fileIssueAggregator.aggregateIssuesForDocument(doc);
+    if (issues.length === 0) {
+      const fileName = path.basename(doc.fileName || doc.uri.fsPath);
+      const msg = `No Sonar issues detected in ${fileName}. File is clean!`;
+      vscode.window.showInformationMessage(msg);
+      return { ok: true, count: 0, message: msg };
+    }
+
+    const effectiveDefaultAgent = this._getEffectiveDefaultAgent();
+    const result = await this.agentDispatcher.dispatchBatch(issues, {
+      targetAgentId: effectiveDefaultAgent,
+    });
+
+    return { ok: result.ok, count: issues.length, message: result.message };
   }
 
   public dispose(): void {
@@ -565,6 +620,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         items = await client.getIssues(config.projectKey);
       }
 
+      this._updateCachedServerIssues(items);
       this._view.webview.postMessage({
         type: 'details',
         category,
@@ -579,6 +635,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     } finally {
       this._view.webview.postMessage({ type: 'loadingDetails', loading: false });
     }
+  }
+
+  private _updateCachedServerIssues(items: SonarDetailItem[]): void {
+    const map = new Map<string, SonarDetailItem>();
+    for (const existing of this._cachedServerIssues) {
+      map.set(existing.id, existing);
+    }
+    for (const item of items) {
+      map.set(item.id, item);
+    }
+    this._cachedServerIssues = Array.from(map.values());
   }
 
   /**
@@ -2385,6 +2452,10 @@ ${ISSUE_LIFECYCLE_CSS}
               <input type="checkbox" id="current-select-all-checkbox" />
               <span>Select All</span>
             </label>
+            <button id="clean-file-btn" class="btn btn-agent btn-sm hidden" title="Clean Current File with AI">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>
+              Clean File with AI
+            </button>
             <button id="run-full-scan-btn" class="btn btn-secondary btn-sm">Run Full Scan</button>
           </div>
         </div>
@@ -3080,6 +3151,7 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
     const currentEmptyClean = document.getElementById("current-empty-clean");
     const currentSourceLabel = document.getElementById("current-source-label");
     const runFullScanBtn = document.getElementById("run-full-scan-btn");
+    const cleanFileBtn = document.getElementById("clean-file-btn");
     const installSonarlintBtn = document.getElementById("install-sonarlint-btn");
     const runFullScanEmptyBtn = document.getElementById("run-full-scan-empty-btn");
 
@@ -3235,6 +3307,9 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       if (!currentIssuesContainer) return;
       currentIssuesContainer.innerHTML = "";
       const hasItems = currentCodeItems.length > 0;
+      if (cleanFileBtn) {
+        cleanFileBtn.classList.toggle("hidden", !hasItems);
+      }
       if (currentEmptySonarlint) {
         currentEmptySonarlint.classList.toggle("hidden", sonarLintInstalled !== false || hasItems);
       }
@@ -3258,6 +3333,11 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
     if (tabCurrent) {
       tabCurrent.addEventListener("click", () => {
         vscode.postMessage({ command: "switchTab", tab: "currentCode" });
+      });
+    }
+    if (cleanFileBtn) {
+      cleanFileBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "cleanCurrentFile" });
       });
     }
     if (runFullScanBtn) {

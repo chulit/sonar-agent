@@ -4,13 +4,13 @@
 
 **Blocked by:** 25: Try Demo Mode Onboarding, 26: Status Bar Quality Gate Item
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Hybrid file issue aggregator finds all Sonar issues for the active text editor document (SonarClient cache + fallback to active editor diagnostics).
-- [ ] Command `sonarAgent.cleanCurrentFile` registered and exposed in Command Palette.
-- [ ] Editor title bar action button (`$(sparkle) Clean Current File with AI`) added under `editor/title` with `when: editorTextFocus` condition.
-- [ ] Sidebar Current Code view displays a "Clean File with AI" batch action button when issues exist for the current file.
-- [ ] Dispatches a comprehensive batch prompt including file path, rule summaries, line numbers, and code context to the selected AI assistant.
-- [ ] Displays informative notification if no Sonar issues are detected in the active file.
-- [ ] Unit tests verify file path matching, hybrid fallback resolution, command dispatching, and notification on clean files.
-- [ ] All test suites, linting, and typechecks pass with zero regressions.
+- [x] Hybrid file issue aggregator finds all Sonar issues for the active text editor document (SonarClient cache + fallback to active editor diagnostics).
+- [x] Command `sonarAgent.cleanCurrentFile` registered and exposed in Command Palette.
+- [x] Editor title bar action button (`$(sparkle) Clean Current File with AI`) added under `editor/title` with `when: editorTextFocus` condition.
+- [x] Sidebar Current Code view displays a "Clean File with AI" batch action button when issues exist for the current file.
+- [x] Dispatches a comprehensive batch prompt including file path, rule summaries, line numbers, and code context to the selected AI assistant.
+- [x] Displays informative notification if no Sonar issues are detected in the active file.
+- [x] Unit tests verify file path matching, hybrid fallback resolution, command dispatching, and notification on clean files.
+- [x] All test suites, linting, and typechecks pass with zero regressions.

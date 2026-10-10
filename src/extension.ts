@@ -68,6 +68,17 @@ export function activate(context: vscode.ExtensionContext) {
         await codeActionProvider.executeFixWithAgent(diagnostic, document);
       },
     ),
+    vscode.commands.registerCommand('sonarAgent.cleanCurrentFile', async (uri?: vscode.Uri) => {
+      let doc: vscode.TextDocument | undefined;
+      if (uri) {
+        try {
+          doc = await vscode.workspace.openTextDocument(uri);
+        } catch {
+          // fallback to active editor
+        }
+      }
+      await overviewProvider.cleanCurrentFile(doc);
+    }),
   );
 
   void projectDetector

@@ -87,11 +87,23 @@
         "title": "Fix Sonar Issue with AI Agent"
       },
       {
+        "command": "sonarAgent.cleanCurrentFile",
+        "title": "Clean Current File with AI",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "sonarAgent.showLogs",
         "title": "Show Logs"
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "sonarAgent.cleanCurrentFile",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        }
+      ],
       "view/title": [
         {
           "command": "sonarAgent.refresh",
