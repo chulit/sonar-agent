@@ -1,3 +1,16 @@
+# [1.6.0](https://github.com/chulit/sonar-agent/compare/v1.5.1...v1.6.0) (2026-10-10)
+
+
+### Features
+
+* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([278e0f5](https://github.com/chulit/sonar-agent/commit/278e0f593b93f06543feda700f2535c460cdd564))
+* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([980055f](https://github.com/chulit/sonar-agent/commit/980055ffd1ace19ea10854f0e24c7e240e36adea))
+* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([5a78f3b](https://github.com/chulit/sonar-agent/commit/5a78f3b859aec38657dd0654fad3ed9c8380694c))
+* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([2d6fd40](https://github.com/chulit/sonar-agent/commit/2d6fd40ee58e5fead7e8d4ca7637bc3b9e1b41d1))
+* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([39deb85](https://github.com/chulit/sonar-agent/commit/39deb851af99da136f4e1d0b6f512e620c88c020))
+* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([5a8c322](https://github.com/chulit/sonar-agent/commit/5a8c32261a5763fc12fdebb5c278d00c8690fce6))
+* SonarCloud org support + 10.x taxonomy (clean branch from v1.5.1) ([a0f615c](https://github.com/chulit/sonar-agent/commit/a0f615c8cfb8399f73d3aa65d5165d2a3a5dd1e5))
+
 ## [1.5.1](https://github.com/chulit/sonar-agent/compare/v1.5.0...v1.5.1) (2026-10-09)
 
 
