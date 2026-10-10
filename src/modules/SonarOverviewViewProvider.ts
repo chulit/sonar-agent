@@ -17,6 +17,7 @@ import { Logger } from './Logger.js';
 import { DemoData } from './DemoData.js';
 import { SonarStatusBar } from './SonarStatusBar.js';
 import { FileIssueAggregator } from './FileIssueAggregator.js';
+import { GitStageGuard } from './GitStageGuard.js';
 import {
   ISSUE_LIFECYCLE_CSS,
   ISSUE_LIFECYCLE_MENU_SCRIPT,
@@ -55,6 +56,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
   private _isDemoMode = false;
   private _cachedServerIssues: SonarDetailItem[] = [];
   private readonly fileIssueAggregator: FileIssueAggregator;
+  private readonly gitStageGuard: GitStageGuard;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -66,6 +68,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     localScanner?: SonarLocalScanner,
     workspaceRoot?: string,
     statusBar?: SonarStatusBar,
+    gitStageGuard?: GitStageGuard,
   ) {
     this.workspaceRoot = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     this.fileNavigator = fileNavigator ?? new FileNavigator();
@@ -90,6 +93,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         onConfigChanged: () => this.refresh(),
         promptProjectSelectionFn: () => this.promptProjectSelection(),
       });
+    this.gitStageGuard =
+      gitStageGuard ??
+      new GitStageGuard({
+        workspaceRoot: this.workspaceRoot,
+        getCachedIssuesFn: () => this.getAllCachedIssues(),
+        dispatchBatchFn: async (issues) => {
+          const agent = this._getEffectiveDefaultAgent();
+          return await this.agentDispatcher.dispatchBatch(issues, { targetAgentId: agent });
+        },
+      });
+    void this.gitStageGuard.initialize();
   }
 
   public resolveWebviewView(
@@ -183,6 +197,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
           }
           case 'generateMissingTests': {
             await this.generateMissingTests(message.item, message.targetAgentId);
+            break;
+          }
+          case 'checkStagedFiles': {
+            await this.checkStagedFiles(true);
             break;
           }
           case 'enableDemoMode': {
@@ -449,8 +467,17 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     return await this.agentDispatcher.dispatchIssue(item, { targetAgentId: agent });
   }
 
+  public async checkStagedFiles(interactive = true): Promise<{
+    stagedFileCount: number;
+    issueCount: number;
+    issues: SonarDetailItem[];
+  }> {
+    return await this.gitStageGuard.checkStagedFiles(interactive);
+  }
+
   public dispose(): void {
     this.statusBar.dispose();
+    this.gitStageGuard.dispose();
   }
 
   public isCurrentCodeEnabled(): boolean {

@@ -101,6 +101,11 @@
         "icon": "$(beaker)"
       },
       {
+        "command": "sonarAgent.checkStagedFiles",
+        "title": "Check Staged Files for Sonar Issues",
+        "icon": "$(source-control)"
+      },
+      {
         "command": "sonarAgent.showLogs",
         "title": "Show Logs"
       }
@@ -206,6 +211,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable inline Sonar CodeLens annotations above lines with detected issues."
+        },
+        "sonarAgent.gitGuard.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Monitor git staged files and warn before committing if unresolved Sonar issues are detected."
         }
       }
     }

@@ -51,6 +51,7 @@ describe('extension entrypoint', () => {
     expect(registeredCommands.has('sonarAgent.explainRuleWithAgent')).toBe(true);
     expect(registeredCommands.has('sonarAgent.cleanCurrentFile')).toBe(true);
     expect(registeredCommands.has('sonarAgent.generateMissingTests')).toBe(true);
+    expect(registeredCommands.has('sonarAgent.checkStagedFiles')).toBe(true);
 
     // Test explainRuleWithAgent with no arguments
     await registeredCommands.get('sonarAgent.explainRuleWithAgent')!(null, null);
@@ -60,6 +61,9 @@ describe('extension entrypoint', () => {
 
     // Test generateMissingTests
     await registeredCommands.get('sonarAgent.generateMissingTests')!();
+
+    // Test checkStagedFiles
+    await registeredCommands.get('sonarAgent.checkStagedFiles')!();
 
     // Test showLogs
     registeredCommands.get('sonarAgent.showLogs')!();

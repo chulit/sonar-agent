@@ -104,6 +104,9 @@ export function activate(context: vscode.ExtensionContext) {
       }
       await overviewProvider.generateMissingTests(doc ?? target);
     }),
+    vscode.commands.registerCommand('sonarAgent.checkStagedFiles', async () => {
+      await overviewProvider.checkStagedFiles(true);
+    }),
   );
 
   void projectDetector

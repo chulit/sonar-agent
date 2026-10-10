@@ -4,12 +4,12 @@
 
 **Blocked by:** 28: 1-Click Clean Current File with AI
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Git extension watcher hooks into `git.repositories` state changes via `vscode.extensions.getExtension('vscode.git')`.
-- [ ] Configurable setting `sonarAgent.gitGuard.enabled` (default `true`) allows users to enable or disable the guard.
-- [ ] Command `sonarAgent.checkStagedFiles` registered to allow manual inspection of staged files.
-- [ ] Warning notification displays when staged files have Sonar issues, offering `[Clean Staged Files with AI]` and `[Ignore]` options.
-- [ ] Clicking `[Clean Staged Files with AI]` triggers batch prompt dispatching for all issues found across staged files.
-- [ ] Unit tests verify Git API event handling, setting toggle behavior, notification filtering, and dispatching.
-- [ ] All test suites, linting, and typechecks pass with zero regressions.
+- [x] Git extension watcher hooks into `git.repositories` state changes via `vscode.extensions.getExtension('vscode.git')`.
+- [x] Configurable setting `sonarAgent.gitGuard.enabled` (default `true`) allows users to enable or disable the guard.
+- [x] Command `sonarAgent.checkStagedFiles` registered to allow manual inspection of staged files.
+- [x] Warning notification displays when staged files have Sonar issues, offering `[Clean Staged Files with AI]` and `[Ignore]` options.
+- [x] Clicking `[Clean Staged Files with AI]` triggers batch prompt dispatching for all issues found across staged files.
+- [x] Unit tests verify Git API event handling, setting toggle behavior, notification filtering, and dispatching.
+- [x] All test suites, linting, and typechecks pass with zero regressions.
