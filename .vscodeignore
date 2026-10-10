@@ -12,5 +12,7 @@ tsconfig.json
 vitest.config.ts
 .prettier*
 .releaserc*
+coverage/**
+scripts/**
 **/*.map
 !dist/**
