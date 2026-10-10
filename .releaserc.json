@@ -4,12 +4,6 @@
     "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
     [
-      "@semantic-release/changelog",
-      {
-        "changelogFile": "CHANGELOG.md"
-      }
-    ],
-    [
       "@semantic-release/npm",
       {
         "npmPublish": false
@@ -20,13 +14,6 @@
       {
         "prepareCmd": "npm run build && npx @vscode/vsce package ${nextRelease.version} --no-git-tag-version -o sonar-agent-${nextRelease.version}.vsix",
         "publishCmd": "npx @vscode/vsce publish --packagePath sonar-agent-${nextRelease.version}.vsix --skip-duplicate && (test -z \"$OVSX_PAT\" || npx ovsx publish sonar-agent-${nextRelease.version}.vsix -p \"$OVSX_PAT\" --skip-duplicate)"
-      }
-    ],
-    [
-      "@semantic-release/git",
-      {
-        "assets": ["package.json", "package-lock.json", "CHANGELOG.md"],
-        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ],
     [
