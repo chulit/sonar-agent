@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { SonarClient, SonarDetailItem, SonarRuleDoc } from './SonarClient.js';
 import { FileNavigator } from './FileNavigator.js';
 import { ProjectDetector } from './ProjectDetector.js';
+import { DemoData } from './DemoData.js';
 
 export interface CodeSnippetContext {
   snippet: string;
@@ -253,6 +254,7 @@ export class AgentDispatcher {
       }
     }
 
+    doc ??= DemoData.getRuleDoc(ruleKey);
     doc ??= {
       key: ruleKey,
       name: ruleKey,

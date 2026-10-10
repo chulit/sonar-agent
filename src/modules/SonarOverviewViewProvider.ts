@@ -13,6 +13,7 @@ import { AgentDispatcher } from './AgentDispatcher.js';
 import { ConnectionProfileWizard } from './ConnectionProfileWizard.js';
 import { SonarLocalScanner } from './SonarLocalScanner.js';
 import { Logger } from './Logger.js';
+import { DemoData } from './DemoData.js';
 import {
   ISSUE_LIFECYCLE_CSS,
   ISSUE_LIFECYCLE_MENU_SCRIPT,
@@ -47,6 +48,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
   private readonly issueTransitionsCache = new Map<string, string[]>();
   private currentUserLogin: string | null = null;
   private _currentDetailCategory: string | null = null;
+  private _isDemoMode = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -164,6 +166,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
             await this._handleSendBatchToAgent(message.items, message.targetAgentId);
             break;
           }
+          case 'enableDemoMode': {
+            await this.enableDemoMode();
+            break;
+          }
+          case 'disableDemoMode': {
+            await this.disableDemoMode();
+            break;
+          }
           case 'fetchIssueTransitions': {
             await this._handleFetchIssueTransitions(message.issueKey);
             break;
@@ -248,6 +258,43 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     if (this._view) {
       await this._syncState();
     }
+  }
+
+  public get isDemoMode(): boolean {
+    return this._isDemoMode;
+  }
+
+  public async enableDemoMode(): Promise<void> {
+    this._isDemoMode = true;
+    const demoOverview = DemoData.getOverview();
+    const demoGate = DemoData.getQualityGate();
+    const demoProjects = DemoData.getProjects();
+    const effectiveDefaultAgent = this._getEffectiveDefaultAgent();
+    const availableAgents = this.agentDispatcher.getAvailableAgents();
+
+    const demoState = {
+      type: 'state',
+      state: 'connected',
+      isDemoMode: true,
+      serverUrl: 'http://localhost:9000 (Demo)',
+      projectKey: 'demo-sample-project',
+      projects: demoProjects,
+      overview: demoOverview,
+      qualityGate: demoGate,
+      profiles: [],
+      activeProfileId: undefined,
+      defaultAgent: effectiveDefaultAgent,
+      availableAgents,
+    };
+    this._lastStateMessage = demoState;
+    await this._view?.webview.postMessage(demoState);
+    await this._view?.webview.postMessage({ type: 'qualityGate', status: demoGate });
+    await this._view?.webview.postMessage({ type: 'loading', loading: false });
+  }
+
+  public async disableDemoMode(): Promise<void> {
+    this._isDemoMode = false;
+    await this._syncState();
   }
 
   public isCurrentCodeEnabled(): boolean {
@@ -460,6 +507,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
     if (!this._view) return;
 
     this._currentDetailCategory = category;
+
+    if (this._isDemoMode) {
+      const items = DemoData.getDetails(category);
+      this._view.webview.postMessage({
+        type: 'details',
+        category,
+        items,
+      });
+      return;
+    }
 
     const config = await this.projectDetector.getConfig();
     const token = await this.projectDetector.getToken();
@@ -916,6 +973,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    if (this._isDemoMode) {
+      await this.enableDemoMode();
+      return;
+    }
+
     try {
       const config = await this.projectDetector.getConfig();
       const token = await this.projectDetector.getToken();
@@ -1262,6 +1324,35 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider {
 
     .btn-agent:hover {
       background: #0062a3;
+    }
+
+    .demo-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: var(--vscode-editorInfo-background, rgba(0, 122, 204, 0.12));
+      border: 1px solid var(--vscode-editorInfo-foreground, #3794ff);
+      border-radius: 4px;
+      gap: 8px;
+    }
+
+    .demo-banner-content {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .demo-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 2px 5px;
+      border-radius: 3px;
+      background: var(--vscode-badge-background, #007acc);
+      color: var(--vscode-badge-foreground, #ffffff);
     }
 
     .alert {
@@ -1985,7 +2076,13 @@ ${ISSUE_LIFECYCLE_CSS}
         <input type="password" id="user-token" placeholder="Enter SonarQube User Token" spellcheck="false" autocomplete="off" />
       </div>
 
-      <button id="connect-btn" class="btn">Connect & Verify</button>
+      <button id="connect-btn" class="btn" style="width: 100%;">Connect & Verify</button>
+      <div style="display: flex; align-items: center; margin: 10px 0; gap: 8px;">
+        <hr style="flex: 1; border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));" />
+        <span style="font-size: 10px; color: var(--vscode-descriptionForeground); text-transform: uppercase;">or</span>
+        <hr style="flex: 1; border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));" />
+      </div>
+      <button id="try-demo-btn" class="btn btn-secondary" style="width: 100%;">⚡ Try Demo Mode (Instant Preview)</button>
     </div>
 
     <!-- No Profiles Empty State -->
@@ -1993,11 +2090,25 @@ ${ISSUE_LIFECYCLE_CSS}
       <p style="font-size: 12px; line-height: 1.4; color: var(--vscode-descriptionForeground);">
         No connection profiles yet. Create one to connect to SonarQube and monitor Overall Code quality.
       </p>
-      <button id="create-profile-btn" class="btn">New Connection Profile</button>
+      <button id="create-profile-btn" class="btn" style="width: 100%;">New Connection Profile</button>
+      <div style="display: flex; align-items: center; margin: 10px 0; gap: 8px;">
+        <hr style="flex: 1; border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));" />
+        <span style="font-size: 10px; color: var(--vscode-descriptionForeground); text-transform: uppercase;">or</span>
+        <hr style="flex: 1; border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));" />
+      </div>
+      <button id="no-profiles-demo-btn" class="btn btn-secondary" style="width: 100%;">⚡ Try Demo Mode (Instant Preview)</button>
     </div>
 
     <!-- Connected Dashboard View -->
     <div id="connected-view" class="${isConfigured ? '' : 'hidden'}" style="display: flex; flex-direction: column; gap: 10px;">
+      <!-- Demo Mode Accent Banner -->
+      <div id="demo-banner" class="demo-banner hidden">
+        <div class="demo-banner-content">
+          <span class="demo-badge">DEMO MODE</span>
+          <span style="font-size: 11px;">Viewing sample SonarQube data</span>
+        </div>
+        <button id="exit-demo-btn" class="btn btn-sm btn-secondary" title="Exit Demo Mode">Exit Demo Mode</button>
+      </div>
       <!-- Project & Target Agent Selector Bar -->
       <div class="card" style="padding: 8px 10px; gap: 8px;">
         <div>
@@ -3254,6 +3365,29 @@ ${ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT}
       vscode.postMessage({ command: "createProfile" });
     });
 
+    const tryDemoBtn = document.getElementById("try-demo-btn");
+    if (tryDemoBtn) {
+      tryDemoBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "enableDemoMode" });
+      });
+    }
+
+    const noProfilesDemoBtn = document.getElementById("no-profiles-demo-btn");
+    if (noProfilesDemoBtn) {
+      noProfilesDemoBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "enableDemoMode" });
+      });
+    }
+
+    const exitDemoBtn = document.getElementById("exit-demo-btn");
+    if (exitDemoBtn) {
+      exitDemoBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "disableDemoMode" });
+      });
+    }
+
+    const demoBanner = document.getElementById("demo-banner");
+
     function renderProfileSwitcher(profiles, activeProfileId) {
       if (!profiles || !Array.isArray(profiles) || profiles.length === 0) {
         profileSwitcher.classList.add("hidden");
@@ -3313,6 +3447,12 @@ ${ISSUE_LIFECYCLE_MESSAGE_SCRIPT}
             connectedView.classList.remove("hidden");
             renderProfileSwitcher(message.profiles, message.activeProfileId);
 
+            if (message.isDemoMode) {
+              demoBanner?.classList.remove("hidden");
+            } else {
+              demoBanner?.classList.add("hidden");
+            }
+
             if (message.availableAgents && Array.isArray(message.availableAgents)) {
               targetAgentDropdown.innerHTML = "";
               message.availableAgents.forEach((agent) => {
@@ -3352,11 +3492,13 @@ ${ISSUE_LIFECYCLE_MESSAGE_SCRIPT}
               }
             }
           } else if (message.state === "no-profiles") {
+            demoBanner?.classList.add("hidden");
             connectedView.classList.add("hidden");
             onboardingView.classList.add("hidden");
             noProfilesView.classList.remove("hidden");
             renderProfileSwitcher(message.profiles, message.activeProfileId);
           } else {
+            demoBanner?.classList.add("hidden");
             connectedView.classList.add("hidden");
             noProfilesView.classList.add("hidden");
             onboardingView.classList.remove("hidden");

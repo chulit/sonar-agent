@@ -40,6 +40,22 @@ Developers using SonarQube often struggle with context switching between the web
 23. As a developer, I want dispatching to an agent without a direct chat-query API to trigger its focus command, open the target file at the issue line, copy the enriched Fix Prompt to the clipboard, and display a helpful toast notification.
 24. As a developer, I want clicking the "Configure Connection" gear button in the sidebar header to open an interactive QuickPick configuration menu, so that I can update my SonarQube Server URL and token with live verification, switch projects, disconnect, or open settings.
 25. As a developer, I want a reactive Filter Bar above the issues list (Severity, Author, File, Rule, Include Test Files) so that I can quickly narrow down issues of interest during drilldown review.
+26. As a new user without an active SonarQube server or token, I want a "Try Demo Mode" button in the onboarding and empty profiles views, so that I can immediately explore the extension's features, metric cards, and issue triage with realistic sample data.
+27. As a user exploring Demo Mode, I want to see a persistent banner informing me that Demo Mode is active with an "Exit Demo Mode" button, so that I understand I am viewing sample data and can switch back to connection setup at any time.
+28. As a user in Demo Mode, I want sample metrics for Quality Gate (failed status), Bugs, Vulnerabilities, Security Hotspots, Code Smells, Coverage, and Duplications, so that I can experience the full dashboard layout and drilldown interactions.
+29. As a user in Demo Mode, I want clicking "Fix with Agent" or "Send to Agent" on sample issues to generate and dispatch an enriched AI Fix Prompt, so that I can experience the core remediation workflow before connecting to a real server.
+30. As a developer, I want a persistent Status Bar item displaying the current Quality Gate status (e.g. `$(pass) Sonar: Passed` or `$(error) Sonar: Failed`), so that I have ambient awareness of my code quality without having to open the sidebar.
+31. As a developer, I want the Status Bar item to display a beaker icon (`$(beaker) Sonar: Demo (Failed)`) when Demo Mode is active, so that I can easily distinguish demo state from real server state.
+32. As a developer, I want hovering over the Status Bar item to show a rich Markdown tooltip summarizing project key, Quality Gate conditions, and key metrics (Bugs, Vulnerabilities, Coverage), so that I can see health details without opening the sidebar.
+33. As a developer, I want clicking the Status Bar item to immediately open and focus the Sonar Overview sidebar, so that I can navigate to the full dashboard with a single click.
+34. As a developer, I want the Status Bar item to automatically update whenever metrics are refreshed, a profile is switched, or demo mode is toggled, so that it always reflects current workspace state.
+35. As a developer browsing the VS Code Marketplace or GitHub repository, I want a dynamic demo visual and updated badges in the README, so that I can immediately understand the value and workflow of Sonar Agent before installing.
+36. As a developer, I want a 1-click "Clean Current File with AI" action in the editor title bar, Command Palette, and Current Code sidebar, so that I can automatically aggregate all Sonar issues in my active file and send a unified batch fix prompt to my AI assistant.
+37. As a developer, I want inline CodeLens annotations (`⚡ Sonar: <Issue Title> • [Fix with AI] • [Explain]`) above problematic lines in my code, so that I can triage and resolve issues without leaving the editor.
+38. As a developer, I want clicking `[Explain]` on a Sonar CodeLens or issue to dispatch an educational prompt to my AI assistant, so that I can get a beginner-friendly explanation of why the rule matters and how to refactor it.
+39. As a developer looking at low test coverage, I want an automatic test framework detector and a "Generate Missing Unit Tests" action that tailors the prompt to my project's framework (Vitest, Jest, Go test, Pytest), so that the AI generates idiomatic tests immediately.
+40. As a developer committing changes, I want an optional Git Stage Guard that warns me if my staged files contain unresolved Sonar issues, so that I can fix them before pushing and avoid failing CI/CD Quality Gates.
+41. As a developer reviewing metrics in the sidebar, I want responsive Bento Grid health rings (SVG circular progress) and a celebratory micro-animation when Quality Gate passes or issues reach zero, so that code quality review feels modern and rewarding.
 
 ## Implementation Decisions
 
@@ -48,20 +64,26 @@ Developers using SonarQube often struggle with context switching between the web
 - **`ProjectDetector`**: Small interface exposing `detectConfig(workspaceRoot)` and `saveConfig(config)`. Hides file parsing of `sonar-project.properties`, VS Code configuration lookup, and `context.secrets` management.
 - **`SonarClient`**: Small interface exposing `verifyConnection()`, `getOverview()`, `getDetails(category)`, `getEnrichedRule(ruleKey)`, and `fetchProjects()`. Hides HTTP authentication headers, pagination, error code translation, in-memory caching of rule documentation, and JSON mapping.
 - **`AgentDispatcher`**: Small interface exposing `getAvailableAgents()`, `dispatchSingle(item, targetAgentId)`, and `dispatchBatch(items, targetAgentId)`. Hides path resolution, environment and extension discovery, code context extraction from local text documents, rule enrichment assembly, command dispatching, and clipboard fallback.
-- **`SonarOverviewViewProvider`**: Implements `vscode.WebviewViewProvider`. Encapsulates the Webview HTML lifecycle, container-aware styles, dynamic dropdown population for detected agents, and the two-way message protocol between webview scripts and the extension host.
+- **`SonarOverviewViewProvider`**: Implements `vscode.WebviewViewProvider`. Encapsulates the Webview HTML lifecycle, container-aware styles, dynamic dropdown population for detected agents, the two-way message protocol between webview scripts and the extension host, and manages Demo Mode state toggles.
+- **`DemoData`**: Dedicated deep module encapsulating rich, realistic sample metrics, Quality Gate failure conditions, and mock issues with rule descriptions and snippet lines. Completely isolated from network dependencies.
+- **`SonarStatusBar`**: Encapsulates `vscode.StatusBarItem` lifecycle (`createStatusBarItem`, update, dispose). Translates Quality Gate status (Passed, Failed, Warning, Demo, Disconnected) into clean icons, text, and rich markdown tooltips with single-click focus navigation.
+- **`SonarCodeLensProvider`**: Implements `vscode.CodeLensProvider`. Encapsulates line coordinate mapping for Sonar diagnostics/cached issues and produces `[Fix with AI]` and `[Explain]` command lenses.
+- **`TestFrameworkDetector`**: Inspects workspace manifests (`package.json`, `go.mod`, `pyproject.toml`) and returns detected testing frameworks, test templates, and runner conventions for enriched prompt generation.
+- **`GitStageGuard`**: Integrates with the VS Code Git extension API (`vscode.git`). Monitors staged files and verifies them against cached Sonar issues, triggering interactive warning notifications and one-click AI resolution.
 
 ### 2. UI & Webview Architecture
 
 - Built with **Vanilla TypeScript + HTML/CSS** with zero third-party UI framework bloat, guaranteeing instant load times in the VS Code sidebar.
 - Styled using CSS **Container Queries** (`container-type: inline-size`) on the root container, allowing adaptive reflow between 1-column and 2-column metric cards based on sidebar width rather than viewport width.
 - Colors and typography bound strictly to VS Code theme variables (`var(--vscode-*)`) combined with standardized Sonar rating palette tokens.
-- Target Agent dropdown dynamically renders `<option>` elements from the array sent via `_syncState()`.
+- Onboarding and No Profiles views present an explicit secondary action button: `⚡ Try Demo Mode (Instant Preview)`.
+- When Demo Mode is active, an accent demo banner is pinned at the top with an `Exit Demo Mode` button.
 
 ### 3. Agent Dispatch Contracts
 
 - **Dynamic Discovery**:
   - `copilot`: Detected if extension `github.copilot` or `github.copilot-chat` is installed.
-  - `antigravity`: Detected if running in an Antigravity IDE environment (`appName` contains Antigravity or Antigravity environment config present).
+  - `antigravity`: Detected if running in an Antigravity IDE environment or if extension `google.google-antigravity` is installed.
   - `claude-code`: Detected if extension `anthropic.claude-code` is installed.
   - `cline`: Detected if extension `saoudrizwan.claude-dev` is installed.
   - `roo-code`: Detected if extension `rooveterinaryinc.roo-cline` is installed.
@@ -81,17 +103,19 @@ Developers using SonarQube often struggle with context switching between the web
 ### 1. Definition of a Good Test
 
 - Tests must verify external module behavior across clean seams, not internal private state.
-- No mocking of internal helper functions; test through the public methods of `SonarClient`, `ProjectDetector`, and `AgentDispatcher`.
+- No mocking of internal helper functions; test through the public methods of `SonarClient`, `ProjectDetector`, `AgentDispatcher`, `SonarOverviewViewProvider`, and `SonarStatusBar`.
 
 ### 2. Modules to Test
 
 - **`ProjectDetector`**: Test parsing valid, invalid, and missing `sonar-project.properties` files, and fallback priority between properties, VS Code settings, and secrets.
 - **`SonarClient`**: Test endpoint call construction, successful mapping of measures into `SonarOverview`, handling of HTTP 401/403/404 errors, and rule caching behavior.
 - **`AgentDispatcher`**: Test prompt construction for single issues, batch issues, coverage prompts, duplication prompts, and verifying clipboard fallback when chat commands are mocked as unavailable.
+- **`SonarOverviewViewProvider`**: Test `enableDemoMode` and `disableDemoMode` message handling, payload delivery to webview, and state recovery.
+- **`SonarStatusBar`**: Test status formatting (`$(pass)`, `$(error)`, `$(beaker)`), markdown tooltip generation, click command registration, and hide/dispose lifecycle.
 
 ### 3. Test Harness
 
-- Unit testing with `mocha` or `vitest` with Node.js assertions.
+- Unit testing with `vitest` with Node.js assertions.
 - Fast execution decoupled from the live VS Code GUI via dependency injection of workspace and storage adapters.
 
 ## Out of Scope
@@ -99,6 +123,7 @@ Developers using SonarQube often struggle with context switching between the web
 - Running local SonarScanner CLI executions directly from the extension (the extension consumes analysis already completed on the SonarQube server).
 - Writing back issue status changes (e.g., marking issues as "False Positive" or "Won't Fix" directly on SonarQube server) in version 1.0.
 - Supporting SonarCloud-specific organization/enterprise multi-tenant SAML web login flows (standard User Tokens are used).
+- Cross-window state synchronization for demo mode (scoped per extension host instance).
 
 ## Further Notes
 
