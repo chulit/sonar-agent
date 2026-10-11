@@ -1,3 +1,10 @@
+## [1.10.2](https://github.com/chulit/sonar-agent/compare/v1.10.1...v1.10.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **webview:** restore issue card checkboxes and selection styling ([c85a44e](https://github.com/chulit/sonar-agent/commit/c85a44eba90f4527b0fbd604ce8a7efc5276556b))
+
 # [1.10.0](https://github.com/chulit/sonar-agent/compare/v1.9.0...v1.10.0) (2026-10-10)
 
 ### Features
