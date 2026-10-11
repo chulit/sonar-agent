@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/chulit/sonar-agent/compare/v1.10.2...v1.11.0) (2026-10-11)
+
+
+### Features
+
+* **webview:** add local fix marking, optimistic metrics, and server reconciliation ([38c7bca](https://github.com/chulit/sonar-agent/commit/38c7bca9eb5ba8153aab3157eac5dac2f2be77c2))
+
 ## [1.10.2](https://github.com/chulit/sonar-agent/compare/v1.10.1...v1.10.2) (2026-10-11)
 
 

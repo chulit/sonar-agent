@@ -2,7 +2,7 @@
   "name": "sonar-agent",
   "displayName": "Sonar Agent - SonarQube AI Fix & Quality Metrics",
   "description": "Turn SonarQube Quality Gate Failures into Instant 1-Click AI Fixes (Copilot, Claude, Antigravity, Roo, Cline, Codex).",
-  "version": "1.10.2",
+  "version": "1.11.0",
   "icon": "media/icon.png",
   "publisher": "chulit",
   "repository": {
