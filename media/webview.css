@@ -1127,6 +1127,13 @@
       white-space: nowrap;
     }
 
+    .metric-fixed-badge {
+      color: #4ade80;
+      font-weight: 600;
+      font-size: 9px;
+      margin-left: 2px;
+    }
+
     .metric-helper {
       font-size: 9px;
       color: #64748b;
@@ -1264,6 +1271,9 @@
     body.vscode-light .metric-sublabel,
     body.vscode-light .metric-helper {
       color: #94a3b8;
+    }
+    body.vscode-light .metric-fixed-badge {
+      color: #16a34a;
     }
     body.vscode-light .health-ring-bg {
       stroke: rgba(0, 0, 0, 0.08);
@@ -1841,6 +1851,17 @@
       background: rgba(59, 130, 246, 0.05);
     }
 
+    .issue-card.fixed-locally {
+      opacity: 0.8;
+      border-color: rgba(34, 197, 94, 0.35);
+      background: rgba(34, 197, 94, 0.04);
+    }
+
+    .issue-card.fixed-locally .issue-title-bold {
+      text-decoration: line-through;
+      color: var(--vscode-descriptionForeground, #94a3b8);
+    }
+
     .issue-card-header {
       display: flex;
       align-items: center;
@@ -2028,6 +2049,13 @@
       font-weight: 600;
     }
 
+    .badge-fixed-locally {
+      background: rgba(34, 197, 94, 0.2);
+      border: 1px solid rgba(34, 197, 94, 0.45);
+      color: #4ade80;
+      font-weight: 600;
+    }
+
     .issue-footer {
       display: flex;
       align-items: center;
@@ -2106,6 +2134,26 @@
       border-color: rgba(255, 255, 255, 0.28);
       transform: translateY(-0.5px);
       box-shadow: 0 2px 8px rgba(37, 99, 235, 0.45);
+    }
+
+    .btn-mark-fixed {
+      border-color: rgba(34, 197, 94, 0.4);
+      color: #4ade80;
+    }
+
+    .btn-mark-fixed:hover {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: #4ade80;
+    }
+
+    .btn-undo-fix {
+      border-color: rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+    }
+
+    .btn-undo-fix:hover {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: #fbbf24;
     }
 
     /* Batch Actions Floating Bar */

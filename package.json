@@ -108,6 +108,10 @@
       {
         "command": "sonarAgent.showLogs",
         "title": "Show Logs"
+      },
+      {
+        "command": "sonarAgent.resetLocalFixes",
+        "title": "Reset Local Fixes"
       }
     ],
     "menus": {

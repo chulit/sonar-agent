@@ -213,4 +213,21 @@ describe('GitStageGuard', () => {
       vi.useRealTimers();
     }
   });
+
+  it('does not prompt warnings when all matching issues are marked as locally fixed (excluded from getCachedIssuesFn)', async () => {
+    // When issues on staged files are fixed locally, getCachedIssuesFn returns empty array
+    const guard = new GitStageGuard({
+      workspaceRoot: '/workspace',
+      getCachedIssuesFn: () => [],
+      dispatchBatchFn: mockDispatchBatchFn,
+      gitApiAccessor: async () => mockGitApi,
+      isEnabledFn: () => true,
+      showWarningMessageFn: mockWarningMessageFn,
+      showInformationMessageFn: mockInformationMessageFn,
+    });
+
+    const result = await guard.checkStagedFiles(false);
+    expect(result.issues).toEqual([]);
+    expect(mockWarningMessageFn).not.toHaveBeenCalled();
+  });
 });
