@@ -1524,6 +1524,42 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     }
   }
 
+  private _resolveIconUri(webview: vscode.Webview, mediaDir: string): string {
+    if (typeof webview.asWebviewUri === 'function' && this.extensionUri) {
+      try {
+        return webview
+          .asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.png'))
+          .toString();
+      } catch {
+        // Fall back to disk or base64 resolution
+      }
+    }
+
+    const iconPath = path.join(mediaDir, 'icon.png');
+    if (fs.existsSync(iconPath)) {
+      try {
+        return `data:image/png;base64,${fs.readFileSync(iconPath).toString('base64')}`;
+      } catch {
+        return 'media/icon.png';
+      }
+    }
+
+    return '';
+  }
+
+  private _getCodePeriodReplacements(codePeriod: SonarCodePeriod): Record<string, string> {
+    const isNew = codePeriod === 'new';
+    return {
+      '{{codePeriodMeasuresTitle}}': isNew ? 'New Code Measures' : 'Overall Code Measures',
+      '{{overallPeriodActive}}': isNew ? '' : 'active',
+      '{{overallPeriodSelected}}': isNew ? 'false' : 'true',
+      '{{newPeriodActive}}': isNew ? 'active' : '',
+      '{{newPeriodSelected}}': isNew ? 'true' : 'false',
+      '{{newPeriodNoticeHidden}}': isNew ? '' : 'hidden',
+      '{{codePeriodLabel}}': isNew ? 'New' : 'Overall',
+    };
+  }
+
   private _getHtmlForWebview(
     webview: vscode.Webview,
     isConfigured: boolean = false,
@@ -1545,31 +1581,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       .replace('/* {{issueLifecycleCardButtonScript}} */', ISSUE_LIFECYCLE_CARD_BUTTON_SCRIPT)
       .replace('/* {{issueLifecycleMessageScript}} */', ISSUE_LIFECYCLE_MESSAGE_SCRIPT);
 
-    const currentTabPanelHtml = currentCodeEnabled ? CURRENT_TAB_PANEL_HTML : '';
-    const tabBarHtml = currentCodeEnabled ? TAB_BAR_HTML : '';
+    const iconUri = this._resolveIconUri(webview, mediaDir);
 
-    let iconUri = '';
-    if (typeof webview.asWebviewUri === 'function' && this.extensionUri) {
-      try {
-        iconUri = webview
-          .asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.png'))
-          .toString();
-      } catch {
-        iconUri = '';
-      }
-    }
-    if (!iconUri) {
-      const iconPath = path.join(mediaDir, 'icon.png');
-      if (fs.existsSync(iconPath)) {
-        try {
-          iconUri = `data:image/png;base64,${fs.readFileSync(iconPath).toString('base64')}`;
-        } catch {
-          iconUri = 'media/icon.png';
-        }
-      }
-    }
-
-    return htmlTemplate
+    let html = htmlTemplate
       .replaceAll('{{cspSource}}', webview.cspSource)
       .replaceAll('{{nonce}}', nonce)
       .replaceAll('{{iconUri}}', iconUri)
@@ -1577,19 +1591,16 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       .replace('{{script}}', script)
       .replace('{{onboardingHidden}}', isConfigured ? 'hidden' : '')
       .replace('{{overviewHidden}}', isConfigured ? '' : 'hidden')
-      .replace(
-        '{{codePeriodMeasuresTitle}}',
-        codePeriod === 'new' ? 'New Code Measures' : 'Overall Code Measures',
-      )
-      .replace('{{overallPeriodActive}}', codePeriod === 'overall' ? 'active' : '')
-      .replace('{{overallPeriodSelected}}', codePeriod === 'overall' ? 'true' : 'false')
-      .replace('{{newPeriodActive}}', codePeriod === 'new' ? 'active' : '')
-      .replace('{{newPeriodSelected}}', codePeriod === 'new' ? 'true' : 'false')
-      .replace('{{newPeriodNoticeHidden}}', codePeriod === 'new' ? '' : 'hidden')
       .replace('{{issuesContainerHidden}}', isConfigured ? '' : 'hidden')
-      .replace('{{codePeriodLabel}}', codePeriod === 'new' ? 'New' : 'Overall')
-      .replace('{{tabBar}}', tabBarHtml)
-      .replace('{{currentTabPanel}}', currentTabPanelHtml);
+      .replace('{{tabBar}}', currentCodeEnabled ? TAB_BAR_HTML : '')
+      .replace('{{currentTabPanel}}', currentCodeEnabled ? CURRENT_TAB_PANEL_HTML : '');
+
+    const periodReplacements = this._getCodePeriodReplacements(codePeriod);
+    for (const [key, value] of Object.entries(periodReplacements)) {
+      html = html.replace(key, value);
+    }
+
+    return html;
   }
 
   private _getMediaDir(): string {

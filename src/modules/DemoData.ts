@@ -2,6 +2,9 @@ import {
   SonarOverview,
   SonarCodePeriod,
   QualityGateStatus,
+  QualityGateStatusValue,
+  QualityGateCondition,
+  SonarRating,
   SonarDetailItem,
   SonarRuleDoc,
 } from './SonarClient.js';
@@ -9,6 +12,42 @@ import {
 export interface DemoProject {
   key: string;
   name: string;
+}
+
+type RatingMetric = [number, SonarRating];
+type ConditionTuple = [QualityGateStatusValue, string, string, string, string];
+
+function createOverview(
+  period: SonarCodePeriod,
+  sec: RatingMetric,
+  rel: RatingMetric,
+  maint: RatingMetric,
+  acceptedIssues: number,
+  cov: [number, number],
+  dup: [number, number],
+  hot: RatingMetric,
+): SonarOverview {
+  return {
+    security: { count: sec[0], rating: sec[1] },
+    reliability: { count: rel[0], rating: rel[1] },
+    maintainability: { count: maint[0], rating: maint[1] },
+    acceptedIssues: { count: acceptedIssues },
+    coverage: { percentage: cov[0], linesToCover: cov[1] },
+    duplications: { percentage: dup[0], duplicatedLines: dup[1] },
+    securityHotspots: { count: hot[0], rating: hot[1] },
+    period,
+    hasNewCode: true,
+  };
+}
+
+function mapConditions(tuples: ConditionTuple[]): QualityGateCondition[] {
+  return tuples.map(([status, metricKey, comparator, errorThreshold, actualValue]) => ({
+    status,
+    metricKey,
+    comparator,
+    errorThreshold,
+    actualValue,
+  }));
 }
 
 export class DemoData {
@@ -23,29 +62,27 @@ export class DemoData {
 
   static getOverview(period: SonarCodePeriod = 'overall'): SonarOverview {
     if (period === 'new') {
-      return {
-        security: { count: 1, rating: 'B' },
-        reliability: { count: 2, rating: 'B' },
-        maintainability: { count: 4, rating: 'A' },
-        acceptedIssues: { count: 0 },
-        coverage: { percentage: 78.5, linesToCover: 140 },
-        duplications: { percentage: 0.0, duplicatedLines: 0 },
-        securityHotspots: { count: 1, rating: 'A' },
-        period: 'new',
-        hasNewCode: true,
-      };
+      return createOverview(
+        'new',
+        [1, 'B'],
+        [2, 'B'],
+        [4, 'A'],
+        0,
+        [78.5, 140],
+        [0.0, 0],
+        [1, 'A'],
+      );
     }
-    return {
-      security: { count: 3, rating: 'D' },
-      reliability: { count: 5, rating: 'C' },
-      maintainability: { count: 18, rating: 'B' },
-      acceptedIssues: { count: 2 },
-      coverage: { percentage: 64.2, linesToCover: 850 },
-      duplications: { percentage: 8.4, duplicatedLines: 120 },
-      securityHotspots: { count: 4, rating: 'E' },
-      period: 'overall',
-      hasNewCode: true,
-    };
+    return createOverview(
+      'overall',
+      [3, 'D'],
+      [5, 'C'],
+      [18, 'B'],
+      2,
+      [64.2, 850],
+      [8.4, 120],
+      [4, 'E'],
+    );
   }
 
   static getQualityGate(period: SonarCodePeriod = 'overall'): QualityGateStatus {
@@ -53,71 +90,23 @@ export class DemoData {
       return {
         status: 'ERROR',
         period: 'new',
-        conditions: [
-          {
-            status: 'ERROR',
-            metricKey: 'new_coverage',
-            comparator: 'LT',
-            errorThreshold: '80.0',
-            actualValue: '78.5',
-          },
-          {
-            status: 'OK',
-            metricKey: 'new_reliability_rating',
-            comparator: 'GT',
-            errorThreshold: '1',
-            actualValue: '1',
-          },
-          {
-            status: 'OK',
-            metricKey: 'new_security_rating',
-            comparator: 'GT',
-            errorThreshold: '1',
-            actualValue: '1',
-          },
-          {
-            status: 'OK',
-            metricKey: 'new_duplicated_lines_density',
-            comparator: 'GT',
-            errorThreshold: '3.0',
-            actualValue: '0.0',
-          },
-        ],
+        conditions: mapConditions([
+          ['ERROR', 'new_coverage', 'LT', '80.0', '78.5'],
+          ['OK', 'new_reliability_rating', 'GT', '1', '1'],
+          ['OK', 'new_security_rating', 'GT', '1', '1'],
+          ['OK', 'new_duplicated_lines_density', 'GT', '3.0', '0.0'],
+        ]),
       };
     }
     return {
       status: 'ERROR',
       period: 'overall',
-      conditions: [
-        {
-          status: 'ERROR',
-          metricKey: 'coverage',
-          comparator: 'LT',
-          errorThreshold: '80.0',
-          actualValue: '64.2',
-        },
-        {
-          status: 'ERROR',
-          metricKey: 'reliability_rating',
-          comparator: 'GT',
-          errorThreshold: '1',
-          actualValue: '3',
-        },
-        {
-          status: 'ERROR',
-          metricKey: 'security_rating',
-          comparator: 'GT',
-          errorThreshold: '1',
-          actualValue: '4',
-        },
-        {
-          status: 'OK',
-          metricKey: 'duplicated_lines_density',
-          comparator: 'GT',
-          errorThreshold: '10.0',
-          actualValue: '8.4',
-        },
-      ],
+      conditions: mapConditions([
+        ['ERROR', 'coverage', 'LT', '80.0', '64.2'],
+        ['ERROR', 'reliability_rating', 'GT', '1', '3'],
+        ['ERROR', 'security_rating', 'GT', '1', '4'],
+        ['OK', 'duplicated_lines_density', 'GT', '10.0', '8.4'],
+      ]),
     };
   }
 

@@ -1,3 +1,42 @@
+# [1.10.0](https://github.com/chulit/sonar-agent/compare/v1.9.0...v1.10.0) (2026-10-10)
+
+### Features
+
+- add new code measures support and period switcher ([4b7b52d](https://github.com/chulit/sonar-agent/commit/4b7b52d))
+- add new code issues drilldown and AI remediation scoping ([e227165](https://github.com/chulit/sonar-agent/commit/e227165))
+- add new code quality gate evaluation and ambient status bar ([5c81b05](https://github.com/chulit/sonar-agent/commit/5c81b05))
+- **webview:** overhaul sidebar UI layout, modularize webview assets, and refine typography ([cf5550f](https://github.com/chulit/sonar-agent/commit/cf5550f))
+
+# [1.9.0](https://github.com/chulit/sonar-agent/compare/v1.8.0...v1.9.0) (2026-10-10)
+
+### Features
+
+- **ui:** add bento health rings and quality gate celebration animations ([924f8d5](https://github.com/chulit/sonar-agent/commit/924f8d5))
+- **git-guard:** add pre-commit git stage guard against unresolved issues ([7d4feb5](https://github.com/chulit/sonar-agent/commit/7d4feb5))
+- **coverage:** add test generator from coverage gap ([028b55e](https://github.com/chulit/sonar-agent/commit/028b55e))
+- **editor:** add inline codelens and sonar explain prompt flow ([1edc4a3](https://github.com/chulit/sonar-agent/commit/1edc4a3))
+- **editor:** add 1-click clean current file with ai ([b20c952](https://github.com/chulit/sonar-agent/commit/b20c952))
+- **ui:** add persistent Status Bar item for Quality Gate and demo status ([50b4e88](https://github.com/chulit/sonar-agent/commit/50b4e88))
+- **demo:** add interactive demo mode onboarding and sample issue triage ([8e1dbf7](https://github.com/chulit/sonar-agent/commit/8e1dbf7))
+
+### Bug Fixes
+
+- **quality:** resolve SonarCloud reliability bug and code smells ([fdf618d](https://github.com/chulit/sonar-agent/commit/fdf618d))
+- **core:** resolve unhandled promises and expand test coverage ([3d0d442](https://github.com/chulit/sonar-agent/commit/3d0d442))
+
+# [1.8.0](https://github.com/chulit/sonar-agent/compare/v1.7.1...v1.8.0) (2026-10-10)
+
+### Features
+
+- **ci:** add SonarCloud scan workflow with code coverage reporting ([0f8c71b](https://github.com/chulit/sonar-agent/commit/0f8c71b))
+
+## [1.7.1](https://github.com/chulit/sonar-agent/compare/v1.7.0...v1.7.1) (2026-10-10)
+
+### Bug Fixes
+
+- **tests:** resolve duplicated lines density for SonarCloud quality gate ([8e136da](https://github.com/chulit/sonar-agent/commit/8e136da))
+- update package-lock.json for coverage dependency ([a77a7d9](https://github.com/chulit/sonar-agent/commit/a77a7d9))
+
 # [1.7.0](https://github.com/chulit/sonar-agent/compare/v1.6.1...v1.7.0) (2026-10-10)
 
 ### Bug Fixes
