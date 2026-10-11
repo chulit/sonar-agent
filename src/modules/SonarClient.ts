@@ -374,15 +374,8 @@ export class SonarClient {
     return [];
   }
 
-  /**
-   * Fetches Overall or New Code measures for the given project key
-   */
-  async getOverview(
-    projectKey: string,
-    codePeriod: SonarCodePeriod = 'overall',
-  ): Promise<SonarOverview> {
-    const isNewCode = codePeriod === 'new';
-    const metricKeys = isNewCode
+  private getOverviewMetricKeys(isNewCode: boolean): string {
+    return isNewCode
       ? [
           'new_bugs',
           'new_reliability_rating',
@@ -414,7 +407,12 @@ export class SonarClient {
           'security_hotspots',
           'security_review_rating',
         ].join(',');
+  }
 
+  private async fetchMeasuresWithFallback(
+    projectKey: string,
+    metricKeys: string,
+  ): Promise<Response> {
     const url = `${this.serverUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
     let response = await this.authenticatedFetch(url);
 
@@ -444,25 +442,32 @@ export class SonarClient {
       throw new Error(`Failed to fetch measures: HTTP ${response.status} ${response.statusText}`);
     }
 
-    const data = (await response.json()) as {
-      component?: {
-        measures?: {
-          metric: string;
-          value?: string;
-          period?: { value?: string };
-          periods?: { value?: string; index?: number }[];
-        }[];
-      };
-    };
+    return response;
+  }
 
+  private extractMeasureMap(
+    measures: Array<{
+      metric: string;
+      value?: string;
+      period?: { value?: string };
+      periods?: { value?: string; index?: number }[];
+    }> = [],
+  ): Record<string, string> {
     const measureMap: Record<string, string> = {};
-    for (const m of data.component?.measures || []) {
-      const val = m.value !== undefined ? m.value : (m.period?.value ?? m.periods?.[0]?.value);
+    for (const m of measures) {
+      const val = m.value ?? m.period?.value ?? m.periods?.[0]?.value;
       if (val !== undefined) {
         measureMap[m.metric] = val;
       }
     }
+    return measureMap;
+  }
 
+  private buildOverviewFromMeasures(
+    measureMap: Record<string, string>,
+    isNewCode: boolean,
+    codePeriod: SonarCodePeriod,
+  ): SonarOverview {
     const rawBugs = isNewCode ? measureMap.new_bugs : measureMap.bugs;
     const rawReliabilityRating = isNewCode
       ? measureMap.new_reliability_rating
@@ -540,6 +545,32 @@ export class SonarClient {
       period: codePeriod,
       hasNewCode,
     };
+  }
+
+  /**
+   * Fetches Overall or New Code measures for the given project key
+   */
+  async getOverview(
+    projectKey: string,
+    codePeriod: SonarCodePeriod = 'overall',
+  ): Promise<SonarOverview> {
+    const isNewCode = codePeriod === 'new';
+    const metricKeys = this.getOverviewMetricKeys(isNewCode);
+    const response = await this.fetchMeasuresWithFallback(projectKey, metricKeys);
+
+    const data = (await response.json()) as {
+      component?: {
+        measures?: {
+          metric: string;
+          value?: string;
+          period?: { value?: string };
+          periods?: { value?: string; index?: number }[];
+        }[];
+      };
+    };
+
+    const measureMap = this.extractMeasureMap(data.component?.measures);
+    return this.buildOverviewFromMeasures(measureMap, isNewCode, codePeriod);
   }
 
   /**
