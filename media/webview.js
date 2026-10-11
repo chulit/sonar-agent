@@ -38,6 +38,7 @@
 
     const loadingIndicator = document.getElementById("loading-indicator");
     const metricsGrid = document.getElementById("metrics-grid");
+    const metricsPlaceholder = document.getElementById("metrics-placeholder");
     const qualityGateBanner = document.getElementById("quality-gate-banner");
     const qualityGateToggle = document.getElementById("quality-gate-toggle");
     const qualityGateLabel = document.getElementById("quality-gate-label");
@@ -1046,6 +1047,9 @@
 
       populateFilterDropdowns(items);
 
+      if (metricsPlaceholder) {
+        metricsPlaceholder.classList.add("hidden");
+      }
       issuesSection.classList.remove("hidden");
       issuesListTitle.textContent = categoryTitles[category] || (category ? category.charAt(0).toUpperCase() + category.slice(1) + " Issues" : "Issues");
       const titleIconEl = document.getElementById("issues-title-icon");
@@ -1470,6 +1474,10 @@
         document.querySelectorAll(".metric-card").forEach((c) => c.classList.remove("active"));
         card.classList.add("active");
         activeCategory = cat;
+
+        if (metricsPlaceholder) {
+          metricsPlaceholder.classList.add("hidden");
+        }
 
         issuesContainer.innerHTML = "";
         issuesLoading.classList.remove("hidden");

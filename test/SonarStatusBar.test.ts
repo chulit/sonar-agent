@@ -95,7 +95,28 @@ describe('SonarStatusBar', () => {
     expect(mockItem.show).toHaveBeenCalled();
   });
 
-  it('generates rich Markdown tooltip with project key and metric breakdown', () => {
+  it('generates rich Markdown tooltip with metric breakdown when conditions are absent', () => {
+    statusBar.update({
+      projectKey: 'my-org:awesome-service',
+      overview: sampleOverview,
+      qualityGate: { status: 'OK' },
+    });
+
+    expect(mockItem.tooltip).toBeDefined();
+    const tooltipText = (mockItem.tooltip as vscode.MarkdownString).value;
+    expect(tooltipText).toContain('my-org:awesome-service');
+    expect(tooltipText).toContain('Quality Gate: Passed');
+    expect(tooltipText).toContain('Bugs');
+    expect(tooltipText).toContain('3');
+    expect(tooltipText).toContain('Vulnerabilities');
+    expect(tooltipText).toContain('2');
+    expect(tooltipText).toContain('Coverage');
+    expect(tooltipText).toContain('82.5%');
+    expect(tooltipText).toContain('Duplications');
+    expect(tooltipText).toContain('2.1%');
+  });
+
+  it('renders only conditions table and avoids duplicate metric table when conditions are present', () => {
     statusBar.update({
       projectKey: 'my-org:awesome-service',
       overview: sampleOverview,
@@ -106,14 +127,9 @@ describe('SonarStatusBar', () => {
     const tooltipText = (mockItem.tooltip as vscode.MarkdownString).value;
     expect(tooltipText).toContain('my-org:awesome-service');
     expect(tooltipText).toContain('Quality Gate: Failed');
-    expect(tooltipText).toContain('Bugs');
-    expect(tooltipText).toContain('3');
-    expect(tooltipText).toContain('Vulnerabilities');
-    expect(tooltipText).toContain('2');
-    expect(tooltipText).toContain('Coverage');
-    expect(tooltipText).toContain('82.5%');
-    expect(tooltipText).toContain('Duplications');
-    expect(tooltipText).toContain('2.1%');
+    expect(tooltipText).toContain('Quality Gate Conditions');
+    expect(tooltipText).toContain('`new_coverage`');
+    expect(tooltipText).not.toContain('Bugs');
   });
 
   it('indicates Demo Mode in tooltip when demo is active', () => {

@@ -1652,12 +1652,14 @@
       left: 8px;
       color: var(--vscode-input-placeholderForeground, #94a3b8);
       pointer-events: none;
+      z-index: 1;
     }
 
+    input[type="text"].filter-input-search,
     .filter-input-search {
       width: 100%;
       height: 26px;
-      padding: 3px 8px 3px 26px;
+      padding: 3px 8px 3px 28px !important;
       font-size: 10.5px;
       background: var(--vscode-input-background, rgba(0, 0, 0, 0.25));
       color: var(--vscode-input-foreground, var(--vscode-foreground));
@@ -1667,6 +1669,7 @@
       transition: border-color 0.15s;
     }
 
+    input[type="text"].filter-input-search:focus,
     .filter-input-search:focus {
       border-color: var(--vscode-focusBorder, var(--sonar-blue));
     }
