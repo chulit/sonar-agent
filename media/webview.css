@@ -1836,11 +1836,29 @@
       border-color: rgba(59, 130, 246, 0.4);
     }
 
+    .issue-card.selected {
+      border-color: var(--sonar-blue, #3b82f6);
+      background: rgba(59, 130, 246, 0.05);
+    }
+
     .issue-card-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+    }
+
+    .issue-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .issue-header-left .issue-checkbox {
+      margin: 0;
+      flex-shrink: 0;
     }
 
     .issue-path {

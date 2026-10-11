@@ -647,11 +647,32 @@
 
     function renderIssueCard(item) {
       const card = document.createElement("div");
-      card.className = "issue-card";
+      card.className = "issue-card" + (selectedItemIds.has(item.id) ? " selected" : "");
 
-      // Card Header: File path and collapse button
+      // Card Header: Checkbox, File path and collapse button
       const headerDiv = document.createElement("div");
       headerDiv.className = "issue-card-header";
+
+      const headerLeft = document.createElement("div");
+      headerLeft.className = "issue-header-left";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "issue-checkbox";
+      checkbox.checked = selectedItemIds.has(item.id);
+      checkbox.setAttribute("aria-label", "Select issue: " + item.message);
+      checkbox.addEventListener("click", (e) => {
+        e.stopPropagation();
+      });
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selectedItemIds.add(item.id);
+        } else {
+          selectedItemIds.delete(item.id);
+        }
+        card.classList.toggle("selected", checkbox.checked);
+        updateBatchBar();
+      });
 
       const pathDiv = document.createElement("div");
       pathDiv.className = "issue-path";
@@ -661,29 +682,16 @@
         vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
       });
 
+      headerLeft.appendChild(checkbox);
+      headerLeft.appendChild(pathDiv);
+
       const collapseBtn = document.createElement("button");
       collapseBtn.className = "issue-collapse-btn";
       collapseBtn.setAttribute("aria-label", "Toggle card details");
       collapseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 10-5-5-5 5"/></svg>';
 
-      headerDiv.appendChild(pathDiv);
+      headerDiv.appendChild(headerLeft);
       headerDiv.appendChild(collapseBtn);
-
-      // Hidden checkbox for batch selection compatibility
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.className = "issue-checkbox";
-      checkbox.style.display = "none";
-      checkbox.checked = selectedItemIds.has(item.id);
-      checkbox.setAttribute("aria-label", "Select issue: " + item.message);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) {
-          selectedItemIds.add(item.id);
-        } else {
-          selectedItemIds.delete(item.id);
-        }
-        updateBatchBar();
-      });
 
       // Card Inner Panel
       const innerDiv = document.createElement("div");
@@ -839,7 +847,6 @@
 /* {{issueLifecycleCardButtonScript}} */
       footerDiv.appendChild(actionsDiv);
 
-      card.appendChild(checkbox);
       card.appendChild(headerDiv);
       card.appendChild(innerDiv);
       card.appendChild(footerDiv);
@@ -1109,6 +1116,8 @@
       selectedItemIds.clear();
       document.querySelectorAll(".issue-checkbox").forEach((cb) => {
         cb.checked = false;
+        const c = cb.closest(".issue-card");
+        if (c) c.classList.remove("selected");
       });
       updateBatchBar();
     });
@@ -1123,6 +1132,8 @@
       });
       document.querySelectorAll(".issue-checkbox").forEach((cb) => {
         cb.checked = selectAllCheckbox.checked;
+        const c = cb.closest(".issue-card");
+        if (c) c.classList.toggle("selected", selectAllCheckbox.checked);
       });
       updateBatchBar();
     });
@@ -1194,11 +1205,32 @@
 
     function renderCurrentIssueCard(item) {
       const card = document.createElement("div");
-      card.className = "issue-card";
+      card.className = "issue-card" + (selectedCurrentIds.has(item.id) ? " selected" : "");
 
-      // Card Header
+      // Card Header: Checkbox, File path and collapse button
       const headerDiv = document.createElement("div");
       headerDiv.className = "issue-card-header";
+
+      const headerLeft = document.createElement("div");
+      headerLeft.className = "issue-header-left";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "issue-checkbox current-issue-checkbox";
+      checkbox.checked = selectedCurrentIds.has(item.id);
+      checkbox.setAttribute("aria-label", "Select issue: " + item.message);
+      checkbox.addEventListener("click", (e) => {
+        e.stopPropagation();
+      });
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selectedCurrentIds.add(item.id);
+        } else {
+          selectedCurrentIds.delete(item.id);
+        }
+        card.classList.toggle("selected", checkbox.checked);
+        updateCurrentBatchBar();
+      });
 
       const pathDiv = document.createElement("div");
       pathDiv.className = "issue-path";
@@ -1208,29 +1240,16 @@
         vscode.postMessage({ command: "openFile", filePath: item.filePath, line: item.line });
       });
 
+      headerLeft.appendChild(checkbox);
+      headerLeft.appendChild(pathDiv);
+
       const collapseBtn = document.createElement("button");
       collapseBtn.className = "issue-collapse-btn";
       collapseBtn.setAttribute("aria-label", "Toggle card details");
       collapseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 10-5-5-5 5"/></svg>';
 
-      headerDiv.appendChild(pathDiv);
+      headerDiv.appendChild(headerLeft);
       headerDiv.appendChild(collapseBtn);
-
-      // Hidden checkbox for current batch selection compatibility
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.className = "issue-checkbox current-issue-checkbox";
-      checkbox.style.display = "none";
-      checkbox.checked = selectedCurrentIds.has(item.id);
-      checkbox.setAttribute("aria-label", "Select issue: " + item.message);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) {
-          selectedCurrentIds.add(item.id);
-        } else {
-          selectedCurrentIds.delete(item.id);
-        }
-        updateCurrentBatchBar();
-      });
 
       // Card Inner Panel
       const innerDiv = document.createElement("div");
@@ -1321,7 +1340,6 @@
 
       footerDiv.appendChild(actionsDiv);
 
-      card.appendChild(checkbox);
       card.appendChild(headerDiv);
       card.appendChild(innerDiv);
       card.appendChild(footerDiv);
@@ -1442,6 +1460,8 @@
         selectedCurrentIds.clear();
         document.querySelectorAll(".current-issue-checkbox").forEach((cb) => {
           cb.checked = false;
+          const c = cb.closest(".issue-card");
+          if (c) c.classList.remove("selected");
         });
         updateCurrentBatchBar();
       });
@@ -1457,6 +1477,8 @@
         });
         document.querySelectorAll(".current-issue-checkbox").forEach((cb) => {
           cb.checked = currentSelectAllCheckbox.checked;
+          const c = cb.closest(".issue-card");
+          if (c) c.classList.toggle("selected", currentSelectAllCheckbox.checked);
         });
         updateCurrentBatchBar();
       });
