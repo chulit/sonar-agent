@@ -127,11 +127,7 @@ export class SonarStatusBar implements vscode.Disposable {
         );
       }
       md.appendMarkdown(`\n`);
-    }
-
-    md.appendMarkdown(`---\n\n`);
-
-    if (overview) {
+    } else if (overview) {
       md.appendMarkdown(`| Metric | Value | Rating |\n`);
       md.appendMarkdown(`| :--- | :--- | :--- |\n`);
       md.appendMarkdown(
@@ -152,6 +148,7 @@ export class SonarStatusBar implements vscode.Disposable {
       );
     }
 
+    md.appendMarkdown(`---\n\n`);
     md.appendMarkdown(`*Click to open Sonar Overview sidebar*`);
     return md;
   }
