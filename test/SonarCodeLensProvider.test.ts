@@ -63,7 +63,43 @@ describe('SonarCodeLensProvider & Sonar Explain Prompt Flow', () => {
       expect(lenses[2].command?.arguments?.[0]).toEqual(sampleItem);
     });
 
-    it('returns empty array when CodeLens is disabled via configuration', () => {
+    it('uses default options when none are passed to constructor (covering lines 16-23)', () => {
+      const getSpy = vi.fn().mockReturnValue(true);
+      const getConfigSpy = vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({
+        get: getSpy,
+        update: vi.fn(),
+      } as any);
+
+      const defaultProvider = new SonarCodeLensProvider();
+
+      // Aggregate issues using default FileIssueAggregator (returns empty array for mock doc)
+      const lenses = defaultProvider.provideCodeLenses(sampleDoc);
+      expect(getConfigSpy).toHaveBeenCalledWith('sonarAgent');
+      expect(getSpy).toHaveBeenCalledWith('editor.codeLens.enabled', true);
+      expect(lenses).toEqual([]);
+    });
+
+    it('respects default config function when editor.codeLens.enabled is false in workspace configuration', () => {
+      const getSpy = vi.fn().mockReturnValue(false);
+      vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({
+        get: getSpy,
+        update: vi.fn(),
+      } as any);
+
+      const mockAggregator = {
+        aggregateIssuesForDocument: vi.fn().mockReturnValue([sampleItem]),
+      } as unknown as FileIssueAggregator;
+
+      const provider = new SonarCodeLensProvider({
+        fileIssueAggregator: mockAggregator,
+      });
+
+      const lenses = provider.provideCodeLenses(sampleDoc);
+      expect(lenses).toHaveLength(0);
+      expect(mockAggregator.aggregateIssuesForDocument).not.toHaveBeenCalled();
+    });
+
+    it('returns empty array when CodeLens is disabled via custom configuration function', () => {
       const mockAggregator = {
         aggregateIssuesForDocument: vi.fn().mockReturnValue([sampleItem]),
       } as unknown as FileIssueAggregator;
@@ -92,18 +128,123 @@ describe('SonarCodeLensProvider & Sonar Explain Prompt Flow', () => {
       expect(lenses).toHaveLength(0);
     });
 
-    it('fires onDidChangeCodeLenses event when refreshed', () => {
+    it('returns empty array when aggregateIssuesForDocument returns null or undefined (!issues)', () => {
+      const mockAggregator = {
+        aggregateIssuesForDocument: vi.fn().mockReturnValue(undefined),
+      } as unknown as FileIssueAggregator;
+
+      const provider = new SonarCodeLensProvider({
+        fileIssueAggregator: mockAggregator,
+        isCodeLensEnabledFn: () => true,
+      });
+
+      const lenses = provider.provideCodeLenses(sampleDoc);
+      expect(lenses).toEqual([]);
+    });
+
+    it('does not truncate message title when length is <= 50 characters', () => {
+      const shortIssue: SonarDetailItem = {
+        ...sampleItem,
+        id: 'issue-short',
+        message: 'Avoid unused variables', // 22 chars (< 50)
+      };
+
+      const exact50Issue: SonarDetailItem = {
+        ...sampleItem,
+        id: 'issue-exact-50',
+        message: '12345678901234567890123456789012345678901234567890', // exactly 50 chars
+      };
+
+      const mockAggregator = {
+        aggregateIssuesForDocument: vi.fn().mockReturnValue([shortIssue, exact50Issue]),
+      } as unknown as FileIssueAggregator;
+
+      const provider = new SonarCodeLensProvider({
+        fileIssueAggregator: mockAggregator,
+        isCodeLensEnabledFn: () => true,
+      });
+
+      const lenses = provider.provideCodeLenses(sampleDoc);
+      expect(lenses).toHaveLength(6);
+
+      // Short issue should not have ellipsis
+      expect(lenses[0].command?.title).toBe('⚡ Sonar: Avoid unused variables');
+      // Exact 50 chars should not have ellipsis
+      expect(lenses[3].command?.title).toBe(
+        '⚡ Sonar: 12345678901234567890123456789012345678901234567890',
+      );
+    });
+
+    it('handles line number edge cases (line <= 0 or undefined mapping to 0)', () => {
+      const line0Issue: SonarDetailItem = {
+        ...sampleItem,
+        id: 'issue-line-0',
+        line: 0,
+      };
+
+      const negativeLineIssue: SonarDetailItem = {
+        ...sampleItem,
+        id: 'issue-line-neg',
+        line: -2,
+      };
+
+      const undefinedLineIssue: SonarDetailItem = {
+        ...sampleItem,
+        id: 'issue-line-undef',
+        line: undefined,
+      };
+
+      const mockAggregator = {
+        aggregateIssuesForDocument: vi
+          .fn()
+          .mockReturnValue([line0Issue, negativeLineIssue, undefinedLineIssue]),
+      } as unknown as FileIssueAggregator;
+
+      const provider = new SonarCodeLensProvider({
+        fileIssueAggregator: mockAggregator,
+        isCodeLensEnabledFn: () => true,
+      });
+
+      const lenses = provider.provideCodeLenses(sampleDoc);
+      expect(lenses).toHaveLength(9);
+
+      // line: 0 maps to line 0
+      expect(lenses[0].range.start.line).toBe(0);
+      // line: -2 maps to line 0
+      expect(lenses[3].range.start.line).toBe(0);
+      // line: undefined maps to line 0
+      expect(lenses[6].range.start.line).toBe(0);
+    });
+
+    it('accepts optional cancellation token in provideCodeLenses without errors', () => {
+      const mockAggregator = {
+        aggregateIssuesForDocument: vi.fn().mockReturnValue([sampleItem]),
+      } as unknown as FileIssueAggregator;
+
+      const provider = new SonarCodeLensProvider({
+        fileIssueAggregator: mockAggregator,
+        isCodeLensEnabledFn: () => true,
+      });
+
+      const mockToken = {} as vscode.CancellationToken;
+      const lenses = provider.provideCodeLenses(sampleDoc, mockToken);
+      expect(lenses).toHaveLength(3);
+    });
+
+    it('fires onDidChangeCodeLenses event when refreshed and allows disposing listener', () => {
       const provider = new SonarCodeLensProvider({
         isCodeLensEnabledFn: () => true,
       });
 
-      let fired = false;
-      provider.onDidChangeCodeLenses(() => {
-        fired = true;
-      });
+      const listenerSpy = vi.fn();
+      const subscription = provider.onDidChangeCodeLenses(listenerSpy);
 
       provider.refresh();
-      expect(fired).toBe(true);
+      expect(listenerSpy).toHaveBeenCalledTimes(1);
+
+      subscription.dispose();
+      provider.refresh();
+      expect(listenerSpy).toHaveBeenCalledTimes(1);
     });
   });
 
