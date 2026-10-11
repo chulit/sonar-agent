@@ -1121,4 +1121,370 @@ describe('SonarOverviewViewProvider - Issue Lifecycle Actions', () => {
     expect(provider.getCodePeriod()).toBe('overall');
     expect(postedMessages.some((m) => m.type === 'details' && m.period === 'overall')).toBe(true);
   });
+
+  describe('SonarOverviewViewProvider - Local Fix Marking (Ticket 36)', () => {
+    it('toggles issue fixed locally via message, updates workspaceState, and broadcasts localIssueFixedToggled', async () => {
+      const storedMap = new Map<string, any>();
+      const customMemento: vscode.Memento = {
+        keys: () => Array.from(storedMap.keys()),
+        get: <T>(key: string, defaultValue?: T) =>
+          (storedMap.has(key) ? storedMap.get(key) : defaultValue) as T,
+        update: vi.fn(async (key: string, value: any) => {
+          storedMap.set(key, value);
+        }),
+      };
+
+      const testProvider = new SonarOverviewViewProvider(
+        { fsPath: '/extension' } as any,
+        mockProjectDetector as unknown as ProjectDetector,
+        { workspaceState: customMemento },
+      );
+      testProvider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+
+      // 1. Mark as fixed
+      await messageCallback!({
+        command: 'toggleLocalIssueFixed',
+        issueKey: 'issue-abc-123',
+        fixed: true,
+      });
+
+      expect(testProvider.getLocallyFixedIssues().has('issue-abc-123')).toBe(true);
+      expect(customMemento.update).toHaveBeenCalledWith('sonarAgent.locallyFixedIssues', [
+        'issue-abc-123',
+      ]);
+      const fixedMsg = postedMessages.find(
+        (m) =>
+          m.type === 'localIssueFixedToggled' && m.issueKey === 'issue-abc-123' && m.fixed === true,
+      );
+      expect(fixedMsg).toBeDefined();
+
+      // 2. Undo fix
+      await messageCallback!({
+        command: 'toggleLocalIssueFixed',
+        issueKey: 'issue-abc-123',
+        fixed: false,
+      });
+
+      expect(testProvider.getLocallyFixedIssues().has('issue-abc-123')).toBe(false);
+      expect(customMemento.update).toHaveBeenCalledWith('sonarAgent.locallyFixedIssues', []);
+      const undoMsg = postedMessages.find(
+        (m) =>
+          m.type === 'localIssueFixedToggled' &&
+          m.issueKey === 'issue-abc-123' &&
+          m.fixed === false,
+      );
+      expect(undoMsg).toBeDefined();
+    });
+
+    it('marks issues with isFixedLocally: true when fetching details in demo and server modes', async () => {
+      const storedMap = new Map<string, any>();
+      storedMap.set('sonarAgent.locallyFixedIssues', ['demo-bug-1']);
+      const customMemento: vscode.Memento = {
+        keys: () => Array.from(storedMap.keys()),
+        get: <T>(key: string, defaultValue?: T) =>
+          (storedMap.has(key) ? storedMap.get(key) : defaultValue) as T,
+        update: vi.fn(async (key: string, value: any) => {
+          storedMap.set(key, value);
+        }),
+      };
+
+      const testProvider = new SonarOverviewViewProvider(
+        { fsPath: '/extension' } as any,
+        mockProjectDetector as unknown as ProjectDetector,
+        { workspaceState: customMemento },
+      );
+      testProvider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+
+      await testProvider.enableDemoMode();
+      await (testProvider as any)._handleFetchDetails('reliability');
+
+      const detailsMsg = postedMessages.reverse().find((m) => m.type === 'details');
+      expect(detailsMsg).toBeDefined();
+      const demoBug1 = detailsMsg.items.find((item: any) => item.id === 'demo-bug-1');
+      if (demoBug1) {
+        expect(demoBug1.isFixedLocally).toBe(true);
+      }
+
+      // Check getAllCachedIssues reflects isFixedLocally
+      const cached = testProvider.getAllCachedIssues();
+      const cachedDemoBug1 = cached.find((item) => item.id === 'demo-bug-1');
+      if (cachedDemoBug1) {
+        expect(cachedDemoBug1.isFixedLocally).toBe(true);
+      }
+    });
+
+    it('handles memento error gracefully in getLocallyFixedIssues and setLocallyFixedIssues', async () => {
+      const throwingMemento: vscode.Memento = {
+        keys: () => [],
+        get: () => {
+          throw new Error('Storage corrupted');
+        },
+        update: vi.fn(async () => {
+          throw new Error('Disk full');
+        }),
+      };
+
+      const testProvider = new SonarOverviewViewProvider(
+        { fsPath: '/extension' } as any,
+        mockProjectDetector as unknown as ProjectDetector,
+        { workspaceState: throwingMemento },
+      );
+
+      // Should not throw, returns empty Set
+      expect(testProvider.getLocallyFixedIssues().size).toBe(0);
+
+      // Should not throw on update
+      await expect(testProvider.setLocallyFixedIssues(new Set(['issue-1']))).resolves.not.toThrow();
+    });
+
+    it('computes optimistic overview counts by decrementing fixed issues per category and flooring at 0', () => {
+      const mockState: Record<string, any> = {};
+      const mockMemento: vscode.Memento = {
+        keys: () => Object.keys(mockState),
+        get: (key: string, def?: any) => mockState[key] ?? def,
+        update: vi.fn(async (key: string, val: any) => {
+          mockState[key] = val;
+        }),
+      };
+
+      const testProvider = new SonarOverviewViewProvider(
+        { fsPath: '/extension' } as any,
+        mockProjectDetector as unknown as ProjectDetector,
+        { workspaceState: mockMemento },
+      );
+
+      // Seed cached server issues: 2 bugs, 1 vuln, 3 smells
+      (testProvider as any)._cachedServerIssues = [
+        { id: 'bug-1', type: 'BUG' },
+        { id: 'bug-2', type: 'BUG' },
+        { id: 'vuln-1', type: 'VULNERABILITY' },
+        { id: 'smell-1', type: 'CODE_SMELL' },
+        { id: 'smell-2', type: 'CODE_SMELL' },
+        { id: 'smell-3', type: 'CODE_SMELL' },
+      ];
+
+      // Mark bug-1 and smell-1 and smell-2 as fixed locally
+      mockState['sonarAgent.locallyFixedIssues'] = ['bug-1', 'smell-1', 'smell-2'];
+
+      const baseOverview: any = {
+        reliability: { count: 2, rating: 'B' },
+        security: { count: 1, rating: 'A' },
+        maintainability: { count: 3, rating: 'A' },
+        coverage: { percentage: 80, linesToCover: 100 },
+        duplications: { percentage: 0, duplicatedLines: 0 },
+        securityHotspots: { count: 0, rating: 'A' },
+      };
+
+      const optimistic = testProvider.getOptimisticOverview(baseOverview);
+      expect(optimistic.reliability.count).toBe(1);
+      expect(optimistic.reliability.fixedLocallyCount).toBe(1);
+      expect(optimistic.security.count).toBe(1);
+      expect(optimistic.security.fixedLocallyCount).toBe(0);
+      expect(optimistic.maintainability.count).toBe(1);
+      expect(optimistic.maintainability.fixedLocallyCount).toBe(2);
+
+      // Test flooring at 0 when fixedCount exceeds server count
+      const lowOverview: any = {
+        ...baseOverview,
+        maintainability: { count: 1, rating: 'A' },
+      };
+      const floored = testProvider.getOptimisticOverview(lowOverview);
+      expect(floored.maintainability.count).toBe(0);
+      expect(floored.maintainability.fixedLocallyCount).toBe(2);
+    });
+
+    it('batchToggleLocalIssueFixed updates multiple keys and broadcasts optimistic overview', async () => {
+      const mockState: Record<string, any> = {};
+      const mockMemento: vscode.Memento = {
+        keys: () => Object.keys(mockState),
+        get: (key: string, def?: any) => mockState[key] ?? def,
+        update: vi.fn(async (key: string, val: any) => {
+          mockState[key] = val;
+        }),
+      };
+
+      const testProvider = new SonarOverviewViewProvider(
+        { fsPath: '/extension' } as any,
+        mockProjectDetector as unknown as ProjectDetector,
+        { workspaceState: mockMemento },
+      );
+
+      const postedMessages: any[] = [];
+      const testView = {
+        webview: {
+          options: {},
+          html: '',
+          onDidReceiveMessage: vi.fn(),
+          postMessage: vi.fn(async (msg: any) => {
+            postedMessages.push(msg);
+            return true;
+          }),
+          asWebviewUri: vi.fn((uri) => uri),
+          cspSource: 'https:',
+        },
+      } as any;
+      testProvider.resolveWebviewView(testView, {} as any, {} as any);
+
+      (testProvider as any)._cachedServerIssues = [
+        { id: 'b1', type: 'BUG' },
+        { id: 'b2', type: 'BUG' },
+      ];
+      (testProvider as any)._lastOverview = {
+        reliability: { count: 2, rating: 'B' },
+        security: { count: 0, rating: 'A' },
+        maintainability: { count: 0, rating: 'A' },
+        coverage: { percentage: 80, linesToCover: 100 },
+        duplications: { percentage: 0, duplicatedLines: 0 },
+        securityHotspots: { count: 0, rating: 'A' },
+      };
+
+      await testProvider.batchToggleLocalIssueFixed(['b1', 'b2'], true);
+
+      expect(mockState['sonarAgent.locallyFixedIssues']).toEqual(['b1', 'b2']);
+      const batchMsg = postedMessages.find((m) => m.type === 'localIssuesBatchFixedToggled');
+      expect(batchMsg).toEqual({
+        type: 'localIssuesBatchFixedToggled',
+        issueKeys: ['b1', 'b2'],
+        fixed: true,
+      });
+
+      const overviewMsg = postedMessages.find((m) => m.type === 'overviewUpdated');
+      expect(overviewMsg).toBeDefined();
+      expect(overviewMsg.overview.reliability.count).toBe(0);
+      expect(overviewMsg.overview.reliability.fixedLocallyCount).toBe(2);
+    });
+
+    it('resetLocalFixes clears all local fixes and resets overview to baseline', async () => {
+      const mockState: Record<string, any> = {
+        'sonarAgent.locallyFixedIssues': ['b1', 'b2'],
+      };
+      const mockMemento: vscode.Memento = {
+        keys: () => Object.keys(mockState),
+        get: (key: string, def?: any) => mockState[key] ?? def,
+        update: vi.fn(async (key: string, val: any) => {
+          mockState[key] = val;
+        }),
+      };
+
+      const testProvider = new SonarOverviewViewProvider(
+        { fsPath: '/extension' } as any,
+        mockProjectDetector as unknown as ProjectDetector,
+        { workspaceState: mockMemento },
+      );
+
+      const postedMessages: any[] = [];
+      const testView = {
+        webview: {
+          options: {},
+          html: '',
+          onDidReceiveMessage: vi.fn(),
+          postMessage: vi.fn(async (msg: any) => {
+            postedMessages.push(msg);
+            return true;
+          }),
+          asWebviewUri: vi.fn((uri) => uri),
+          cspSource: 'https:',
+        },
+      } as any;
+      testProvider.resolveWebviewView(testView, {} as any, {} as any);
+
+      (testProvider as any)._cachedServerIssues = [{ id: 'b1', type: 'BUG', isFixedLocally: true }];
+      (testProvider as any)._lastOverview = {
+        reliability: { count: 2, rating: 'B' },
+        security: { count: 0, rating: 'A' },
+        maintainability: { count: 0, rating: 'A' },
+        coverage: { percentage: 80, linesToCover: 100 },
+        duplications: { percentage: 0, duplicatedLines: 0 },
+        securityHotspots: { count: 0, rating: 'A' },
+      };
+
+      await testProvider.resetLocalFixes();
+
+      expect(mockState['sonarAgent.locallyFixedIssues']).toEqual([]);
+      expect((testProvider as any)._cachedServerIssues[0].isFixedLocally).toBe(false);
+      expect(postedMessages.some((m) => m.type === 'localFixesReset')).toBe(true);
+      const overviewMsg = postedMessages.reverse().find((m) => m.type === 'overviewUpdated');
+      expect(overviewMsg.overview.reliability.count).toBe(2);
+      expect(overviewMsg.overview.reliability.fixedLocallyCount).toBe(0);
+    });
+
+    it('reconciles local fixes against server responses, pruning resolved keys and preserving awaiting ones', async () => {
+      const mockState: Record<string, any> = {
+        'sonarAgent.locallyFixedIssues': ['server-bug-1', 'server-bug-2', 'local-only-1'],
+      };
+      const mockMemento: vscode.Memento = {
+        keys: () => Object.keys(mockState),
+        get: (key: string, def?: any) => mockState[key] ?? def,
+        update: vi.fn(async (key: string, val: any) => {
+          mockState[key] = val;
+        }),
+      };
+
+      const testProvider = new SonarOverviewViewProvider(
+        { fsPath: '/extension' } as any,
+        mockProjectDetector as unknown as ProjectDetector,
+        { workspaceState: mockMemento },
+      );
+
+      (testProvider as any)._cachedServerIssues = [
+        { id: 'server-bug-1', type: 'BUG' },
+        { id: 'server-bug-2', type: 'BUG' },
+      ];
+
+      // Server returns only server-bug-2 (server-bug-1 was resolved on the remote server!)
+      const freshServerIssues: any[] = [{ id: 'server-bug-2', type: 'BUG' }];
+
+      await testProvider.reconcileLocallyFixedIssues(freshServerIssues);
+
+      // server-bug-1 should be pruned, server-bug-2 preserved
+      const fixed = testProvider.getLocallyFixedIssues();
+      expect(fixed.has('server-bug-1')).toBe(false);
+      expect(fixed.has('server-bug-2')).toBe(true);
+      expect(fixed.has('local-only-1')).toBe(true);
+    });
+
+    it('getAllCachedIssues filters out locally fixed issues by default and includes them when requested', () => {
+      const mockState: Record<string, any> = {
+        'sonarAgent.locallyFixedIssues': ['bug-1'],
+      };
+      const mockMemento: vscode.Memento = {
+        keys: () => Object.keys(mockState),
+        get: (key: string, def?: any) => mockState[key] ?? def,
+        update: vi.fn(async (key: string, val: any) => {
+          mockState[key] = val;
+        }),
+      };
+
+      const testProvider = new SonarOverviewViewProvider(
+        { fsPath: '/extension' } as any,
+        mockProjectDetector as unknown as ProjectDetector,
+        { workspaceState: mockMemento },
+      );
+
+      (testProvider as any)._cachedServerIssues = [
+        { id: 'bug-1', type: 'BUG', filePath: 'src/a.ts' },
+        { id: 'bug-2', type: 'BUG', filePath: 'src/b.ts' },
+      ];
+
+      // Default: filtered (only bug-2 returned)
+      const filtered = testProvider.getAllCachedIssues();
+      expect(filtered.map((i) => i.id)).toEqual(['bug-2']);
+
+      // includeFixedLocally: true (both returned)
+      const all = testProvider.getAllCachedIssues(true);
+      expect(all.map((i) => i.id)).toEqual(['bug-1', 'bug-2']);
+      expect(all.find((i) => i.id === 'bug-1')?.isFixedLocally).toBe(true);
+      expect(all.find((i) => i.id === 'bug-2')?.isFixedLocally).toBe(false);
+    });
+
+    it('renders sublabels and reset buttons in webview HTML template', () => {
+      provider.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+      const html = mockWebviewView.webview.html;
+      expect(html).toContain('id="metric-security-sublabel"');
+      expect(html).toContain('id="metric-reliability-sublabel"');
+      expect(html).toContain('id="metric-maintainability-sublabel"');
+      expect(html).toContain('id="reset-local-fixes-btn"');
+      expect(html).toContain('id="batch-mark-fixed-btn"');
+    });
+  });
 });

@@ -109,6 +109,10 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('sonarAgent.checkStagedFiles', async () => {
       await overviewProvider.checkStagedFiles(true);
     }),
+    vscode.commands.registerCommand('sonarAgent.resetLocalFixes', async () => {
+      await overviewProvider.resetLocalFixes();
+      void vscode.window.showInformationMessage('All local issue fixes have been reset.');
+    }),
   );
 
   void projectDetector

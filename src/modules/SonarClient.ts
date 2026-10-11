@@ -19,9 +19,9 @@ export type SonarRating = 'A' | 'B' | 'C' | 'D' | 'E';
 export type SonarCodePeriod = 'overall' | 'new';
 
 export interface SonarOverview {
-  security: { count: number; rating: SonarRating };
-  reliability: { count: number; rating: SonarRating };
-  maintainability: { count: number; rating: SonarRating };
+  security: { count: number; rating: SonarRating; fixedLocallyCount?: number };
+  reliability: { count: number; rating: SonarRating; fixedLocallyCount?: number };
+  maintainability: { count: number; rating: SonarRating; fixedLocallyCount?: number };
   acceptedIssues: { count: number };
   coverage: { percentage: number; linesToCover: number };
   duplications: { percentage: number; duplicatedLines: number };
@@ -53,6 +53,7 @@ export interface SonarDetailItem {
   author?: string;
   source?: string;
   inNewCodePeriod?: boolean;
+  isFixedLocally?: boolean;
 }
 
 export type QualityGateStatusValue = 'OK' | 'WARN' | 'ERROR' | 'NONE';

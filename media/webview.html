@@ -249,7 +249,7 @@
           <div class="metric-info">
             <span class="metric-title">Security</span>
             <span id="metric-security-count" class="metric-big-num">0</span>
-            <span class="metric-sublabel">Open issues</span>
+            <span id="metric-security-sublabel" class="metric-sublabel">Open issues</span>
           </div>
           <div class="rating-ring-container">
             <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-security" class="rating-ring-circle" cx="18" cy="18" r="14.5" stroke="var(--sonar-green)" /></svg>
@@ -267,7 +267,7 @@
           <div class="metric-info">
             <span class="metric-title">Reliability</span>
             <span id="metric-reliability-count" class="metric-big-num">0</span>
-            <span class="metric-sublabel">Open issues</span>
+            <span id="metric-reliability-sublabel" class="metric-sublabel">Open issues</span>
           </div>
           <div class="rating-ring-container">
             <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-reliability" class="rating-ring-circle" cx="18" cy="18" r="14.5" stroke="var(--sonar-green)" /></svg>
@@ -285,7 +285,7 @@
           <div class="metric-info">
             <span class="metric-title">Maintainability</span>
             <span id="metric-maintainability-count" class="metric-big-num">0</span>
-            <span class="metric-sublabel">Open issues</span>
+            <span id="metric-maintainability-sublabel" class="metric-sublabel">Open issues</span>
           </div>
           <div class="rating-ring-container">
             <svg class="rating-ring-svg" viewBox="0 0 36 36"><circle id="ring-maintainability" class="rating-ring-circle" cx="18" cy="18" r="14.5" stroke="var(--sonar-green)" /></svg>
@@ -412,6 +412,12 @@
               <input type="checkbox" id="select-all-checkbox" />
               <span>Select All</span>
             </label>
+            <button id="reset-local-fixes-btn" class="btn btn-secondary filter-trigger-btn" type="button" title="Reset all locally marked fixes back to server baseline">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+              </svg>
+              <span>Reset Fixes</span>
+            </button>
             <button id="filter-popover-trigger" class="btn btn-secondary filter-trigger-btn" type="button" aria-expanded="false" aria-controls="filter-popover" title="Filter issues">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M1.5 1.5A.5.5 0 0 1 2 1h12a.5.5 0 0 1 .38.82l-4.88 5.62V13.5a.5.5 0 0 1-.76.42l-2-1.25A.5.5 0 0 1 6 12.25V7.44L1.12 1.82a.5.5 0 0 1 .38-.82z"/>
@@ -523,6 +529,10 @@
         <div id="batch-action-bar" class="batch-bar hidden">
           <span id="selected-count-label" style="font-weight: 600; font-size: 11px;">0 selected</span>
           <div style="display: flex; gap: 6px;">
+            <button id="batch-mark-fixed-btn" class="btn btn-secondary btn-sm" title="Mark selected issues as fixed locally">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><polyline points="3.5 8.5 6.5 11.5 12.5 4.5"/></svg>
+              Mark Fixed
+            </button>
             <button id="send-batch-btn" class="btn btn-agent btn-sm">
               <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 4px;"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>
               Send to Agent

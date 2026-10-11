@@ -74,6 +74,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
   private readonly gitStageGuard: GitStageGuard;
   private readonly _workspaceState: vscode.Memento;
   private _codePeriod: SonarCodePeriod = 'overall';
+  private _lastOverview: SonarOverview | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -107,9 +108,13 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       update: (_key: string, _value: any) => Promise.resolve(),
     };
     this._workspaceState = opts.workspaceState ?? defaultMemento;
-    this._codePeriod =
-      this._workspaceState.get<SonarCodePeriod>('sonarAgent.activeCodePeriod', 'overall') ||
-      'overall';
+    try {
+      this._codePeriod =
+        this._workspaceState.get<SonarCodePeriod>('sonarAgent.activeCodePeriod', 'overall') ||
+        'overall';
+    } catch {
+      this._codePeriod = 'overall';
+    }
 
     this.workspaceRoot = opts.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     this.fileNavigator = opts.fileNavigator ?? new FileNavigator();
@@ -277,6 +282,18 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
             await this._handleAddIssueComment(message.issueKey, message.text);
             break;
           }
+          case 'toggleLocalIssueFixed': {
+            await this.toggleLocalIssueFixed(message.issueKey, Boolean(message.fixed));
+            break;
+          }
+          case 'batchToggleLocalIssueFixed': {
+            await this.batchToggleLocalIssueFixed(message.issueKeys, Boolean(message.fixed));
+            break;
+          }
+          case 'resetLocalFixes': {
+            await this.resetLocalFixes();
+            break;
+          }
           case 'setTargetAgent': {
             const config = vscode.workspace.getConfiguration('sonarAgent');
             await config.update('defaultAgent', message.agentId, true);
@@ -407,18 +424,32 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     return this.fileIssueAggregator;
   }
 
-  public getAllCachedIssues(): SonarDetailItem[] {
+  public getAllCachedIssues(includeFixedLocally = false): SonarDetailItem[] {
+    const fixedSet = this.getLocallyFixedIssues();
+    let allItems: SonarDetailItem[];
     if (this._isDemoMode) {
-      return DemoData.getDetails(undefined, this._codePeriod);
+      const demoItems = DemoData.getDetails(undefined, this._codePeriod);
+      for (const item of demoItems) {
+        item.isFixedLocally = fixedSet.has(item.id);
+      }
+      allItems = demoItems;
+    } else {
+      const set = new Map<string, SonarDetailItem>();
+      for (const item of this._currentCodeItems) {
+        item.isFixedLocally = fixedSet.has(item.id);
+        set.set(item.id, item);
+      }
+      for (const item of this._cachedServerIssues) {
+        item.isFixedLocally = fixedSet.has(item.id);
+        set.set(item.id, item);
+      }
+      allItems = Array.from(set.values());
     }
-    const set = new Map<string, SonarDetailItem>();
-    for (const item of this._currentCodeItems) {
-      set.set(item.id, item);
+
+    if (includeFixedLocally) {
+      return allItems;
     }
-    for (const item of this._cachedServerIssues) {
-      set.set(item.id, item);
-    }
-    return Array.from(set.values());
+    return allItems.filter((i) => !i.isFixedLocally);
   }
 
   public async cleanCurrentFile(
@@ -589,12 +620,14 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
     if (this._isDemoMode) {
       const demoOverview = DemoData.getOverview(period);
+      this._lastOverview = demoOverview;
+      const optimistic = this.getOptimisticOverview(demoOverview);
       const demoGate = DemoData.getQualityGate(period);
       await this._view?.webview.postMessage({
         type: 'overviewUpdated',
-        overview: demoOverview,
+        overview: optimistic,
         period: this._codePeriod,
-        hasNewCode: demoOverview.hasNewCode,
+        hasNewCode: optimistic.hasNewCode,
       });
       await this._view?.webview.postMessage({
         type: 'qualityGate',
@@ -602,7 +635,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       });
       this.statusBar.update({
         projectKey: 'demo-sample-project',
-        overview: demoOverview,
+        overview: optimistic,
         qualityGate: demoGate,
         isDemoMode: true,
         codePeriod: this._codePeriod,
@@ -644,6 +677,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     ]);
 
     const { overview, overviewError } = overviewData;
+    this._lastOverview = overview;
+    const effectiveOverview = overview ? this.getOptimisticOverview(overview) : null;
 
     await this._view?.webview.postMessage({
       type: 'loading',
@@ -652,10 +687,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
     await this._view?.webview.postMessage({
       type: 'overviewUpdated',
-      overview,
+      overview: effectiveOverview,
       overviewError,
       period: this._codePeriod,
-      hasNewCode: overview?.hasNewCode,
+      hasNewCode: effectiveOverview?.hasNewCode,
     });
 
     if (qualityGate) {
@@ -667,7 +702,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
     this.statusBar.update({
       projectKey,
-      overview,
+      overview: effectiveOverview,
       qualityGate,
       isDemoMode: false,
       codePeriod: this._codePeriod,
@@ -708,6 +743,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     }
     try {
       const resolved = items ?? this.localScanner.getLocalDiagnostics();
+      const fixedSet = this.getLocallyFixedIssues();
+      for (const item of resolved) {
+        item.isFixedLocally = fixedSet.has(item.id);
+      }
       this._currentCodeItems = resolved;
       const source = this.readCurrentCodeSource();
       const sourceLabel = source === 'cli' ? 'Source: SonarScanner' : 'Source: SonarLint (Live)';
@@ -836,6 +875,9 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       targetAgentId,
       codePeriod: this._codePeriod,
     });
+    if (item.id) {
+      await this.toggleLocalIssueFixed(item.id, true);
+    }
   }
 
   private async _handleSendBatchToAgent(
@@ -846,6 +888,11 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       targetAgentId,
       codePeriod: this._codePeriod,
     });
+    for (const item of items) {
+      if (item.id) {
+        await this.toggleLocalIssueFixed(item.id, true);
+      }
+    }
   }
 
   private async _handleFetchDetails(category: string): Promise<void> {
@@ -855,6 +902,10 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
     if (this._isDemoMode) {
       const items = DemoData.getDetails(category, this._codePeriod);
+      const fixedSet = this.getLocallyFixedIssues();
+      for (const item of items) {
+        item.isFixedLocally = fixedSet.has(item.id);
+      }
       this._view.webview.postMessage({
         type: 'details',
         category,
@@ -892,6 +943,12 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
         items = await client.getIssues(config.projectKey, undefined, inNewCodePeriod);
       }
 
+      const fixedSet = this.getLocallyFixedIssues();
+      for (const item of items) {
+        item.isFixedLocally = fixedSet.has(item.id);
+      }
+
+      await this.reconcileLocallyFixedIssues(items, category);
       this._updateCachedServerIssues(items);
       this._view.webview.postMessage({
         type: 'details',
@@ -908,6 +965,207 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
     } finally {
       this._view.webview.postMessage({ type: 'loadingDetails', loading: false });
     }
+  }
+
+  public getLocallyFixedIssues(): Set<string> {
+    try {
+      const list = this._workspaceState.get<string[]>('sonarAgent.locallyFixedIssues', []);
+      return new Set(Array.isArray(list) ? list : []);
+    } catch {
+      return new Set<string>();
+    }
+  }
+
+  public async setLocallyFixedIssues(fixedSet: Set<string>): Promise<void> {
+    try {
+      await this._workspaceState.update('sonarAgent.locallyFixedIssues', Array.from(fixedSet));
+    } catch {
+      // best-effort persistence
+    }
+  }
+
+  public async toggleLocalIssueFixed(issueKey: string, fixed: boolean): Promise<void> {
+    const fixedSet = this.getLocallyFixedIssues();
+    if (fixed) {
+      fixedSet.add(issueKey);
+    } else {
+      fixedSet.delete(issueKey);
+    }
+    await this.setLocallyFixedIssues(fixedSet);
+
+    for (const item of this._cachedServerIssues) {
+      if (item.id === issueKey) {
+        item.isFixedLocally = fixed;
+      }
+    }
+    for (const item of this._currentCodeItems) {
+      if (item.id === issueKey) {
+        item.isFixedLocally = fixed;
+      }
+    }
+
+    if (this._view) {
+      await this._view.webview.postMessage({
+        type: 'localIssueFixedToggled',
+        issueKey,
+        fixed,
+      });
+    }
+
+    await this.broadcastOptimisticOverview();
+  }
+
+  public async batchToggleLocalIssueFixed(issueKeys: string[], fixed: boolean): Promise<void> {
+    if (!Array.isArray(issueKeys) || issueKeys.length === 0) return;
+    const fixedSet = this.getLocallyFixedIssues();
+    for (const key of issueKeys) {
+      if (fixed) {
+        fixedSet.add(key);
+      } else {
+        fixedSet.delete(key);
+      }
+    }
+    await this.setLocallyFixedIssues(fixedSet);
+
+    for (const item of this._cachedServerIssues) {
+      if (fixedSet.has(item.id)) {
+        item.isFixedLocally = fixed;
+      }
+    }
+    for (const item of this._currentCodeItems) {
+      if (fixedSet.has(item.id)) {
+        item.isFixedLocally = fixed;
+      }
+    }
+
+    if (this._view) {
+      await this._view.webview.postMessage({
+        type: 'localIssuesBatchFixedToggled',
+        issueKeys,
+        fixed,
+      });
+    }
+
+    await this.broadcastOptimisticOverview();
+  }
+
+  public async resetLocalFixes(): Promise<void> {
+    await this.setLocallyFixedIssues(new Set());
+    for (const item of this._cachedServerIssues) {
+      item.isFixedLocally = false;
+    }
+    for (const item of this._currentCodeItems) {
+      item.isFixedLocally = false;
+    }
+
+    if (this._view) {
+      await this._view.webview.postMessage({
+        type: 'localFixesReset',
+      });
+    }
+
+    await this.broadcastOptimisticOverview();
+
+    if (this._currentDetailCategory) {
+      await this._handleFetchDetails(this._currentDetailCategory);
+    }
+  }
+
+  public async reconcileLocallyFixedIssues(
+    serverIssues: SonarDetailItem[],
+    category?: string,
+  ): Promise<void> {
+    const fixedSet = this.getLocallyFixedIssues();
+    if (fixedSet.size === 0) return;
+
+    const serverIssueKeys = new Set(serverIssues.map((i) => i.id));
+    let changed = false;
+
+    if (category) {
+      for (const item of this._cachedServerIssues) {
+        if (fixedSet.has(item.id)) {
+          const matchesCategory =
+            (category === 'reliability' && item.type === 'BUG') ||
+            (category === 'security' && item.type === 'VULNERABILITY') ||
+            (category === 'maintainability' && item.type === 'CODE_SMELL');
+          if (matchesCategory && !serverIssueKeys.has(item.id)) {
+            fixedSet.delete(item.id);
+            changed = true;
+          }
+        }
+      }
+    } else {
+      for (const key of Array.from(fixedSet)) {
+        const wasServerIssue = this._cachedServerIssues.some((i) => i.id === key);
+        if (wasServerIssue && !serverIssueKeys.has(key)) {
+          fixedSet.delete(key);
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      await this.setLocallyFixedIssues(fixedSet);
+      await this.broadcastOptimisticOverview();
+    }
+  }
+
+  public getOptimisticOverview(overview: SonarOverview): SonarOverview {
+    const fixedSet = this.getLocallyFixedIssues();
+    const cachedIssues = this.getAllCachedIssues(true);
+    let bugsFixed = 0;
+    let vulnsFixed = 0;
+    let smellsFixed = 0;
+
+    for (const issue of cachedIssues) {
+      if (fixedSet.has(issue.id)) {
+        if (issue.type === 'BUG') bugsFixed++;
+        else if (issue.type === 'VULNERABILITY') vulnsFixed++;
+        else if (issue.type === 'CODE_SMELL') smellsFixed++;
+      }
+    }
+
+    return {
+      ...overview,
+      reliability: {
+        ...overview.reliability,
+        count: Math.max(0, overview.reliability.count - bugsFixed),
+        fixedLocallyCount: bugsFixed,
+      },
+      security: {
+        ...overview.security,
+        count: Math.max(0, overview.security.count - vulnsFixed),
+        fixedLocallyCount: vulnsFixed,
+      },
+      maintainability: {
+        ...overview.maintainability,
+        count: Math.max(0, overview.maintainability.count - smellsFixed),
+        fixedLocallyCount: smellsFixed,
+      },
+    };
+  }
+
+  public async broadcastOptimisticOverview(): Promise<void> {
+    const baseOverview = this._isDemoMode
+      ? DemoData.getOverview(this._codePeriod)
+      : this._lastOverview;
+    if (!baseOverview) return;
+
+    const optimistic = this.getOptimisticOverview(baseOverview);
+    if (this._view) {
+      await this._view.webview.postMessage({
+        type: 'overviewUpdated',
+        overview: optimistic,
+        period: this._codePeriod,
+        hasNewCode: optimistic.hasNewCode,
+      });
+    }
+
+    this.statusBar.update({
+      overview: optimistic,
+      codePeriod: this._codePeriod,
+      isDemoMode: this._isDemoMode,
+    });
   }
 
   private _updateCachedServerIssues(items: SonarDetailItem[]): void {
@@ -1219,6 +1477,18 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       return { overview: null };
     }
 
+    if (resolvedProjectKey) {
+      try {
+        const fixedSet = this.getLocallyFixedIssues();
+        if (fixedSet.size > 0) {
+          const serverIssues = await client.getIssues(resolvedProjectKey);
+          await this.reconcileLocallyFixedIssues(serverIssues);
+        }
+      } catch (err) {
+        Logger.warn(`[SonarAgent] Local fixes reconciliation skipped: ${err}`);
+      }
+    }
+
     if (
       resolvedProjectKey === effectiveProjectKey &&
       initialOverview &&
@@ -1299,6 +1569,8 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       effectiveProjectKey,
       initialOverview,
     );
+    this._lastOverview = overview;
+    const effectiveOverview = overview ? this.getOptimisticOverview(overview) : null;
 
     // Quality gate rides alongside the overview fetch but must never block it.
     // If the project key was auto-resolved above (no key configured), the
@@ -1324,7 +1596,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
       serverUrl: config.serverUrl,
       projectKey: resolvedProjectKey,
       projects,
-      overview,
+      overview: effectiveOverview,
       overviewError,
       qualityGate,
       profiles,
@@ -1343,7 +1615,7 @@ export class SonarOverviewViewProvider implements vscode.WebviewViewProvider, vs
 
     this.statusBar.update({
       projectKey: resolvedProjectKey,
-      overview,
+      overview: effectiveOverview,
       qualityGate,
       isDemoMode: false,
       codePeriod: this._codePeriod,
@@ -1654,6 +1926,7 @@ const CURRENT_TAB_PANEL_HTML = `<div id="current-tab-panel" class="hidden" style
         <div id="current-batch-bar" class="batch-bar hidden">
           <span id="current-selected-count" style="font-weight: 600; font-size: 11px;">0 selected</span>
           <div style="display: flex; gap: 6px;">
+            <button id="current-mark-fixed-btn" class="btn btn-secondary btn-sm">Mark Fixed</button>
             <button id="current-send-batch-btn" class="btn btn-agent btn-sm">Send to Agent</button>
             <button id="current-clear-btn" class="btn btn-secondary btn-sm">Clear</button>
           </div>

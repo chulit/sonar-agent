@@ -217,6 +217,22 @@ describe('SonarStatusBar', () => {
     expect(tooltipText).toContain('1.2');
   });
 
+  it('includes note in tooltip when local fixes are pending remote CI scan verification', () => {
+    statusBar.update({
+      projectKey: 'my-project',
+      overview: {
+        ...sampleOverview,
+        reliability: { ...sampleOverview.reliability, fixedLocallyCount: 2 },
+        security: { ...sampleOverview.security, fixedLocallyCount: 1 },
+      },
+    });
+
+    const tooltipText = (mockItem.tooltip as vscode.MarkdownString).value;
+    expect(tooltipText).toContain(
+      '3 issues marked as fixed locally (pending remote CI scan verification).',
+    );
+  });
+
   it('hides the item on clear()', () => {
     statusBar.update({
       projectKey: 'my-project',

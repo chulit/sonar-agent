@@ -423,6 +423,34 @@
         acceptedCount.textContent = formatNumber(overview.acceptedIssues.count);
       }
 
+      const securitySublabel = document.getElementById("metric-security-sublabel");
+      const reliabilitySublabel = document.getElementById("metric-reliability-sublabel");
+      const maintainabilitySublabel = document.getElementById("metric-maintainability-sublabel");
+
+      if (securitySublabel) {
+        if (overview.security.fixedLocallyCount && overview.security.fixedLocallyCount > 0) {
+          securitySublabel.innerHTML = 'Open issues <span class="metric-fixed-badge">(' + overview.security.fixedLocallyCount + ' fixed locally)</span>';
+        } else {
+          securitySublabel.textContent = "Open issues";
+        }
+      }
+
+      if (reliabilitySublabel) {
+        if (overview.reliability.fixedLocallyCount && overview.reliability.fixedLocallyCount > 0) {
+          reliabilitySublabel.innerHTML = 'Open issues <span class="metric-fixed-badge">(' + overview.reliability.fixedLocallyCount + ' fixed locally)</span>';
+        } else {
+          reliabilitySublabel.textContent = "Open issues";
+        }
+      }
+
+      if (maintainabilitySublabel) {
+        if (overview.maintainability.fixedLocallyCount && overview.maintainability.fixedLocallyCount > 0) {
+          maintainabilitySublabel.innerHTML = 'Open issues <span class="metric-fixed-badge">(' + overview.maintainability.fixedLocallyCount + ' fixed locally)</span>';
+        } else {
+          maintainabilitySublabel.textContent = "Open issues";
+        }
+      }
+
       const totalIssues =
         (overview.security.count || 0) +
         (overview.reliability.count || 0) +
@@ -645,9 +673,63 @@
       });
     }
 
+    function attachLocalFixToggle(item, card, badgesDiv, actionsDiv) {
+      function createMarkFixedButton() {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-secondary btn-sm btn-mark-fixed";
+        btn.setAttribute("aria-label", "Mark as fixed locally: " + item.message);
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><polyline points="3.5 8.5 6.5 11.5 12.5 4.5"/></svg><span>Mark as Fixed</span>';
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setLocalIssueFixed(true);
+        });
+        return btn;
+      }
+
+      function createUndoButton() {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-secondary btn-sm btn-undo-fix";
+        btn.setAttribute("aria-label", "Undo local fix for " + item.message);
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M3 7h7a4 4 0 0 1 0 8H7"/><path d="M6 4L3 7l3 3"/></svg><span>Undo</span>';
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setLocalIssueFixed(false);
+        });
+        return btn;
+      }
+
+      function setLocalIssueFixed(fixed) {
+        item.isFixedLocally = fixed;
+        card.classList.toggle("fixed-locally", fixed);
+        const existingBadge = badgesDiv.querySelector(".badge-fixed-locally");
+        if (fixed && !existingBadge) {
+          const badge = document.createElement("span");
+          badge.className = "badge-tag badge-fixed-locally";
+          badge.textContent = "Fixed Locally";
+          badgesDiv.appendChild(badge);
+        } else if (!fixed && existingBadge) {
+          existingBadge.remove();
+        }
+
+        const currentToggleBtn = actionsDiv.querySelector(".btn-mark-fixed, .btn-undo-fix");
+        if (currentToggleBtn) {
+          currentToggleBtn.replaceWith(fixed ? createUndoButton() : createMarkFixedButton());
+        }
+
+        vscode.postMessage({ command: "toggleLocalIssueFixed", issueKey: item.id, fixed });
+      }
+
+      if (item.isFixedLocally) {
+        actionsDiv.appendChild(createUndoButton());
+      } else {
+        actionsDiv.appendChild(createMarkFixedButton());
+      }
+    }
+
     function renderIssueCard(item) {
       const card = document.createElement("div");
-      card.className = "issue-card" + (selectedItemIds.has(item.id) ? " selected" : "");
+      card.className = "issue-card" + (item.isFixedLocally ? " fixed-locally" : "") + (selectedItemIds.has(item.id) ? " selected" : "");
+      card.dataset.issueId = item.id;
 
       // Card Header: Checkbox, File path and collapse button
       const headerDiv = document.createElement("div");
@@ -799,6 +881,13 @@
         badgesDiv.appendChild(tagBadge);
       });
 
+      if (item.isFixedLocally) {
+        const fixedBadge = document.createElement("span");
+        fixedBadge.className = "badge-tag badge-fixed-locally";
+        fixedBadge.textContent = "Fixed Locally";
+        badgesDiv.appendChild(fixedBadge);
+      }
+
       innerDiv.appendChild(badgesDiv);
 
       // Actions Footer
@@ -843,6 +932,8 @@
 
       actionsDiv.appendChild(jumpBtn);
       actionsDiv.appendChild(agentBtn);
+
+      attachLocalFixToggle(item, card, badgesDiv, actionsDiv);
 
 /* {{issueLifecycleCardButtonScript}} */
       footerDiv.appendChild(actionsDiv);
@@ -1112,6 +1203,23 @@
       }
     });
 
+    const batchMarkFixedBtn = document.getElementById("batch-mark-fixed-btn");
+    if (batchMarkFixedBtn) {
+      batchMarkFixedBtn.addEventListener("click", () => {
+        const selectedKeys = Array.from(selectedItemIds);
+        if (selectedKeys.length > 0) {
+          vscode.postMessage({ command: "batchToggleLocalIssueFixed", issueKeys: selectedKeys, fixed: true });
+        }
+      });
+    }
+
+    const resetLocalFixesBtn = document.getElementById("reset-local-fixes-btn");
+    if (resetLocalFixesBtn) {
+      resetLocalFixesBtn.addEventListener("click", () => {
+        vscode.postMessage({ command: "resetLocalFixes" });
+      });
+    }
+
     deselectAllBtn.addEventListener("click", () => {
       selectedItemIds.clear();
       document.querySelectorAll(".issue-checkbox").forEach((cb) => {
@@ -1205,7 +1313,8 @@
 
     function renderCurrentIssueCard(item) {
       const card = document.createElement("div");
-      card.className = "issue-card" + (selectedCurrentIds.has(item.id) ? " selected" : "");
+      card.className = "issue-card" + (item.isFixedLocally ? " fixed-locally" : "") + (selectedCurrentIds.has(item.id) ? " selected" : "");
+      card.dataset.issueId = item.id;
 
       // Card Header: Checkbox, File path and collapse button
       const headerDiv = document.createElement("div");
@@ -1305,6 +1414,13 @@
         badgesDiv.appendChild(ruleBadge);
       }
 
+      if (item.isFixedLocally) {
+        const fixedBadge = document.createElement("span");
+        fixedBadge.className = "badge-tag badge-fixed-locally";
+        fixedBadge.textContent = "Fixed Locally";
+        badgesDiv.appendChild(fixedBadge);
+      }
+
       innerDiv.appendChild(badgesDiv);
 
       // Actions Footer
@@ -1337,6 +1453,8 @@
 
       actionsDiv.appendChild(jumpBtn);
       actionsDiv.appendChild(agentBtn);
+
+      attachLocalFixToggle(item, card, badgesDiv, actionsDiv);
 
       footerDiv.appendChild(actionsDiv);
 
@@ -1452,6 +1570,15 @@
         if (selected.length > 0) {
           const targetAgentId = targetAgentDropdown.value;
           vscode.postMessage({ command: "sendBatchToAgent", items: selected, targetAgentId });
+        }
+      });
+    }
+    const currentMarkFixedBtn = document.getElementById("current-mark-fixed-btn");
+    if (currentMarkFixedBtn) {
+      currentMarkFixedBtn.addEventListener("click", () => {
+        const selectedKeys = Array.from(selectedCurrentIds);
+        if (selectedKeys.length > 0) {
+          vscode.postMessage({ command: "batchToggleLocalIssueFixed", issueKeys: selectedKeys, fixed: true });
         }
       });
     }
@@ -1659,6 +1786,56 @@
           break;
         }
 /* {{issueLifecycleMessageScript}} */
+        case "localIssueFixedToggled": {
+          const matchingCards = document.querySelectorAll(`[data-issue-id="${message.issueKey}"]`);
+          matchingCards.forEach((c) => {
+            c.classList.toggle("fixed-locally", message.fixed);
+            const badges = c.querySelector(".issue-badges");
+            if (badges) {
+              const existing = badges.querySelector(".badge-fixed-locally");
+              if (message.fixed && !existing) {
+                const b = document.createElement("span");
+                b.className = "badge-tag badge-fixed-locally";
+                b.textContent = "Fixed Locally";
+                badges.appendChild(b);
+              } else if (!message.fixed && existing) {
+                existing.remove();
+              }
+            }
+          });
+          break;
+        }
+        case "localIssuesBatchFixedToggled": {
+          if (Array.isArray(message.issueKeys)) {
+            message.issueKeys.forEach((key) => {
+              const matchingCards = document.querySelectorAll(`[data-issue-id="${key}"]`);
+              matchingCards.forEach((c) => {
+                c.classList.toggle("fixed-locally", message.fixed);
+                const badges = c.querySelector(".issue-badges");
+                if (badges) {
+                  const existing = badges.querySelector(".badge-fixed-locally");
+                  if (message.fixed && !existing) {
+                    const b = document.createElement("span");
+                    b.className = "badge-tag badge-fixed-locally";
+                    b.textContent = "Fixed Locally";
+                    badges.appendChild(b);
+                  } else if (!message.fixed && existing) {
+                    existing.remove();
+                  }
+                }
+              });
+            });
+          }
+          break;
+        }
+        case "localFixesReset": {
+          document.querySelectorAll(".issue-card.fixed-locally").forEach((c) => {
+            c.classList.remove("fixed-locally");
+            const existing = c.querySelector(".badge-fixed-locally");
+            if (existing) existing.remove();
+          });
+          break;
+        }
         case "details": {
           renderIssues(message.items || [], message.category, message.period);
           break;

@@ -192,6 +192,17 @@ export class SonarStatusBar implements vscode.Disposable {
       this.appendOverviewTable(md, overview);
     }
 
+    const totalFixedLocally =
+      (overview?.reliability.fixedLocallyCount || 0) +
+      (overview?.security.fixedLocallyCount || 0) +
+      (overview?.maintainability.fixedLocallyCount || 0);
+
+    if (totalFixedLocally > 0) {
+      md.appendMarkdown(
+        `> ℹ️ *${totalFixedLocally} issue${totalFixedLocally > 1 ? 's' : ''} marked as fixed locally (pending remote CI scan verification).*\n\n`,
+      );
+    }
+
     md.appendMarkdown(`---\n\n`);
     md.appendMarkdown(`*Click to open Sonar Overview sidebar*`);
     return md;
