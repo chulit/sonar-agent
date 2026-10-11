@@ -1352,13 +1352,15 @@
       background: var(--vscode-badge-background, rgba(255, 255, 255, 0.06));
       color: var(--vscode-badge-foreground, var(--vscode-descriptionForeground));
       border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
-      padding: 2px 8px;
+      padding: 2px 7px;
       border-radius: 9999px;
       font-weight: 500;
       text-transform: none;
       display: inline-flex;
       align-items: center;
       line-height: 1.2;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     /* Issues List Drilldown - Image 2 Style */
@@ -1380,6 +1382,7 @@
       text-transform: none;
       user-select: none;
       padding: 0 2px;
+      gap: 8px;
     }
 
     .section-title-left {
@@ -1389,6 +1392,20 @@
       font-size: 11.5px;
       font-weight: 600;
       color: var(--vscode-foreground, #f1f5f9);
+      min-width: 0;
+    }
+
+    .issues-title-group {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    #issues-list-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .issues-title-icon {
@@ -1396,12 +1413,31 @@
       align-items: center;
       justify-content: center;
       line-height: 1;
+      flex-shrink: 0;
     }
 
     .section-title-actions {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    @container (max-width: 360px) {
+      .issues-section .section-title {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+      }
+      .issues-section .section-title-left {
+        justify-content: space-between;
+        width: 100%;
+      }
+      .issues-section .section-title-actions {
+        justify-content: space-between;
+        width: 100%;
+        padding-top: 2px;
+      }
     }
 
     /* Filter Trigger Button & Popover */
@@ -1731,13 +1767,15 @@
     .filter-checkbox-label {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       font-size: 11px;
       color: var(--vscode-foreground);
       cursor: pointer;
       text-transform: none;
       font-weight: 500;
       user-select: none;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .filter-checkbox-label input[type="checkbox"],
