@@ -719,6 +719,36 @@ export class SonarClient {
     return data.login;
   }
 
+  private mapToDetailItem(
+    item: any,
+    overrides: {
+      ruleKey: string;
+      type: SonarDetailItem['type'];
+      severity: SonarDetailItem['severity'];
+      status: string;
+      tags: string[];
+      effort?: string;
+    },
+    inNewCodePeriod: boolean,
+  ): SonarDetailItem {
+    return {
+      id: item.key,
+      ruleKey: overrides.ruleKey,
+      message: item.message || '',
+      component: item.component || '',
+      filePath: this.extractFilePath(item.component || ''),
+      line: item.line,
+      type: overrides.type,
+      severity: overrides.severity,
+      status: overrides.status,
+      effort: overrides.effort,
+      tags: overrides.tags,
+      creationDate: item.creationDate || '',
+      author: item.author || undefined,
+      inNewCodePeriod: inNewCodePeriod || item.inNewCodePeriod === true,
+    };
+  }
+
   /**
    * Fetches issues list filtered by category/type and optionally scoped to New Code period
    */
@@ -759,22 +789,20 @@ export class SonarClient {
     }
 
     const data = (await response.json()) as { issues?: any[] };
-    return (data.issues || []).map((item) => ({
-      id: item.key,
-      ruleKey: item.rule || '',
-      message: item.message || '',
-      component: item.component || '',
-      filePath: this.extractFilePath(item.component || ''),
-      line: item.line,
-      type: mapImpactToType(item),
-      severity: mapImpactToSeverity(item),
-      status: mapIssueStatus(item),
-      effort: item.effort,
-      tags: item.tags || [],
-      creationDate: item.creationDate || '',
-      author: item.author || undefined,
-      inNewCodePeriod: inNewCodePeriod || item.inNewCodePeriod === true,
-    }));
+    return (data.issues || []).map((item) =>
+      this.mapToDetailItem(
+        item,
+        {
+          ruleKey: item.rule || '',
+          type: mapImpactToType(item),
+          severity: mapImpactToSeverity(item),
+          status: mapIssueStatus(item),
+          effort: item.effort,
+          tags: item.tags || [],
+        },
+        inNewCodePeriod,
+      ),
+    );
   }
 
   /**
@@ -793,21 +821,19 @@ export class SonarClient {
     }
 
     const data = (await response.json()) as { hotspots?: any[] };
-    return (data.hotspots || []).map((item) => ({
-      id: item.key,
-      ruleKey: item.ruleKey || '',
-      message: item.message || '',
-      component: item.component || '',
-      filePath: this.extractFilePath(item.component || ''),
-      line: item.line,
-      type: 'HOTSPOT',
-      severity: 'MAJOR',
-      status: item.status || 'TO_REVIEW',
-      tags: ['security-hotspot'],
-      creationDate: item.creationDate || '',
-      author: item.author || undefined,
-      inNewCodePeriod: inNewCodePeriod || item.inNewCodePeriod === true,
-    }));
+    return (data.hotspots || []).map((item) =>
+      this.mapToDetailItem(
+        item,
+        {
+          ruleKey: item.ruleKey || '',
+          type: 'HOTSPOT',
+          severity: 'MAJOR',
+          status: item.status || 'TO_REVIEW',
+          tags: ['security-hotspot'],
+        },
+        inNewCodePeriod,
+      ),
+    );
   }
 
   /**
@@ -852,28 +878,44 @@ export class SonarClient {
     }
   }
 
-  /**
-   * Fetches components with low coverage / uncovered lines
-   */
-  async getCoverageFiles(projectKey: string): Promise<SonarDetailItem[]> {
-    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=uncovered_lines,coverage&qualifiers=FIL&strategy=leaves&s=metric&metricSort=uncovered_lines&asc=false&ps=100`;
+  private async fetchComponentTreeMeasures(
+    projectKey: string,
+    metricKeys: string,
+    metricSort: string,
+    resourceName: string,
+  ): Promise<Array<{ comp: any; measureMap: Record<string, string> }>> {
+    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}&qualifiers=FIL&strategy=leaves&s=metric&metricSort=${metricSort}&asc=false&ps=100`;
     const response = await this.authenticatedFetch(url);
 
     if (!response.ok) {
       throw new Error(
-        `Failed to fetch coverage files: HTTP ${response.status} ${response.statusText}`,
+        `Failed to fetch ${resourceName}: HTTP ${response.status} ${response.statusText}`,
       );
     }
 
     const data = (await response.json()) as { components?: any[] };
-    const items: SonarDetailItem[] = [];
-
-    for (const comp of data.components || []) {
+    return (data.components || []).map((comp) => {
       const measureMap: Record<string, string> = {};
       for (const m of comp.measures || []) {
         measureMap[m.metric] = m.value;
       }
+      return { comp, measureMap };
+    });
+  }
 
+  /**
+   * Fetches components with low coverage / uncovered lines
+   */
+  async getCoverageFiles(projectKey: string): Promise<SonarDetailItem[]> {
+    const components = await this.fetchComponentTreeMeasures(
+      projectKey,
+      'uncovered_lines,coverage',
+      'uncovered_lines',
+      'coverage files',
+    );
+    const items: SonarDetailItem[] = [];
+
+    for (const { comp, measureMap } of components) {
       const uncovered = Number.parseInt(measureMap.uncovered_lines || '0', 10);
       const coverage = Number.parseFloat(measureMap.coverage || '0');
 
@@ -901,24 +943,15 @@ export class SonarClient {
    * Fetches components with duplicate code blocks
    */
   async getDuplicationFiles(projectKey: string): Promise<SonarDetailItem[]> {
-    const url = `${this.serverUrl}/api/measures/component_tree?component=${encodeURIComponent(projectKey)}&metricKeys=duplicated_lines_density,duplicated_blocks&qualifiers=FIL&strategy=leaves&s=metric&metricSort=duplicated_lines_density&asc=false&ps=100`;
-    const response = await this.authenticatedFetch(url);
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch duplication files: HTTP ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const data = (await response.json()) as { components?: any[] };
+    const components = await this.fetchComponentTreeMeasures(
+      projectKey,
+      'duplicated_lines_density,duplicated_blocks',
+      'duplicated_lines_density',
+      'duplication files',
+    );
     const items: SonarDetailItem[] = [];
 
-    for (const comp of data.components || []) {
-      const measureMap: Record<string, string> = {};
-      for (const m of comp.measures || []) {
-        measureMap[m.metric] = m.value;
-      }
-
+    for (const { comp, measureMap } of components) {
       const density = Number.parseFloat(measureMap.duplicated_lines_density || '0');
       const blocks = Number.parseInt(measureMap.duplicated_blocks || '0', 10);
 

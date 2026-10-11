@@ -48,6 +48,46 @@ export interface TargetAgent {
   focusCommand?: string;
 }
 
+function formatPromptHeader(
+  title: string,
+  item: SonarDetailItem,
+  rule: SonarRuleDoc,
+  options?: { isNewCode?: boolean; ruleHeading?: string; includeType?: boolean },
+): string {
+  let prompt = `${title}\n\n`;
+  prompt += `### 📍 Location\n`;
+  prompt += `- File: \`${item.filePath}\`\n`;
+  prompt += `- Line: ${item.line || 'File level'}\n\n`;
+
+  prompt += `### ⚠️ Issue Details\n`;
+  prompt += `- Message: "${item.message}"\n`;
+  if (options?.includeType) {
+    prompt += `- Type: ${item.type} | Severity: ${item.severity}\n`;
+  } else {
+    prompt += `- Severity: ${item.severity}\n`;
+  }
+  if (options?.isNewCode) {
+    prompt += `- Scope: New Code Period (Clean as You Code)\n`;
+  }
+  prompt += `- Sonar Rule: \`${rule.key}\` - ${rule.name}\n\n`;
+
+  prompt += `### 📖 ${options?.ruleHeading ?? 'SonarQube Rule Details'}\n`;
+  prompt += `${rule.cleanDesc}\n`;
+  if (rule.recommendation) {
+    prompt += `> Sonar Recommendation: ${rule.recommendation}\n`;
+  }
+  prompt += `\n`;
+
+  return prompt;
+}
+
+function formatLocalSnippet(filePath: string, snippetContext: CodeSnippetContext | null): string {
+  if (!snippetContext) {
+    return '';
+  }
+  return `### 💻 Local Code Snippet (\`${filePath}\` L${snippetContext.startLine}-L${snippetContext.endLine})\n\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
+}
+
 export class AgentDispatcher {
   private readonly ruleCache = new Map<string, SonarRuleDoc>();
   private readonly fileNavigator: FileNavigator;
@@ -174,44 +214,50 @@ export class AgentDispatcher {
       });
     }
 
-    // 3. Claude Code
-    if (this.isExtensionInstalledFn('anthropic.claude-code')) {
-      agents.push({
-        id: 'claude-code',
-        name: 'Claude Code',
-        description: 'Anthropic Claude Code for VS Code',
-        focusCommand: 'claude-vscode.editor.openLast',
-      });
-    }
+    // 3. Extensions with direct single-extension detection
+    const extensionAgents: Array<{ extensionId: string; agent: TargetAgent }> = [
+      {
+        extensionId: 'anthropic.claude-code',
+        agent: {
+          id: 'claude-code',
+          name: 'Claude Code',
+          description: 'Anthropic Claude Code for VS Code',
+          focusCommand: 'claude-vscode.editor.openLast',
+        },
+      },
+      {
+        extensionId: 'saoudrizwan.claude-dev',
+        agent: {
+          id: 'cline',
+          name: 'Cline',
+          description: 'Autonomous AI coding agent',
+          focusCommand: 'claude-dev.focus',
+        },
+      },
+      {
+        extensionId: 'rooveterinaryinc.roo-cline',
+        agent: {
+          id: 'roo-code',
+          name: 'Roo Code',
+          description: 'Roo Code coding agent',
+          focusCommand: 'roo-cline.focus',
+        },
+      },
+      {
+        extensionId: 'continue.continue',
+        agent: {
+          id: 'continue',
+          name: 'Continue',
+          description: 'Continue open-source AI assistant',
+          focusCommand: 'continue.focusContinueInputView',
+        },
+      },
+    ];
 
-    // 4. Cline
-    if (this.isExtensionInstalledFn('saoudrizwan.claude-dev')) {
-      agents.push({
-        id: 'cline',
-        name: 'Cline',
-        description: 'Autonomous AI coding agent',
-        focusCommand: 'claude-dev.focus',
-      });
-    }
-
-    // 4. Roo Code
-    if (this.isExtensionInstalledFn('rooveterinaryinc.roo-cline')) {
-      agents.push({
-        id: 'roo-code',
-        name: 'Roo Code',
-        description: 'Roo Code coding agent',
-        focusCommand: 'roo-cline.focus',
-      });
-    }
-
-    // 5. Continue
-    if (this.isExtensionInstalledFn('continue.continue')) {
-      agents.push({
-        id: 'continue',
-        name: 'Continue',
-        description: 'Continue open-source AI assistant',
-        focusCommand: 'continue.focusContinueInputView',
-      });
+    for (const { extensionId, agent } of extensionAgents) {
+      if (this.isExtensionInstalledFn(extensionId)) {
+        agents.push(agent);
+      }
     }
 
     // 6. Codex
@@ -397,31 +443,17 @@ export class AgentDispatcher {
     }
 
     const rule = await this.getRule(item.ruleKey);
-
-    let prompt = `@workspace Please fix the following SonarQube issue:\n\n`;
-    prompt += `### 📍 Location\n`;
-    prompt += `- File: \`${item.filePath}\`\n`;
-    prompt += `- Line: ${item.line || 'File level'}\n\n`;
-
-    prompt += `### ⚠️ Issue Details\n`;
-    prompt += `- Message: "${item.message}"\n`;
-    prompt += `- Type: ${item.type} | Severity: ${item.severity}\n`;
-    if (isNewCode) {
-      prompt += `- Scope: New Code Period (Clean as You Code)\n`;
-    }
-    prompt += `- Sonar Rule: \`${rule.key}\` - ${rule.name}\n\n`;
-
-    prompt += `### 📖 SonarQube Rule Details\n`;
-    prompt += `${rule.cleanDesc}\n`;
-    if (rule.recommendation) {
-      prompt += `> Sonar Recommendation: ${rule.recommendation}\n`;
-    }
-    prompt += `\n`;
-
-    if (snippetContext) {
-      prompt += `### 💻 Local Code Snippet (\`${item.filePath}\` L${snippetContext.startLine}-L${snippetContext.endLine})\n`;
-      prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
-    }
+    let prompt = formatPromptHeader(
+      '@workspace Please fix the following SonarQube issue:',
+      item,
+      rule,
+      {
+        isNewCode,
+        includeType: true,
+        ruleHeading: 'SonarQube Rule Details',
+      },
+    );
+    prompt += formatLocalSnippet(item.filePath, snippetContext);
 
     prompt += `### 🎯 Instructions for Agent\n`;
     prompt += `1. Fix the issue according to the SonarQube rule without breaking existing functionality.\n`;
@@ -692,6 +724,18 @@ export class AgentDispatcher {
     }
   }
 
+  private async tryExecuteFirstCommand(commands: string[]): Promise<boolean> {
+    for (const cmd of commands) {
+      try {
+        await this.executeCommandFn(cmd);
+        return true;
+      } catch {
+        // continue trying next command
+      }
+    }
+    return false;
+  }
+
   private async tryCodexApiDispatch(
     codexExt: vscode.Extension<unknown>,
     prompt: string,
@@ -703,36 +747,27 @@ export class AgentDispatcher {
         }
       | undefined;
 
-    if (api && typeof api.sendMessage === 'function') {
-      try {
-        await api.sendMessage({ text: prompt, prompt });
-        vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
-        return { ok: true, message: 'Dispatched to Codex via API.' };
-      } catch {
-        // Fall back if API invocation fails
-      }
-    } else if (api && typeof api.sendPrompt === 'function') {
-      try {
-        await api.sendPrompt(prompt);
-        vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
-        return { ok: true, message: 'Dispatched to Codex via API.' };
-      } catch {
-        // Fall back if API invocation fails
-      }
+    if (!api) {
+      return undefined;
     }
-    return undefined;
+
+    try {
+      if (typeof api.sendMessage === 'function') {
+        await api.sendMessage({ text: prompt, prompt });
+      } else if (typeof api.sendPrompt === 'function') {
+        await api.sendPrompt(prompt);
+      } else {
+        return undefined;
+      }
+      vscode.window.showInformationMessage('Dispatched Fix Prompt to Codex!');
+      return { ok: true, message: 'Dispatched to Codex via API.' };
+    } catch {
+      return undefined;
+    }
   }
 
   private async focusCodexChat(): Promise<void> {
-    const codexCommands = ['chatgpt.openSidebar', 'chatgpt.focus', 'codex.chat.focus'];
-    for (const cmd of codexCommands) {
-      try {
-        await this.executeCommandFn(cmd);
-        break;
-      } catch {
-        // continue trying next command
-      }
-    }
+    await this.tryExecuteFirstCommand(['chatgpt.openSidebar', 'chatgpt.focus', 'codex.chat.focus']);
   }
 
   /**
@@ -743,20 +778,12 @@ export class AgentDispatcher {
    * paste step.
    */
   private async dispatchClaudeCode(): Promise<{ ok: boolean; message: string }> {
-    const openCommands = [
+    await this.tryExecuteFirstCommand([
       'claude-vscode.focus',
       'claude-vscode.editor.open',
       'claude-vscode.sidebar.open',
       'claude-vscode.editor.openLast',
-    ];
-    for (const cmd of openCommands) {
-      try {
-        await this.executeCommandFn(cmd);
-        break;
-      } catch {
-        // try the next command
-      }
-    }
+    ]);
 
     vscode.window.showInformationMessage(
       'Fix Prompt copied to clipboard for Claude Code! Press Cmd+V / Ctrl+V to paste it into the Claude Code chat.',
@@ -766,15 +793,7 @@ export class AgentDispatcher {
 
   private async focusTargetAgent(targetAgentId: string, matchedAgent?: TargetAgent): Promise<void> {
     if (targetAgentId === 'codex') {
-      const codexCommands = ['chatgpt.openSidebar', 'chatgpt.focus'];
-      for (const cmd of codexCommands) {
-        try {
-          await this.executeCommandFn(cmd);
-          break;
-        } catch {
-          // continue trying next command
-        }
-      }
+      await this.tryExecuteFirstCommand(['chatgpt.openSidebar', 'chatgpt.focus']);
     } else if (matchedAgent?.focusCommand) {
       try {
         await this.executeCommandFn(matchedAgent.focusCommand);
@@ -940,27 +959,13 @@ export class AgentDispatcher {
     const snippetContext = await this.readCodeSnippet(item.filePath, item.line);
     const rule = await this.getRule(item.ruleKey);
 
-    let prompt = `@workspace Please explain the following SonarQube rule and issue in simple, beginner-friendly terms:\n\n`;
-    prompt += `### 📍 Location\n`;
-    prompt += `- File: \`${item.filePath}\`\n`;
-    prompt += `- Line: ${item.line || 'File level'}\n\n`;
-
-    prompt += `### ⚠️ Issue Details\n`;
-    prompt += `- Message: "${item.message}"\n`;
-    prompt += `- Severity: ${item.severity}\n`;
-    prompt += `- Sonar Rule: \`${rule.key}\` - ${rule.name}\n\n`;
-
-    prompt += `### 📖 SonarQube Rule Context\n`;
-    prompt += `${rule.cleanDesc}\n`;
-    if (rule.recommendation) {
-      prompt += `> Sonar Recommendation: ${rule.recommendation}\n`;
-    }
-    prompt += `\n`;
-
-    if (snippetContext) {
-      prompt += `### 💻 Local Code Snippet (\`${item.filePath}\` L${snippetContext.startLine}-L${snippetContext.endLine})\n`;
-      prompt += `\`\`\`${snippetContext.language}\n${snippetContext.snippet}\n\`\`\`\n\n`;
-    }
+    let prompt = formatPromptHeader(
+      '@workspace Please explain the following SonarQube rule and issue in simple, beginner-friendly terms:',
+      item,
+      rule,
+      { ruleHeading: 'SonarQube Rule Context' },
+    );
+    prompt += formatLocalSnippet(item.filePath, snippetContext);
 
     prompt += `### 🎯 Instructions for Agent\n`;
     prompt += `1. Explain why this pattern is problematic and what risks or bugs it can cause in plain, beginner-friendly terms.\n`;
